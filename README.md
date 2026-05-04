@@ -14,19 +14,19 @@ React Native 0.83 + `@reactvision/react-viro` 기반의 AR Map MVP 부트스트�
 ## 실행
 
 ```sh
-npm install
+pnpm install
 cd ios && pod install && cd ..
-npm start
+pnpm start
 ```
 
 다른 터미널에서:
 
 ```sh
-npm run ios
+pnpm ios
 ```
 
 ```sh
-npm run android
+pnpm android
 ```
 
 ## 주의
@@ -46,11 +46,11 @@ npm run android
 브이월드 검색 API와 WFS를 이용해 특정 주소의 건물 외곽 꼭짓점 좌표를 출력할 수 있다.
 
 ```sh
-npm run print:building-vertices
+pnpm print:building-vertices
 ```
 
 다른 주소로 테스트하려면:
 
 ```sh
-npm run print:building-vertices -- "경남 김해시 인제로230번길 50-17"
+pnpm print:building-vertices -- "경남 김해시 인제로230번길 50-17"
 ```
