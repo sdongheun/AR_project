@@ -54,3 +54,5 @@ pnpm print:building-vertices
 ```sh
 pnpm print:building-vertices -- "경남 김해시 인제로230번길 50-17"
 ```
+
+이 스크립트는 `TypeScript + class` 구조로 작성되어 있다.
