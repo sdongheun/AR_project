@@ -40,19 +40,3 @@ pnpm android
 1. VWorld 3D 응답 스펙을 확정한다.
 2. 단일 건물 좌표를 실제 API 응답으로 바꾼다.
 3. GPS 좌표와 AR 마커 오차 보정 로직을 붙인다.
-
-## 건물 꼭짓점 테스트
-
-브이월드 검색 API와 WFS를 이용해 특정 주소의 건물 외곽 꼭짓점 좌표를 출력할 수 있다.
-
-```sh
-pnpm print:building-vertices
-```
-
-다른 주소로 테스트하려면:
-
-```sh
-pnpm print:building-vertices -- "경남 김해시 인제로230번길 50-17"
-```
-
-이 스크립트는 `TypeScript + class` 구조로 작성되어 있다.

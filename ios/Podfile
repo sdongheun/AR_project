@@ -8,6 +8,11 @@ end
 
 node_require('react-native/scripts/react_native_pods.rb')
 
+ENVFILES = {
+  'Debug' => '$(PODS_ROOT)/../../.env.local',
+  'Release' => '$(PODS_ROOT)/../../.env.local',
+}
+
 platform :ios, min_ios_version_supported
 prepare_react_native_project!
 
@@ -42,6 +47,12 @@ target 'ARMap' do
     )
 
     installer.pods_project.targets.each do |target|
+      if target.name == 'react-native-config'
+        target.build_configurations.each do |build_config|
+          build_config.build_settings['ENVFILE'] = ENVFILES[build_config.name]
+        end
+      end
+
       next unless target.name == 'fmt'
 
       target.build_configurations.each do |build_config|

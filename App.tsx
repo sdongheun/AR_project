@@ -7,6 +7,7 @@ import {
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import Geolocation from 'react-native-geolocation-service';
@@ -16,12 +17,36 @@ import {
   requestRequiredPermissions,
   ViroARSceneNavigator,
 } from '@reactvision/react-viro';
+import Config from 'react-native-config';
 import {ARMapScene} from './src/ar/ARMapScene';
 import {appConfig, demoTarget} from './src/config/appConfig';
+import {
+  type GisBuildingInfoResult,
+  VWorldApiError,
+  VWorldBuildingService,
+  type VWorldDebugInfo,
+} from './src/services/vworldBuildingService';
 import type {LocationSnapshot} from './src/types/location';
+import type {MapTarget} from './src/types/target';
 
 const initialArScene = ARMapScene as unknown as () => React.JSX.Element;
 type RecognitionStatus = 'tracking' | 'success' | 'failure';
+type TargetFormState = {
+  address: string;
+  altitude: string;
+  latitude: string;
+  longitude: string;
+  name: string;
+};
+type BuildingBoundaryCheckState = {
+  buildingNumber: string;
+  checkedAddress: string;
+  isInside: boolean;
+  resolvedRoadAddress: string;
+  vertexCount: number;
+} | null;
+type BuildingBoundaryDebugState = VWorldDebugInfo | null;
+type GisBuildingInfoState = GisBuildingInfoResult | null;
 
 function App(): React.JSX.Element {
   return (
@@ -46,6 +71,26 @@ function AppContent() {
   const [isArActive, setIsArActive] = useState(false);
   const [recognitionStatus, setRecognitionStatus] =
     useState<RecognitionStatus>('tracking');
+  const [isCheckingBoundary, setIsCheckingBoundary] = useState(false);
+  const [boundaryCheckError, setBoundaryCheckError] = useState<string | null>(null);
+  const [boundaryCheckResult, setBoundaryCheckResult] =
+    useState<BuildingBoundaryCheckState>(null);
+  const [boundaryCheckDebug, setBoundaryCheckDebug] =
+    useState<BuildingBoundaryDebugState>(null);
+  const [gisBuildingInfo, setGisBuildingInfo] =
+    useState<GisBuildingInfoState>(null);
+  const [gisBuildingError, setGisBuildingError] = useState<string | null>(null);
+  const [gisBuildingDebug, setGisBuildingDebug] =
+    useState<BuildingBoundaryDebugState>(null);
+  const [isFetchingGisBuilding, setIsFetchingGisBuilding] = useState(false);
+  const [activeTarget, setActiveTarget] = useState<MapTarget>(demoTarget);
+  const [targetForm, setTargetForm] = useState<TargetFormState>({
+    address: demoTarget.address,
+    altitude: String(demoTarget.altitude),
+    latitude: String(demoTarget.latitude),
+    longitude: String(demoTarget.longitude),
+    name: demoTarget.name,
+  });
 
   useEffect(() => {
     bootstrapSupport().catch(() => {
@@ -54,7 +99,7 @@ function AppContent() {
     });
   }, []);
 
-  const distanceToDemoTarget = useMemo(() => {
+  const distanceToActiveTarget = useMemo(() => {
     if (!location) {
       return null;
     }
@@ -62,10 +107,10 @@ function AppContent() {
     return getDistanceMeters(
       location.latitude,
       location.longitude,
-      demoTarget.latitude,
-      demoTarget.longitude,
+      activeTarget.latitude,
+      activeTarget.longitude,
     );
-  }, [location]);
+  }, [activeTarget.latitude, activeTarget.longitude, location]);
 
   async function bootstrapSupport() {
     try {
@@ -147,6 +192,185 @@ function AppContent() {
     setIsArActive(true);
   }
 
+  function applyTargetInput() {
+    const latitude = Number(targetForm.latitude);
+    const longitude = Number(targetForm.longitude);
+    const altitude = Number(targetForm.altitude || '0');
+
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      Alert.alert('입력 오류', '위도와 경도는 숫자로 입력해야 합니다.');
+      return;
+    }
+
+    if (!targetForm.address.trim()) {
+      Alert.alert('입력 오류', '건물 주소를 입력해야 합니다.');
+      return;
+    }
+
+    setActiveTarget({
+      id: `custom-${Date.now()}`,
+      name: targetForm.name.trim() || targetForm.address.trim(),
+      category: 'building',
+      categoryLabel: '건물',
+      address: targetForm.address.trim(),
+      latitude,
+      longitude,
+      altitude: Number.isFinite(altitude) ? altitude : 0,
+    });
+  }
+
+  async function checkCurrentLocationAgainstBuilding() {
+    if (!permissions.location) {
+      Alert.alert('권한 필요', '먼저 위치 권한을 허용해야 합니다.');
+      return;
+    }
+
+    if (!targetForm.address.trim()) {
+      Alert.alert('입력 오류', '건물 주소를 입력해야 합니다.');
+      return;
+    }
+
+    if (!Config.VWORLD_API_KEY) {
+      Alert.alert(
+        '설정 오류',
+        '브이월드 API 키를 앱에서 읽지 못했습니다. 네이티브 재빌드가 필요할 수 있습니다.',
+      );
+      return;
+    }
+
+    setIsCheckingBoundary(true);
+    setBoundaryCheckError(null);
+    setBoundaryCheckDebug(null);
+
+    try {
+      const currentLocation = location ?? (await getCurrentLocation());
+      setLocation(currentLocation);
+
+      const service = new VWorldBuildingService(Config.VWORLD_API_KEY);
+      const result = await service.getBuildingContainmentForPoint(
+        targetForm.address.trim(),
+        {
+          latitude: currentLocation.latitude,
+          longitude: currentLocation.longitude,
+        },
+      );
+
+      const nextTarget: MapTarget = {
+        id: `resolved-${Date.now()}`,
+        name: targetForm.name.trim() || result.buildingResult.queryAddress,
+        category: 'building',
+        categoryLabel: '건물',
+        address: result.buildingResult.resolvedRoadAddress,
+        latitude: result.buildingResult.geocodedPoint.latitude,
+        longitude: result.buildingResult.geocodedPoint.longitude,
+        altitude: Number(targetForm.altitude || '0') || 0,
+      };
+
+      setTargetForm(currentState => ({
+        ...currentState,
+        address: result.buildingResult.resolvedRoadAddress,
+        latitude: String(result.buildingResult.geocodedPoint.latitude),
+        longitude: String(result.buildingResult.geocodedPoint.longitude),
+        name: currentState.name.trim() || nextTarget.name,
+      }));
+      setActiveTarget(nextTarget);
+      setBoundaryCheckResult({
+        buildingNumber: result.buildingResult.building.buildingNumber,
+        checkedAddress: result.buildingResult.queryAddress,
+        isInside: result.isInside,
+        resolvedRoadAddress: result.buildingResult.resolvedRoadAddress,
+        vertexCount: result.buildingResult.building.outerRingVertices.length,
+      });
+    } catch (error) {
+      setBoundaryCheckResult(null);
+      if (error instanceof VWorldApiError) {
+        setBoundaryCheckDebug(error.debugInfo);
+        setBoundaryCheckError(error.message);
+      } else {
+        setBoundaryCheckError(
+          error instanceof Error ? error.message : '건물 외벽 조회에 실패했습니다.',
+        );
+      }
+    } finally {
+      setIsCheckingBoundary(false);
+    }
+  }
+
+  async function fetchGisBuildingInfo() {
+    if (!targetForm.address.trim()) {
+      Alert.alert('입력 오류', '건물 주소를 입력해야 합니다.');
+      return;
+    }
+
+    if (!Config.VWORLD_API_KEY) {
+      Alert.alert(
+        '설정 오류',
+        '브이월드 API 키를 앱에서 읽지 못했습니다. 네이티브 재빌드가 필요할 수 있습니다.',
+      );
+      return;
+    }
+
+    setIsFetchingGisBuilding(true);
+    setGisBuildingError(null);
+    setGisBuildingDebug(null);
+
+    try {
+      const service = new VWorldBuildingService(Config.VWORLD_API_KEY);
+      const result = await service.getIntegratedBuildingInfo(
+        targetForm.address.trim(),
+      );
+
+      setGisBuildingInfo(result);
+      setTargetForm(currentState => ({
+        ...currentState,
+        address: result.resolvedRoadAddress,
+        latitude: String(result.geocodedPoint.latitude),
+        longitude: String(result.geocodedPoint.longitude),
+        name:
+          currentState.name.trim() ||
+          result.building.buildingName ||
+          result.resolvedRoadAddress,
+      }));
+      setActiveTarget({
+        id: `gis-${Date.now()}`,
+        name:
+          targetForm.name.trim() ||
+          result.building.buildingName ||
+          result.resolvedRoadAddress,
+        category: 'building',
+        categoryLabel: '건물',
+        address: result.resolvedRoadAddress,
+        latitude: result.geocodedPoint.latitude,
+        longitude: result.geocodedPoint.longitude,
+        altitude: Number(targetForm.altitude || '0') || 0,
+      });
+    } catch (error) {
+      setGisBuildingInfo(null);
+      if (error instanceof VWorldApiError) {
+        setGisBuildingDebug(error.debugInfo);
+        setGisBuildingError(error.message);
+      } else {
+        setGisBuildingError(
+          error instanceof Error
+            ? error.message
+            : 'GIS건물통합정보 조회에 실패했습니다.',
+        );
+      }
+    } finally {
+      setIsFetchingGisBuilding(false);
+    }
+  }
+
+  function updateTargetForm<Key extends keyof TargetFormState>(
+    key: Key,
+    value: TargetFormState[Key],
+  ) {
+    setTargetForm(currentState => ({
+      ...currentState,
+      [key]: value,
+    }));
+  }
+
   if (isArActive) {
     return (
       <View style={styles.container}>
@@ -156,7 +380,7 @@ function AppContent() {
           style={styles.arNavigator}
           viroAppProps={{
             onRecognitionStateChange: setRecognitionStatus,
-            target: demoTarget,
+            target: activeTarget,
             userLocation: location,
           }}
           worldAlignment="GravityAndHeading"
@@ -164,7 +388,7 @@ function AppContent() {
         <SafeAreaView pointerEvents="box-none" style={styles.arOverlay}>
           <View style={styles.arOverlayHeader}>
             <View style={styles.arStatusBlock}>
-              <Text style={styles.arOverlayTitle}>{demoTarget.name}</Text>
+              <Text style={styles.arOverlayTitle}>{activeTarget.name}</Text>
               <Text
                 style={[
                   styles.arStatusBadge,
@@ -201,6 +425,62 @@ function AppContent() {
         </View>
 
         <View style={styles.card}>
+          <Text style={styles.cardTitle}>타깃 입력</Text>
+          <InputField
+            label="건물명"
+            onChangeText={value => updateTargetForm('name', value)}
+            placeholder="예: 김해 인제로230번길 50-17"
+            value={targetForm.name}
+          />
+          <InputField
+            label="건물 주소"
+            onChangeText={value => updateTargetForm('address', value)}
+            placeholder="예: 경남 김해시 인제로230번길 50-17"
+            value={targetForm.address}
+          />
+          <View style={styles.inlineInputs}>
+            <InputField
+              keyboardType="decimal-pad"
+              label="위도"
+              onChangeText={value => updateTargetForm('latitude', value)}
+              placeholder="35.247217005"
+              value={targetForm.latitude}
+            />
+            <InputField
+              keyboardType="decimal-pad"
+              label="경도"
+              onChangeText={value => updateTargetForm('longitude', value)}
+              placeholder="128.906748565"
+              value={targetForm.longitude}
+            />
+          </View>
+          <InputField
+            keyboardType="decimal-pad"
+            label="고도"
+            onChangeText={value => updateTargetForm('altitude', value)}
+            placeholder="0"
+            value={targetForm.altitude}
+          />
+          <PrimaryButton
+            label={isCheckingBoundary ? '건물 외벽 조회 중...' : '주소로 외벽 조회 + 내 위치 판정'}
+            onPress={() => {
+              checkCurrentLocationAgainstBuilding().catch(() => {});
+            }}
+          />
+          <PrimaryButton
+            label={
+              isFetchingGisBuilding
+                ? 'GIS건물통합정보 조회 중...'
+                : 'GIS건물통합정보 조회'
+            }
+            onPress={() => {
+              fetchGisBuildingInfo().catch(() => {});
+            }}
+          />
+          <SecondaryButton label="입력값 적용" onPress={applyTargetInput} />
+        </View>
+
+        <View style={styles.card}>
           <Text style={styles.cardTitle}>현재 부트스트랩 상태</Text>
           <StatusRow
             label="AR 지원 확인"
@@ -226,15 +506,16 @@ function AppContent() {
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>시연 타깃</Text>
-          <Text style={styles.targetName}>{demoTarget.name}</Text>
-          <Text style={styles.targetMeta}>{demoTarget.categoryLabel}</Text>
-          <Text style={styles.targetMeta}>{demoTarget.address}</Text>
+          <Text style={styles.targetName}>{activeTarget.name}</Text>
+          <Text style={styles.targetMeta}>{activeTarget.categoryLabel}</Text>
+          <Text style={styles.targetMeta}>{activeTarget.address}</Text>
           <Text style={styles.coordinates}>
-            {demoTarget.latitude.toFixed(6)}, {demoTarget.longitude.toFixed(6)}
+            {activeTarget.latitude.toFixed(6)}, {activeTarget.longitude.toFixed(6)}
           </Text>
-          {distanceToDemoTarget !== null ? (
+          <Text style={styles.targetMeta}>고도 {activeTarget.altitude}m</Text>
+          {distanceToActiveTarget !== null ? (
             <Text style={styles.distance}>
-              현재 위치 기준 약 {Math.round(distanceToDemoTarget)}m
+              현재 위치 기준 약 {Math.round(distanceToActiveTarget)}m
             </Text>
           ) : null}
         </View>
@@ -257,6 +538,132 @@ function AppContent() {
             </Text>
           )}
           {locationError ? <Text style={styles.errorText}>{locationError}</Text> : null}
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>건물 바운더리 판정</Text>
+          {isCheckingBoundary ? <ActivityIndicator color="#dbe362" /> : null}
+          {boundaryCheckResult ? (
+            <>
+              <Text style={styles.targetMeta}>
+                조회 주소: {boundaryCheckResult.checkedAddress}
+              </Text>
+              <Text style={styles.targetMeta}>
+                해석 주소: {boundaryCheckResult.resolvedRoadAddress}
+              </Text>
+              <Text style={styles.targetMeta}>
+                건물 번호: {boundaryCheckResult.buildingNumber} · 꼭짓점 수{' '}
+                {boundaryCheckResult.vertexCount}
+              </Text>
+              <Text
+                style={[
+                  styles.boundaryResult,
+                  boundaryCheckResult.isInside
+                    ? styles.boundaryTrue
+                    : styles.boundaryFalse,
+                ]}>
+                {String(boundaryCheckResult.isInside)}
+              </Text>
+            </>
+          ) : (
+            <Text style={styles.helperText}>
+              주소 입력 후 `주소로 외벽 조회 + 내 위치 판정` 버튼을 누르면 여기에서
+              true/false를 확인할 수 있습니다.
+            </Text>
+          )}
+          {boundaryCheckError ? (
+            <Text style={styles.errorText}>{boundaryCheckError}</Text>
+          ) : null}
+          {boundaryCheckDebug ? (
+            <View style={styles.debugCard}>
+              <Text style={styles.debugTitle}>API 디버그 정보</Text>
+              <Text style={styles.debugText}>
+                엔드포인트: {boundaryCheckDebug.endpointName}
+              </Text>
+              {boundaryCheckDebug.status !== undefined ? (
+                <Text style={styles.debugText}>
+                  상태코드: {boundaryCheckDebug.status}
+                </Text>
+              ) : null}
+              <Text style={styles.debugText}>
+                요청 URL: {boundaryCheckDebug.requestUrl}
+              </Text>
+              <Text style={styles.debugText}>
+                응답 본문: {truncateDebugText(boundaryCheckDebug.responseBody)}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>GIS 건물통합정보</Text>
+          {isFetchingGisBuilding ? <ActivityIndicator color="#dbe362" /> : null}
+          {gisBuildingInfo ? (
+            <>
+              <Text style={styles.targetMeta}>
+                조회 주소: {gisBuildingInfo.queryAddress}
+              </Text>
+              <Text style={styles.targetMeta}>
+                해석 주소: {gisBuildingInfo.resolvedRoadAddress}
+              </Text>
+              <Text style={styles.targetMeta}>
+                지번 주소: {gisBuildingInfo.parcelAddress}
+              </Text>
+              <Text style={styles.targetMeta}>
+                높이: {gisBuildingInfo.building.heightMeters}m · 지상{' '}
+                {gisBuildingInfo.building.aboveGroundFloorCount}층 · 지하{' '}
+                {gisBuildingInfo.building.undergroundFloorCount}층
+              </Text>
+              <Text style={styles.targetMeta}>
+                GIS ID: {gisBuildingInfo.building.gisBuildingId}
+              </Text>
+              <Text style={styles.targetMeta}>
+                PNU: {gisBuildingInfo.building.parcelCode}
+              </Text>
+              <Text style={styles.targetMeta}>
+                좌표 기준점: {gisBuildingInfo.geocodedPoint.latitude.toFixed(6)},{' '}
+                {gisBuildingInfo.geocodedPoint.longitude.toFixed(6)}
+              </Text>
+              <Text style={styles.debugTitle}>폴리곤 좌표</Text>
+              <Text style={styles.codeBlock}>
+                {JSON.stringify(
+                  gisBuildingInfo.building.polygonVertices.map(vertex => [
+                    vertex.longitude,
+                    vertex.latitude,
+                  ]),
+                  null,
+                  2,
+                )}
+              </Text>
+            </>
+          ) : (
+            <Text style={styles.helperText}>
+              주소 입력 후 `GIS건물통합정보 조회` 버튼을 누르면 높이와 폴리곤 좌표가
+              여기 표시됩니다.
+            </Text>
+          )}
+          {gisBuildingError ? (
+            <Text style={styles.errorText}>{gisBuildingError}</Text>
+          ) : null}
+          {gisBuildingDebug ? (
+            <View style={styles.debugCard}>
+              <Text style={styles.debugTitle}>API 디버그 정보</Text>
+              <Text style={styles.debugText}>
+                엔드포인트: {gisBuildingDebug.endpointName}
+              </Text>
+              {gisBuildingDebug.status !== undefined ? (
+                <Text style={styles.debugText}>
+                  상태코드: {gisBuildingDebug.status}
+                </Text>
+              ) : null}
+              <Text style={styles.debugText}>
+                요청 URL: {gisBuildingDebug.requestUrl}
+              </Text>
+              <Text style={styles.debugText}>
+                응답 본문: {truncateDebugText(gisBuildingDebug.responseBody)}
+              </Text>
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.actions}>
@@ -329,6 +736,34 @@ function StatusRow({label, value}: {label: string; value: string}) {
   );
 }
 
+function InputField({
+  keyboardType,
+  label,
+  onChangeText,
+  placeholder,
+  value,
+}: {
+  keyboardType?: 'default' | 'decimal-pad';
+  label: string;
+  onChangeText: (value: string) => void;
+  placeholder: string;
+  value: string;
+}) {
+  return (
+    <View style={styles.inputGroup}>
+      <Text style={styles.inputLabel}>{label}</Text>
+      <TextInput
+        keyboardType={keyboardType}
+        onChangeText={onChangeText}
+        placeholder={placeholder}
+        placeholderTextColor="#6f849d"
+        style={styles.input}
+        value={value}
+      />
+    </View>
+  );
+}
+
 function getCurrentLocation(): Promise<LocationSnapshot> {
   return new Promise((resolve, reject) => {
     Geolocation.getCurrentPosition(
@@ -391,6 +826,14 @@ function getRecognitionStatusLabel(status: RecognitionStatus) {
   }
 }
 
+function truncateDebugText(value?: string) {
+  if (!value) {
+    return '없음';
+  }
+
+  return value.length > 800 ? `${value.slice(0, 800)}...` : value;
+}
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -432,6 +875,29 @@ const styles = StyleSheet.create({
     padding: 18,
     gap: 10,
   },
+  inlineInputs: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  inputGroup: {
+    flex: 1,
+    gap: 6,
+  },
+  inputLabel: {
+    color: '#b5c4d8',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  input: {
+    backgroundColor: '#091423',
+    borderColor: '#27405f',
+    borderRadius: 14,
+    borderWidth: 1,
+    color: '#f4f7fb',
+    fontSize: 15,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
   cardTitle: {
     color: '#f4f7fb',
     fontSize: 18,
@@ -471,6 +937,23 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
+  boundaryResult: {
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    color: '#07111f',
+    fontSize: 16,
+    fontWeight: '800',
+    marginTop: 4,
+    overflow: 'hidden',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  boundaryTrue: {
+    backgroundColor: '#dbe362',
+  },
+  boundaryFalse: {
+    backgroundColor: '#ff8b8b',
+  },
   helperText: {
     color: '#9db1c8',
     fontSize: 14,
@@ -480,6 +963,35 @@ const styles = StyleSheet.create({
     color: '#ff8b8b',
     fontSize: 13,
     lineHeight: 18,
+  },
+  debugCard: {
+    backgroundColor: '#091423',
+    borderColor: '#27405f',
+    borderRadius: 14,
+    borderWidth: 1,
+    gap: 6,
+    marginTop: 8,
+    padding: 12,
+  },
+  debugTitle: {
+    color: '#f4f7fb',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  debugText: {
+    color: '#b5c4d8',
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  codeBlock: {
+    backgroundColor: '#091423',
+    borderColor: '#27405f',
+    borderRadius: 14,
+    borderWidth: 1,
+    color: '#dbe362',
+    fontSize: 12,
+    lineHeight: 18,
+    padding: 12,
   },
   actions: {
     gap: 10,
