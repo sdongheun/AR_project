@@ -15,7 +15,7 @@ class MainApplication : Application(), ReactApplication {
       context = applicationContext,
       packageList =
         PackageList(this).packages.apply {
-          add(ReactViroPackage(ReactViroPackage.ViroPlatform.AR))
+          // add(ReactViroPackage(ReactViroPackage.ViroPlatform.AR))
         },
     )
   }

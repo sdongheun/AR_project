@@ -5,11 +5,12 @@ React Native 0.83 + `@reactvision/react-viro` 기반의 AR Map MVP 부트스트�
 ## 현재 포함된 것
 
 - iPhone 우선 React Native bare 앱
-- Viro AR 수동 네이티브 링크 설정
+- ~~Viro AR 수동 네이티브 링크 설정~~ (VPS 연동을 위해 임시 주석 처리)
 - 카메라/위치 권한 요청 플로우
 - 현재 위치 확인 UI
-- AR 실행용 기본 `ViroARSceneNavigator`
+- ~~AR 실행용 기본 `ViroARSceneNavigator`~~ (향후 VPS 기반 Native Component로 교체 예정)
 - VWorld 연동용 설정 골격
+- **VPS 연동 준비 (proj4를 통한 좌표계 변환 세팅 및 Viro 의존성 제거)**
 
 ## 실행
 
@@ -40,3 +41,4 @@ pnpm android
 1. VWorld 3D 응답 스펙을 확정한다.
 2. 단일 건물 좌표를 실제 API 응답으로 바꾼다.
 3. GPS 좌표와 AR 마커 오차 보정 로직을 붙인다.
+4. 구글 ARCore Geospatial API 기반의 VPS Native UI Component를 작성하고 브릿지로 연결한다.

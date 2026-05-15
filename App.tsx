@@ -12,13 +12,17 @@ import {
 } from 'react-native';
 import Geolocation from 'react-native-geolocation-service';
 import {SafeAreaProvider, SafeAreaView} from 'react-native-safe-area-context';
-import {
-  isARSupportedOnDevice,
-  requestRequiredPermissions,
-  ViroARSceneNavigator,
-} from '@reactvision/react-viro';
+// import {
+//   isARSupportedOnDevice,
+//   requestRequiredPermissions,
+//   ViroARSceneNavigator,
+// } from '@reactvision/react-viro';
+
+// [VPS 준비] Viro 의존성 제거 및 Mock 처리 (향후 Native Module로 대체)
+const isARSupportedOnDevice = async () => ({ isARSupported: true });
+const requestRequiredPermissions = async (permissions: string[]) => ({ camera: true, location: true });
 import Config from 'react-native-config';
-import {ARMapScene} from './src/ar/ARMapScene';
+import {VPSARView} from './src/ar/VPSARView';
 import {appConfig, demoTarget} from './src/config/appConfig';
 import {
   type GisBuildingInfoResult,
@@ -29,7 +33,7 @@ import {
 import type {LocationSnapshot} from './src/types/location';
 import type {MapTarget} from './src/types/target';
 
-const initialArScene = ARMapScene as unknown as () => React.JSX.Element;
+// const initialArScene = ARMapScene as unknown as () => React.JSX.Element;
 type RecognitionStatus = 'tracking' | 'success' | 'failure';
 type TargetFormState = {
   address: string;
@@ -374,7 +378,7 @@ function AppContent() {
   if (isArActive) {
     return (
       <View style={styles.container}>
-        <ViroARSceneNavigator
+        {/* <ViroARSceneNavigator
           autofocus
           initialScene={{scene: initialArScene}}
           style={styles.arNavigator}
@@ -384,6 +388,23 @@ function AppContent() {
             userLocation: location,
           }}
           worldAlignment="GravityAndHeading"
+        /> */}
+        
+        {/* 네이티브 VPS AR 뷰 브릿지 컴포넌트 호출 */}
+        <VPSARView
+          style={styles.arNavigator}
+          apiKey={Config.GOOGLE_VPS_API_KEY} // .env의 구글 API 키를 네이티브로 전달!
+          targetLatitude={activeTarget.latitude}
+          targetLongitude={activeTarget.longitude}
+          onTrackingStatusChange={(e) => {
+            const status = e.nativeEvent.status;
+            console.log('VPS Tracking Status:', status);
+            if (status === 'tracking_success') {
+              setRecognitionStatus('success');
+            } else if (status === 'engine_initialized') {
+              setRecognitionStatus('tracking');
+            }
+          }}
         />
         <SafeAreaView pointerEvents="box-none" style={styles.arOverlay}>
           <View style={styles.arOverlayHeader}>

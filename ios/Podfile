@@ -31,12 +31,20 @@ target 'ARMap' do
     :app_path => "#{Pod::Config.instance.installation_root}/.."
   )
 
-  pod 'ViroReact', :path => '../node_modules/@reactvision/react-viro/ios'
-  pod 'ViroKit', :path => '../node_modules/@reactvision/react-viro/ios/dist/ViroRenderer/'
+  # 기존 ViroReact/ViroKit 제거됨 (ARCore와 C++ 심볼 충돌 원인)
+  
+  # Google ARCore Geospatial API for iOS
+  pod 'ARCore/Geospatial', '~> 1.41.0'
+  
+  # 전역 모듈러 헤더 충돌 방지를 위한 구글/Firebase 선별적 모듈 적용
+  pod 'GoogleUtilities', :modular_headers => true
+  pod 'FirebaseCore', :modular_headers => true
+  pod 'FirebaseCoreInternal', :modular_headers => true
+  pod 'FirebaseInstallations', :modular_headers => true
+  pod 'FirebaseABTesting', :modular_headers => true
+  pod 'FirebaseRemoteConfig', :modular_headers => true
 
-  if ENV['RCT_NEW_ARCH_ENABLED'] != '1'
-    raise 'ViroReact requires RCT_NEW_ARCH_ENABLED=1 in ios/.xcode.env'
-  end
+  # ViroReact 환경 변수 체크 삭제됨
 
   post_install do |installer|
     react_native_post_install(
