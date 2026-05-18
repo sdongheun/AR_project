@@ -3,6 +3,7 @@
 #import <UIKit/UIKit.h>
 #import <ARKit/ARKit.h>
 #import <ARCore/ARCore.h>
+#import <math.h>
 
 // 1. 실제 아이폰 카메라 화면(ARKit)과 구글 AI(ARCore)를 담아낼 커스텀 뷰 클래스 선언
 @interface VPSARNativeView : UIView <ARSCNViewDelegate, GARSessionDelegate>
@@ -15,16 +16,25 @@
 
 // 화면에 정밀한 위도, 경도, 정확도를 실시간으로 뿌려줄 네이티브 HUD 오버레이 UI
 @property (nonatomic, strong) UILabel *debugOverlay;
+@property (nonatomic, assign) NSTimeInterval lastReactEventTime;
 
 // React Native(자바스크립트)에서 넘겨받을 Props 변수들
 @property (nonatomic, copy) NSString *apiKey;
 @property (nonatomic, assign) double targetLatitude;
 @property (nonatomic, assign) double targetLongitude;
+@property (nonatomic, assign) double targetAltitude;
 @property (nonatomic, copy) RCTBubblingEventBlock onTrackingStatusChange;
 
 @end
 
 @implementation VPSARNativeView
+
+- (double)headingDegreesFromFrame:(ARFrame *)frame {
+    // ARWorldAlignmentGravityAndHeading aligns ARKit world axes to compass heading.
+    // The camera yaw is enough for the MVP 2D building ray.
+    double heading = fmod((-frame.camera.eulerAngles.y * 180.0 / M_PI) + 360.0, 360.0);
+    return heading;
+}
 
 // 뷰가 처음 생성될 때 실행되는 생성자 코드
 - (instancetype)initWithFrame:(CGRect)frame {
@@ -145,6 +155,7 @@
                 if (trackingState == GARTrackingStateTracking) {
                     // iOS ARCore에서는 Pose가 아닌 Transform 객체를 사용합니다.
                     GARGeospatialTransform *pose = garFrame.earth.cameraGeospatialTransform;
+                    double headingDegrees = [self headingDegreesFromFrame:frame];
                     
                     [debugText appendFormat:@"Tracking State: ✅ TRACKING\n"];
                     [debugText appendFormat:@"Latitude:      %.7f\n", pose.coordinate.latitude];
@@ -154,6 +165,7 @@
                     [debugText appendFormat:@"Horizontal Acc: %.2f m\n", pose.horizontalAccuracy];
                     [debugText appendFormat:@"Vertical Acc:   %.2f m\n", pose.verticalAccuracy];
                     [debugText appendFormat:@"Orientation Acc:%.2f deg\n", pose.orientationYawAccuracy];
+                    [debugText appendFormat:@"Heading:        %.1f deg\n", headingDegrees];
                     
                     // 주니어 개발자를 위해 정확도 수치에 따른 알림판 기능 추가
                     if (pose.horizontalAccuracy < 5.0) {
@@ -162,19 +174,27 @@
                         [debugText appendString:@"Accuracy Status: ⚠️ REFINING..."];
                     }
                     
-                    // React Native에 정확도 정보까지 추가해서 실시간 보고 전송
-                    dispatch_async(dispatch_get_main_queue(), ^{
-                        if (self.onTrackingStatusChange) {
-                            self.onTrackingStatusChange(@{
-                                @"status": @"tracking_success",
-                                @"latitude": @(pose.coordinate.latitude),
-                                @"longitude": @(pose.coordinate.longitude),
-                                @"altitude": @(pose.altitude),
-                                @"horizontalAccuracy": @(pose.horizontalAccuracy),
-                                @"verticalAccuracy": @(pose.verticalAccuracy)
-                            });
-                        }
-                    });
+                    // RN 이벤트는 JS state 갱신과 브이월드 후보 판정을 유발하므로
+                    // AR 렌더 프레임마다 보내지 않고 초당 5회로 제한한다.
+                    if (time - self.lastReactEventTime >= 0.2) {
+                        self.lastReactEventTime = time;
+                        dispatch_async(dispatch_get_main_queue(), ^{
+                            if (self.onTrackingStatusChange) {
+                                self.onTrackingStatusChange(@{
+                                    @"status": @"tracking_success",
+                                    @"latitude": @(pose.coordinate.latitude),
+                                    @"longitude": @(pose.coordinate.longitude),
+                                    @"altitude": @(pose.altitude),
+                                    @"horizontalAccuracy": @(pose.horizontalAccuracy),
+                                    @"verticalAccuracy": @(pose.verticalAccuracy),
+                                    @"orientationYawAccuracy": @(pose.orientationYawAccuracy),
+                                    @"headingDegrees": @(headingDegrees),
+                                    @"cameraHeadingDegrees": @(headingDegrees),
+                                    @"heading": @(headingDegrees)
+                                });
+                            }
+                        });
+                    }
                     
                 } else if (trackingState == GARTrackingStatePaused) {
                     [debugText appendString:@"Tracking State: ⏸️ PAUSED\n"];
@@ -207,6 +227,7 @@ RCT_EXPORT_MODULE(VPSARView)
 RCT_EXPORT_VIEW_PROPERTY(apiKey, NSString)
 RCT_EXPORT_VIEW_PROPERTY(targetLatitude, double)
 RCT_EXPORT_VIEW_PROPERTY(targetLongitude, double)
+RCT_EXPORT_VIEW_PROPERTY(targetAltitude, double)
 RCT_EXPORT_VIEW_PROPERTY(onTrackingStatusChange, RCTBubblingEventBlock)
 
 - (UIView *)view {

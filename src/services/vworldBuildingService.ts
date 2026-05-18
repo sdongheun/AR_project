@@ -1,3 +1,5 @@
+import type {BuildingRecognitionCandidate} from './buildingRecognition';
+
 const SEARCH_URL = 'https://api.vworld.kr/req/search';
 const WFS_URL = 'https://api.vworld.kr/req/wfs';
 const GIS_BUILDING_WFS_URL = 'https://api.vworld.kr/ned/wfs/getBldgisSpceWFS';
@@ -25,6 +27,25 @@ export type SearchResult = {
   point: AddressPoint;
 };
 
+type VWorldSearchResponse = {
+  response?: {
+    result?: {
+      items?: Array<{
+        address: {
+          parcel: unknown;
+          road: unknown;
+        };
+        id?: unknown;
+        point: {
+          x: unknown;
+          y: unknown;
+        };
+      }>;
+    };
+    status?: string;
+  };
+};
+
 export type BuildingFeatureProperties = {
   bd_mgt_sn: string;
   buld_no: string;
@@ -38,6 +59,10 @@ export type BuildingFeature = {
     coordinates?: number[][][][];
   };
   properties: BuildingFeatureProperties;
+};
+
+type VWorldFeatureCollection = {
+  features?: BuildingFeature[];
 };
 
 export type BuildingSelectionCriteria = {
@@ -211,7 +236,7 @@ export class VWorldApiClient {
       });
     }
 
-    const data = await response.json();
+    const data = (await response.json()) as VWorldSearchResponse;
     const item = data?.response?.result?.items?.[0];
 
     if (data?.response?.status !== 'OK' || !item) {
@@ -270,7 +295,7 @@ export class VWorldApiClient {
       });
     }
 
-    const data = await response.json();
+    const data = (await response.json()) as VWorldFeatureCollection;
     return (data.features ?? []) as BuildingFeature[];
   }
 
@@ -346,7 +371,11 @@ export class CoordinateFormatter {
     const maxLat = latitude + delta;
     const maxLon = longitude + delta;
 
-    return `${minLat},${minLon},${maxLat},${maxLon},EPSG:4326`;
+    return `${this.formatCoordinate(minLat)},${this.formatCoordinate(
+      minLon,
+    )},${this.formatCoordinate(maxLat)},${this.formatCoordinate(
+      maxLon,
+    )},EPSG:4326`;
   }
 
   public getOuterRing(feature: BuildingFeature): number[][] {
@@ -357,6 +386,10 @@ export class CoordinateFormatter {
     }
 
     return outerRing;
+  }
+
+  private formatCoordinate(value: number) {
+    return Number(value.toFixed(12)).toString();
   }
 }
 
@@ -617,6 +650,61 @@ export class VWorldBuildingService {
         useApprovalDate: parsedFeature.useApprovalDate,
         violationBuildingYn: parsedFeature.violationBuildingYn,
       },
+    };
+  }
+
+  public async getBuildingRecognitionCandidatesNearPoint(point: GeoPoint) {
+    const bbox = this.coordinateFormatter.createWfsBbox(
+      point.latitude,
+      point.longitude,
+      0.00075,
+    );
+    const features = await this.apiClient.fetchBuildingFeatures(
+      bbox,
+      this.apiKey,
+    );
+
+    return features
+      .map(feature => this.toRecognitionCandidate(feature))
+      .filter(
+        (
+          candidate,
+        ): candidate is BuildingRecognitionCandidate => candidate !== null,
+      );
+  }
+
+  private toRecognitionCandidate(
+    feature: BuildingFeature,
+  ): BuildingRecognitionCandidate | null {
+    let outerRing: number[][];
+
+    try {
+      outerRing = this.coordinateFormatter.getOuterRing(feature);
+    } catch {
+      return null;
+    }
+
+    if (outerRing.length < 3) {
+      return null;
+    }
+
+    const nameParts = [
+      feature.properties.rd_nm,
+      feature.properties.buld_no,
+    ].filter(Boolean);
+
+    return {
+      id:
+        feature.properties.bd_mgt_sn ||
+        feature.properties.pnu ||
+        `${feature.properties.rd_nm}-${feature.properties.buld_no}`,
+      name: nameParts.length > 0 ? nameParts.join(' ') : '건물 정보 없음',
+      parcelCode: feature.properties.pnu,
+      polygon: outerRing.map(([longitude, latitude]) => ({
+        latitude,
+        longitude,
+      })),
+      roadAddress: nameParts.join(' '),
     };
   }
 }

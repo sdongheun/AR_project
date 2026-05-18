@@ -1,4 +1,4 @@
-import React, {useEffect, useMemo, useState} from 'react';
+import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -20,10 +20,19 @@ import {SafeAreaProvider, SafeAreaView} from 'react-native-safe-area-context';
 
 // [VPS 준비] Viro 의존성 제거 및 Mock 처리 (향후 Native Module로 대체)
 const isARSupportedOnDevice = async () => ({ isARSupported: true });
-const requestRequiredPermissions = async (permissions: string[]) => ({ camera: true, location: true });
+const requestRequiredPermissions = async (_permissions: string[]) => ({
+  camera: true,
+  location: true,
+});
 import Config from 'react-native-config';
 import {VPSARView} from './src/ar/VPSARView';
+import type {VPSTrackingEvent} from './src/ar/VPSARView';
 import {appConfig, demoTarget} from './src/config/appConfig';
+import {
+  selectLookedAtBuilding,
+  type BuildingRecognitionCandidate,
+  type BuildingRecognitionResult,
+} from './src/services/buildingRecognition';
 import {
   type GisBuildingInfoResult,
   VWorldApiError,
@@ -35,6 +44,13 @@ import type {MapTarget} from './src/types/target';
 
 // const initialArScene = ARMapScene as unknown as () => React.JSX.Element;
 type RecognitionStatus = 'tracking' | 'success' | 'failure';
+type ARRecognitionDebugState = {
+  candidateCount: number;
+  detail: string;
+  headingDegrees: number | null;
+  resultType: BuildingRecognitionResult['type'] | 'waiting';
+  selectedName: string | null;
+};
 type TargetFormState = {
   address: string;
   altitude: string;
@@ -75,6 +91,14 @@ function AppContent() {
   const [isArActive, setIsArActive] = useState(false);
   const [recognitionStatus, setRecognitionStatus] =
     useState<RecognitionStatus>('tracking');
+  const [arRecognitionDebug, setArRecognitionDebug] =
+    useState<ARRecognitionDebugState>({
+      candidateCount: 0,
+      detail: 'VPS 트래킹과 카메라 방향을 기다리는 중',
+      headingDegrees: null,
+      resultType: 'waiting',
+      selectedName: null,
+    });
   const [isCheckingBoundary, setIsCheckingBoundary] = useState(false);
   const [boundaryCheckError, setBoundaryCheckError] = useState<string | null>(null);
   const [boundaryCheckResult, setBoundaryCheckResult] =
@@ -88,6 +112,15 @@ function AppContent() {
     useState<BuildingBoundaryDebugState>(null);
   const [isFetchingGisBuilding, setIsFetchingGisBuilding] = useState(false);
   const [activeTarget, setActiveTarget] = useState<MapTarget>(demoTarget);
+  const buildingCandidatesRef = useRef<BuildingRecognitionCandidate[]>([]);
+  const isFetchingRecognitionCandidatesRef = useRef(false);
+  const lastCandidateFetchRef = useRef<{
+    latitude: number;
+    longitude: number;
+    timestampMs: number;
+  } | null>(null);
+  const lastRecognitionRunMsRef = useRef(0);
+  const lastVpsLocationStateMsRef = useRef(0);
   const [targetForm, setTargetForm] = useState<TargetFormState>({
     address: demoTarget.address,
     altitude: String(demoTarget.altitude),
@@ -365,6 +398,230 @@ function AppContent() {
     }
   }
 
+  async function handleVpsTrackingEvent(event: VPSTrackingEvent) {
+    if (event.status === 'engine_initialized') {
+      setRecognitionStatus('tracking');
+      setArRecognitionDebug(current => ({
+        ...current,
+        detail: 'VPS 엔진 초기화 완료, 위치 정밀화 중',
+        resultType: 'waiting',
+      }));
+      return;
+    }
+
+    if (event.status !== 'tracking_success') {
+      setRecognitionStatus('tracking');
+      return;
+    }
+
+    const latitude = Number(event.latitude);
+    const longitude = Number(event.longitude);
+    const altitude = Number(event.altitude ?? 0);
+    const horizontalAccuracy = Number(event.horizontalAccuracy ?? 999);
+    const headingDegrees = getHeadingDegreesFromVpsEvent(event);
+    const nowMs = Date.now();
+
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      setRecognitionStatus('failure');
+      setArRecognitionDebug(current => ({
+        ...current,
+        detail: 'VPS 위치 좌표를 아직 받지 못했습니다.',
+        resultType: 'none',
+      }));
+      return;
+    }
+
+    if (nowMs - lastVpsLocationStateMsRef.current >= 1000) {
+      lastVpsLocationStateMsRef.current = nowMs;
+      const vpsLocation: LocationSnapshot = {
+        accuracy: horizontalAccuracy,
+        altitude,
+        capturedAt: new Date(nowMs).toLocaleTimeString(),
+        latitude,
+        longitude,
+      };
+      setLocation(vpsLocation);
+    }
+
+    if (Config.VWORLD_API_KEY) {
+      refreshRecognitionCandidatesIfNeeded({
+        latitude,
+        longitude,
+        timestampMs: nowMs,
+      }).catch(error => {
+        setArRecognitionDebug(current => ({
+          ...current,
+          detail:
+            error instanceof Error
+              ? error.message
+              : '주변 건물 후보 조회에 실패했습니다.',
+        }));
+      });
+    }
+
+    if (!Number.isFinite(headingDegrees)) {
+      setRecognitionStatus('tracking');
+      setArRecognitionDebug(current => ({
+        ...current,
+        candidateCount: buildingCandidatesRef.current.length,
+        detail: `카메라 heading 값을 기다리는 중 · event keys: ${Object.keys(
+          event,
+        ).join(', ')}`,
+        headingDegrees: null,
+        resultType: 'waiting',
+      }));
+      return;
+    }
+
+    if (nowMs - lastRecognitionRunMsRef.current < 200) {
+      return;
+    }
+    lastRecognitionRunMsRef.current = nowMs;
+
+    const result = selectLookedAtBuilding(
+      {
+        altitude,
+        horizontalAccuracyMeters: horizontalAccuracy,
+        latitude,
+        longitude,
+        source: 'vps',
+        timestampMs: nowMs,
+        verticalAccuracyMeters: Number(event.verticalAccuracy ?? 0),
+      },
+      {
+        headingDegrees,
+        orientationAccuracyDegrees: Number(event.orientationYawAccuracy ?? 0),
+        timestampMs: nowMs,
+      },
+      buildingCandidatesRef.current,
+      {nowMs},
+    );
+
+    applyRecognitionResult(result, headingDegrees);
+  }
+
+  async function refreshRecognitionCandidatesIfNeeded(params: {
+    latitude: number;
+    longitude: number;
+    timestampMs: number;
+  }) {
+    if (isFetchingRecognitionCandidatesRef.current) {
+      return;
+    }
+
+    const lastFetch = lastCandidateFetchRef.current;
+    if (lastFetch) {
+      const movedMeters = getDistanceMeters(
+        lastFetch.latitude,
+        lastFetch.longitude,
+        params.latitude,
+        params.longitude,
+      );
+      const elapsedMs = params.timestampMs - lastFetch.timestampMs;
+
+      if (movedMeters < 30 && elapsedMs < 10000) {
+        return;
+      }
+    }
+
+    isFetchingRecognitionCandidatesRef.current = true;
+
+    try {
+      const apiKey = Config.VWORLD_API_KEY;
+      if (!apiKey) {
+        return;
+      }
+
+      const service = new VWorldBuildingService(apiKey);
+      const candidates =
+        await service.getBuildingRecognitionCandidatesNearPoint({
+          latitude: params.latitude,
+          longitude: params.longitude,
+        });
+
+      buildingCandidatesRef.current = candidates;
+      lastCandidateFetchRef.current = params;
+      setArRecognitionDebug(current => ({
+        ...current,
+        candidateCount: candidates.length,
+        detail:
+          candidates.length > 0
+            ? `주변 건물 후보 ${candidates.length}개 준비`
+            : '주변 건물 후보를 찾지 못했습니다.',
+      }));
+    } finally {
+      isFetchingRecognitionCandidatesRef.current = false;
+    }
+  }
+
+  function applyRecognitionResult(
+    result: BuildingRecognitionResult,
+    headingDegrees: number,
+  ) {
+    if (result.type === 'recognized') {
+      const isVisible =
+        result.confidence === 'high' || result.confidence === 'medium';
+
+      setRecognitionStatus(isVisible ? 'success' : 'failure');
+      setArRecognitionDebug({
+        candidateCount: result.debug.candidateCount,
+        detail: `${result.confidence} · 거리 ${Math.round(
+          result.distanceMeters,
+        )}m · 방향오차 ${Math.round(result.angleDeltaDegrees)}도`,
+        headingDegrees,
+        resultType: 'recognized',
+        selectedName: result.building.name,
+      });
+      setActiveTarget(current => ({
+        ...current,
+        id: result.building.id,
+        name: result.building.name,
+      }));
+      return;
+    }
+
+    if (result.type === 'ambiguous') {
+      setRecognitionStatus('failure');
+      setArRecognitionDebug({
+        candidateCount: result.debug.candidateCount,
+        detail: `상위 후보가 비슷합니다: ${result.candidates
+          .map(candidate => candidate.building.name)
+          .join(', ')}`,
+        headingDegrees,
+        resultType: 'ambiguous',
+        selectedName: null,
+      });
+      return;
+    }
+
+    setRecognitionStatus('failure');
+    setArRecognitionDebug({
+      candidateCount: result.debug.candidateCount,
+      detail: result.reason,
+      headingDegrees,
+      resultType: 'none',
+      selectedName: null,
+    });
+  }
+
+  function getHeadingDegreesFromVpsEvent(event: VPSTrackingEvent) {
+    const candidates = [
+      event.headingDegrees,
+      event.cameraHeadingDegrees,
+      event.heading,
+    ];
+
+    for (const candidate of candidates) {
+      const value = Number(candidate);
+
+      if (Number.isFinite(value)) {
+        return value;
+      }
+    }
+
+    return Number.NaN;
+  }
+
   function updateTargetForm<Key extends keyof TargetFormState>(
     key: Key,
     value: TargetFormState[Key],
@@ -396,20 +653,27 @@ function AppContent() {
           apiKey={Config.GOOGLE_VPS_API_KEY} // .env의 구글 API 키를 네이티브로 전달!
           targetLatitude={activeTarget.latitude}
           targetLongitude={activeTarget.longitude}
-          onTrackingStatusChange={(e) => {
-            const status = e.nativeEvent.status;
-            console.log('VPS Tracking Status:', status);
-            if (status === 'tracking_success') {
-              setRecognitionStatus('success');
-            } else if (status === 'engine_initialized') {
-              setRecognitionStatus('tracking');
-            }
+          targetAltitude={activeTarget.altitude}
+          onTrackingStatusChange={event => {
+            handleVpsTrackingEvent(event.nativeEvent).catch(error => {
+              setRecognitionStatus('failure');
+              setArRecognitionDebug(current => ({
+                ...current,
+                detail:
+                  error instanceof Error
+                    ? error.message
+                    : 'AR 건물 인식 처리 중 오류가 발생했습니다.',
+                resultType: 'none',
+              }));
+            });
           }}
         />
         <SafeAreaView pointerEvents="box-none" style={styles.arOverlay}>
           <View style={styles.arOverlayHeader}>
             <View style={styles.arStatusBlock}>
-              <Text style={styles.arOverlayTitle}>{activeTarget.name}</Text>
+              <Text style={styles.arOverlayTitle}>
+                {arRecognitionDebug.selectedName ?? activeTarget.name}
+              </Text>
               <Text
                 style={[
                   styles.arStatusBadge,
@@ -420,6 +684,15 @@ function AppContent() {
                       : styles.statusTracking,
                 ]}>
                 {getRecognitionStatusLabel(recognitionStatus)}
+              </Text>
+              <Text style={styles.arDebugText}>
+                후보 {arRecognitionDebug.candidateCount}개
+                {arRecognitionDebug.headingDegrees !== null
+                  ? ` · heading ${Math.round(arRecognitionDebug.headingDegrees)}도`
+                  : ''}
+              </Text>
+              <Text style={styles.arDebugText}>
+                {arRecognitionDebug.detail}
               </Text>
             </View>
             <Pressable
@@ -547,10 +820,13 @@ function AppContent() {
           {location ? (
             <>
               <Text style={styles.coordinates}>
-                {location.latitude.toFixed(6)}, {location.longitude.toFixed(6)}
+                위경도: {location.latitude.toFixed(6)}, {location.longitude.toFixed(6)}
+              </Text>
+              <Text style={styles.coordinates}>
+                지면 높이(추정): 해발 {Math.round(location.altitude - 1.5)}m
               </Text>
               <Text style={styles.targetMeta}>
-                정확도 {Math.round(location.accuracy)}m · {location.capturedAt}
+                기기 고도: {Math.round(location.altitude)}m · 정확도 {Math.round(location.accuracy)}m · {location.capturedAt}
               </Text>
             </>
           ) : (
@@ -1091,6 +1367,17 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     overflow: 'hidden',
     paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  arDebugText: {
+    backgroundColor: 'rgba(7, 17, 31, 0.64)',
+    borderRadius: 8,
+    color: '#dbe7f4',
+    fontSize: 12,
+    lineHeight: 17,
+    maxWidth: 280,
+    overflow: 'hidden',
+    paddingHorizontal: 10,
     paddingVertical: 7,
   },
   statusSuccess: {
