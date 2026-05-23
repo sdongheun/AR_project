@@ -1,0 +1,16 @@
+platform :ios, '17.0'
+
+target 'ARBusan' do
+  use_frameworks!
+
+  # ARCore Geospatial SDK for iOS.
+  # Run `pod install` from this directory when network access is available,
+  # then open ARBusan.xcworkspace instead of ARBusan.xcodeproj.
+  pod 'ARCore/Geospatial', '~> 1.54.0'
+end
+
+target 'ARBusanTests' do
+  use_frameworks!
+
+  pod 'ARCore/Geospatial', '~> 1.54.0'
+end

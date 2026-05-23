@@ -1,0 +1,9 @@
+.DS_Store
+.derivedData/
+DerivedData/
+build/
+*.xcuserstate
+xcuserdata/
+Pods/
+*.xcworkspace
+Config/Secrets.local.xcconfig

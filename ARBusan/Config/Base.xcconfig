@@ -1,0 +1,5 @@
+TOUR_API_KEY =
+VWORLD_API_KEY =
+GOOGLE_ARCORE_API_KEY =
+
+#include? "Secrets.local.xcconfig"
