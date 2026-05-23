@@ -17,7 +17,22 @@ struct MVPRecognitionControlView: View {
             }
 
             RecognitionSignalSection(
-                title: "2. VPS/위치 후보",
+                title: "2. 카메라 방향 후보",
+                caption: "내 위치와 카메라 heading을 김해 목업 건물 좌표와 비교해 자동 계산한 후보입니다."
+            ) {
+                Text(appState.cameraDirectionStatus)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if let heading = appState.cameraHeadingDegrees {
+                    Text("카메라 heading: \(Int(heading))도")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            RecognitionSignalSection(
+                title: "3. VPS/위치 후보",
                 caption: "현재 위치와 ARCore VPS가 근처라고 판단한 건물 후보입니다."
             ) {
                 Picker("위치 신뢰도", selection: $appState.locationConfidence) {
@@ -37,8 +52,8 @@ struct MVPRecognitionControlView: View {
             }
 
             RecognitionSignalSection(
-                title: "3. 브이월드 Polygon 후보",
-                caption: "건물 주소/공간 범위가 일치한다고 보는 후보입니다. 현재는 수동 목업 선택입니다."
+                title: "4. 브이월드 Polygon 후보",
+                caption: "건물 주소/공간 범위가 일치한다고 보는 후보입니다. 현재는 수동 테스트 선택입니다."
             ) {
                 Picker("Polygon 일치 건물", selection: $appState.polygonValidatedSpotID) {
                     Text("Polygon 후보 없음").tag(Optional<TourismSpot.ID>.none)

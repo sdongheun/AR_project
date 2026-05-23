@@ -9,8 +9,11 @@ final class ARSessionViewController: UIViewController {
     private var lastOCRTimestamp: TimeInterval = 0
     private var isRecognizingText = false
     private let ocrInterval: TimeInterval = 2.0
+    private var lastHeadingTimestamp: TimeInterval = 0
+    private let headingInterval: TimeInterval = 0.25
 
     var onRecognizedCameraText: ((String) -> Void)?
+    var onCameraHeadingUpdated: ((Double) -> Void)?
 
     init(geospatialSessionManager: GeospatialSessionManager) {
         self.geospatialSessionManager = geospatialSessionManager
@@ -58,7 +61,29 @@ final class ARSessionViewController: UIViewController {
 extension ARSessionViewController: ARSessionDelegate {
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
         geospatialSessionManager.update(with: frame)
+        publishCameraHeadingIfNeeded(from: frame)
         recognizeTextIfNeeded(in: frame)
+    }
+
+    private func publishCameraHeadingIfNeeded(from frame: ARFrame) {
+        guard frame.timestamp - lastHeadingTimestamp >= headingInterval else {
+            return
+        }
+
+        lastHeadingTimestamp = frame.timestamp
+        let heading = compassHeadingDegrees(from: frame)
+
+        DispatchQueue.main.async { [weak self] in
+            self?.onCameraHeadingUpdated?(heading)
+        }
+    }
+
+    private func compassHeadingDegrees(from frame: ARFrame) -> Double {
+        let transform = frame.camera.transform
+        let forwardX = Double(-transform.columns.2.x)
+        let forwardZ = Double(-transform.columns.2.z)
+        let heading = atan2(forwardX, -forwardZ) * 180 / .pi
+        return heading >= 0 ? heading : heading + 360
     }
 
     private func recognizeTextIfNeeded(in frame: ARFrame) {

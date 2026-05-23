@@ -16,6 +16,7 @@ struct ARExploreView: View {
                         status: appState.geospatialStatus,
                         snapshot: appState.latestLocationSnapshot
                     )
+                    TourismDataStatusView(status: appState.tourismDataStatus)
 
                     VStack(alignment: .leading, spacing: 6) {
                         Text(appState.recognitionResult.title)
@@ -38,7 +39,7 @@ struct ARExploreView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(spot.name)
                                     .font(.caption.weight(.semibold))
-                                Text(spot.address)
+                                Text("\(spot.address) / \(spot.source.displayName)")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                             }
@@ -72,6 +73,9 @@ private struct ARViewContainer: UIViewControllerRepresentable {
         viewController.onRecognizedCameraText = { text in
             appState.updateCameraTextFromLiveOCR(text)
         }
+        viewController.onCameraHeadingUpdated = { heading in
+            appState.updateCameraHeading(heading)
+        }
         return viewController
     }
 
@@ -95,6 +99,31 @@ private struct GeospatialStatusView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+}
+
+private struct TourismDataStatusView: View {
+    let status: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("TourAPI 데이터 상태")
+                .font(.caption.weight(.semibold))
+            Text(status)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+private extension TourismSpot.Source {
+    var displayName: String {
+        switch self {
+        case .tourAPI:
+            return "TourAPI"
+        case .mock:
+            return "목업 fallback"
         }
     }
 }

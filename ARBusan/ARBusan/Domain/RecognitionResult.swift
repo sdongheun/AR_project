@@ -21,6 +21,7 @@ enum RecognitionConfidence: String, CaseIterable, Identifiable {
 
 enum RecognitionResult {
     case recognized(spot: TourismSpot, confidence: RecognitionConfidence, reason: String)
+    case nearby(spot: TourismSpot, reason: String)
     case ambiguous(candidates: [TourismSpot], reason: String)
     case none(reason: String)
 
@@ -28,6 +29,8 @@ enum RecognitionResult {
         switch self {
         case let .recognized(spot, confidence, _):
             return "\(spot.name) 건물 인식됨 (\(confidence.displayName))"
+        case let .nearby(spot, _):
+            return "\(spot.name) 근처 후보 감지"
         case .ambiguous:
             return "건물 후보 선택 필요"
         case .none:
@@ -37,7 +40,10 @@ enum RecognitionResult {
 
     var detail: String {
         switch self {
-        case let .recognized(_, _, reason), let .ambiguous(_, reason), let .none(reason):
+        case let .recognized(_, _, reason),
+            let .nearby(_, reason),
+            let .ambiguous(_, reason),
+            let .none(reason):
             return reason
         }
     }
