@@ -39,6 +39,17 @@ enum MockTourismSpots {
             recognitionHints: ["후참잘", "후라이드참잘하는집"],
             notes: "간판이 잘 보인다. 약 2층 건물이며 간판들이 빼곡하게 있다."
         ),
+        TourismSpot(
+            id: "mock-gimhae-thezone101-inje-266",
+            name: "더존 101",
+            address: "경상남도 김해시 인제로 266",
+            districtName: "김해시",
+            category: "목업 주택",
+            source: .mock,
+            geometryKind: .buildingPolygon,
+            center: CLLocationCoordinate2D(latitude: 35.252120, longitude: 128.903338),
+            recognitionHints: ["더존 101", "더존101", "더존", "THEZONE101", "THE ZONE 101"],
+            notes: "상업 건물이 아닌 주택이다. 약 4~5층 건물이며 실기기 테스트 위치 변경에 맞춰 추가했다."
+        ),
     ]
 }
-

@@ -8,7 +8,6 @@ struct RecognitionPipeline {
         cameraText: String,
         locationConfidence: RecognitionConfidence,
         cameraDirectionSpotIDs: Set<String>,
-        vpsNearbySpotIDs: Set<String>,
         polygonValidatedSpotIDs: Set<String>
     ) -> RecognitionResult {
         let scored = scorer.score(
@@ -16,7 +15,6 @@ struct RecognitionPipeline {
             cameraText: cameraText,
             locationConfidence: locationConfidence,
             cameraDirectionSpotIDs: cameraDirectionSpotIDs,
-            vpsNearbySpotIDs: vpsNearbySpotIDs,
             polygonValidatedSpotIDs: polygonValidatedSpotIDs
         )
 
@@ -38,7 +36,7 @@ struct RecognitionPipeline {
         if first.hasSpatialMatch && !first.hasVisualMatch {
             return .nearby(
                 spot: first.spot,
-                reason: "VPS/Polygon은 \(first.spot.name)을 가리키지만 카메라 OCR 또는 방향 확인이 없습니다. 현재는 건물 인식 확정이 아니라 근처 후보로만 표시합니다."
+                reason: "Polygon 후보는 \(first.spot.name)을 가리키지만 카메라 OCR 또는 방향 확인이 없습니다. 현재는 건물 인식 확정이 아니라 근처 후보로만 표시합니다."
             )
         }
 
@@ -46,7 +44,7 @@ struct RecognitionPipeline {
             return .recognized(
                 spot: first.spot,
                 confidence: .high,
-                reason: "카메라 OCR/방향 후보, VPS 후보, polygon 검증이 같은 건물을 가리킵니다."
+                reason: "카메라 OCR/방향 후보와 Polygon 검증이 같은 건물을 가리킵니다. VPS는 위치 정확도 신호로만 반영했습니다."
             )
         }
 
@@ -95,7 +93,7 @@ struct RecognitionPipeline {
 
         return .ambiguous(
             candidates: Array(candidates),
-            reason: "OCR은 \(textMatched.spot.name)을 가리키지만 VPS/Polygon 후보는 \(spatialNames)을 가리킵니다. 현재는 자동 확정하지 않고 후보 선택이 필요합니다."
+            reason: "OCR은 \(textMatched.spot.name)을 가리키지만 Polygon 후보는 \(spatialNames)을 가리킵니다. 현재는 자동 확정하지 않고 후보 선택이 필요합니다."
         )
     }
 }

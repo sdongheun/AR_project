@@ -79,11 +79,7 @@ extension ARSessionViewController: ARSessionDelegate {
     }
 
     private func compassHeadingDegrees(from frame: ARFrame) -> Double {
-        let transform = frame.camera.transform
-        let forwardX = Double(-transform.columns.2.x)
-        let forwardZ = Double(-transform.columns.2.z)
-        let heading = atan2(forwardX, -forwardZ) * 180 / .pi
-        return heading >= 0 ? heading : heading + 360
+        CameraHeadingCalculator.compassHeadingDegrees(from: frame.camera.transform)
     }
 
     private func recognizeTextIfNeeded(in frame: ARFrame) {

@@ -5,7 +5,6 @@ struct ScoredTourismSpot {
     let score: Int
     let hasTextMatch: Bool
     let hasCameraDirectionMatch: Bool
-    let hasVPSMatch: Bool
     let hasPolygonMatch: Bool
 
     var hasVisualMatch: Bool {
@@ -13,7 +12,7 @@ struct ScoredTourismSpot {
     }
 
     var hasSpatialMatch: Bool {
-        hasVPSMatch || hasPolygonMatch
+        hasPolygonMatch
     }
 }
 
@@ -23,7 +22,6 @@ struct CandidateScorer {
         cameraText: String,
         locationConfidence: RecognitionConfidence,
         cameraDirectionSpotIDs: Set<String>,
-        vpsNearbySpotIDs: Set<String>,
         polygonValidatedSpotIDs: Set<String>
     ) -> [ScoredTourismSpot] {
         candidates
@@ -34,7 +32,6 @@ struct CandidateScorer {
                     normalizedText.contains($0.normalizedRecognitionText)
                 }
                 let hasCameraDirectionMatch = cameraDirectionSpotIDs.contains(spot.id)
-                let hasVPSMatch = vpsNearbySpotIDs.contains(spot.id)
                 let hasPolygonMatch = polygonValidatedSpotIDs.contains(spot.id)
 
                 if hasTextMatch {
@@ -43,10 +40,6 @@ struct CandidateScorer {
 
                 if hasCameraDirectionMatch {
                     score += 35
-                }
-
-                if hasVPSMatch {
-                    score += 20
                 }
 
                 if hasPolygonMatch {
@@ -67,7 +60,6 @@ struct CandidateScorer {
                     score: score,
                     hasTextMatch: hasTextMatch,
                     hasCameraDirectionMatch: hasCameraDirectionMatch,
-                    hasVPSMatch: hasVPSMatch,
                     hasPolygonMatch: hasPolygonMatch
                 )
             }

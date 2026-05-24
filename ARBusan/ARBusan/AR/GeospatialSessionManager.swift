@@ -1,9 +1,9 @@
-import ARCore
-import ARCoreGARSession
-import ARCoreGeospatial
 import ARKit
 import CoreLocation
 import Foundation
+@_implementationOnly import ARCore
+@_implementationOnly import ARCoreGARSession
+@_implementationOnly import ARCoreGeospatial
 
 final class GeospatialSessionManager: NSObject, CLLocationManagerDelegate {
     private let locationManager = CLLocationManager()
