@@ -33,6 +33,16 @@ struct ARExploreView: View {
                         .animation(.easeOut(duration: 0.18), value: label)
                 }
 
+                if let debugOverlay = appState.matrixProjectionDebugOverlay {
+                    MatrixProjectionDebugMarkerView(overlay: debugOverlay)
+                        .position(
+                            x: debugOverlay.normalizedX * geometry.size.width,
+                            y: debugOverlay.normalizedY * geometry.size.height
+                        )
+                        .allowsHitTesting(false)
+                        .animation(.easeOut(duration: 0.12), value: debugOverlay)
+                }
+
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         APIKeyStatusView(statuses: appState.apiKeys.statuses)
@@ -88,6 +98,31 @@ struct ARExploreView: View {
         .sheet(isPresented: $showsCollection) {
             CollectionBookView(spots: appState.spots, selectedSpot: appState.selectedSpot)
         }
+    }
+}
+
+private struct MatrixProjectionDebugMarkerView: View {
+    let overlay: MatrixProjectionDebugOverlay
+
+    var body: some View {
+        VStack(spacing: 3) {
+            ZStack {
+                Circle()
+                    .stroke(.white.opacity(0.9), lineWidth: 2)
+                    .frame(width: 22, height: 22)
+                Circle()
+                    .fill(overlay.isInsideView ? .purple : .red)
+                    .frame(width: 12, height: 12)
+            }
+
+            Text("\(overlay.title) \(overlay.insidePointCount)/\(overlay.totalPointCount)")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(overlay.isInsideView ? .purple.opacity(0.82) : .red.opacity(0.82), in: Capsule())
+        }
+        .shadow(color: .black.opacity(0.55), radius: 5, x: 0, y: 2)
     }
 }
 

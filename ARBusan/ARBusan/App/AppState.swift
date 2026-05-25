@@ -12,6 +12,16 @@ struct ARLabelOverlay: Equatable {
     let isSceneSemanticsAdjusted: Bool
 }
 
+struct MatrixProjectionDebugOverlay: Equatable {
+    let spotID: TourismSpot.ID
+    let title: String
+    let normalizedX: Double
+    let normalizedY: Double
+    let isInsideView: Bool
+    let insidePointCount: Int
+    let totalPointCount: Int
+}
+
 @MainActor
 final class AppState: ObservableObject {
     @Published var spots: [TourismSpot]
@@ -30,6 +40,7 @@ final class AppState: ObservableObject {
     @Published var sceneSemanticsScoringDiagnostics = "Scene Semantics 라벨 보정을 아직 계산하지 않았습니다."
     @Published var arLabelOverlay: ARLabelOverlay?
     @Published var arLabelOverlayDiagnostics = "AR 라벨 후보를 아직 계산하지 않았습니다."
+    @Published var matrixProjectionDebugOverlay: MatrixProjectionDebugOverlay?
     @Published var cameraHeadingDegrees: Double?
     @Published var cameraHeadingSampleCount = 0
     @Published var cameraHeadingLastUpdatedAt: Date?
@@ -236,6 +247,7 @@ final class AppState: ObservableObject {
             refreshLocalCoordinateDiagnostics()
             polygonProjectionDiagnostics = "카메라 heading이 없어 Polygon 화면 투영을 계산할 수 없습니다."
             matrixProjectionComparisonDiagnostics = "카메라 heading이 없어 projection matrix 비교를 계산할 수 없습니다."
+            matrixProjectionDebugOverlay = nil
             arLabelOverlay = nil
             arLabelOverlayDiagnostics = "카메라 heading이 없어 AR 라벨 위치를 계산할 수 없습니다."
             polygonLookupTask?.cancel()
@@ -252,6 +264,7 @@ final class AppState: ObservableObject {
             refreshLocalCoordinateDiagnostics()
             polygonProjectionDiagnostics = "현재 위치가 없어 Polygon 화면 투영을 계산할 수 없습니다."
             matrixProjectionComparisonDiagnostics = "현재 위치가 없어 projection matrix 비교를 계산할 수 없습니다."
+            matrixProjectionDebugOverlay = nil
             arLabelOverlay = nil
             arLabelOverlayDiagnostics = "현재 위치가 없어 AR 라벨 위치를 계산할 수 없습니다."
             polygonLookupTask?.cancel()
@@ -272,6 +285,7 @@ final class AppState: ObservableObject {
             refreshLocalCoordinateDiagnostics()
             polygonProjectionDiagnostics = "현재 heading과 일치하는 후보가 없어 Polygon 화면 투영을 계산하지 않았습니다."
             matrixProjectionComparisonDiagnostics = "현재 heading과 일치하는 후보가 없어 projection matrix 비교를 계산하지 않았습니다."
+            matrixProjectionDebugOverlay = nil
             arLabelOverlay = nil
             arLabelOverlayDiagnostics = "현재 heading과 일치하는 후보가 없어 AR 라벨을 숨깁니다."
             polygonLookupTask?.cancel()
@@ -424,6 +438,7 @@ final class AppState: ObservableObject {
         sceneSemanticsScoringDiagnostics = "후보 초기화로 Scene Semantics 라벨 보정도 초기화했습니다."
         arLabelOverlay = nil
         arLabelOverlayDiagnostics = "후보 초기화로 AR 라벨도 초기화했습니다."
+        matrixProjectionDebugOverlay = nil
         localCoordinateDiagnostics = "후보 초기화로 local ENU 좌표 변환도 초기화했습니다."
         matrixProjectionComparisonDiagnostics = "후보 초기화로 projection matrix 비교도 초기화했습니다."
         cameraDirectionSpotID = nil
@@ -635,22 +650,26 @@ final class AppState: ObservableObject {
     private func refreshMatrixProjectionComparisonDiagnostics() {
         guard let latestLocationSnapshot else {
             matrixProjectionComparisonDiagnostics = "현재 위치가 없어 projection matrix 비교를 계산할 수 없습니다."
+            matrixProjectionDebugOverlay = nil
             return
         }
 
         guard let heading = cameraHeadingDegrees,
               let pose = cameraPoseSnapshot else {
             matrixProjectionComparisonDiagnostics = "heading/pose 중 일부가 없어 projection matrix 비교를 계산할 수 없습니다."
+            matrixProjectionDebugOverlay = nil
             return
         }
 
         guard let cameraProjectionSnapshot else {
             matrixProjectionComparisonDiagnostics = "ARFrame camera matrix 샘플이 없어 projection matrix 비교를 계산할 수 없습니다."
+            matrixProjectionDebugOverlay = nil
             return
         }
 
         guard let spot = localCoordinateTargetSpot(from: latestLocationSnapshot) else {
             matrixProjectionComparisonDiagnostics = "projection matrix 비교 대상 후보가 없습니다."
+            matrixProjectionDebugOverlay = nil
             return
         }
 
@@ -681,6 +700,7 @@ final class AppState: ObservableObject {
         guard let cameraProjectionSnapshot,
               let latestLocationSnapshot else {
             matrixProjectionComparisonDiagnostics = "\(spot.name) projection matrix 비교 대기: matrix/위치 중 일부가 없습니다."
+            matrixProjectionDebugOverlay = nil
             return
         }
 
@@ -703,6 +723,7 @@ final class AppState: ObservableObject {
         let coordinates = polygon?.rings.flatMap { $0 } ?? [spot.center]
         guard !coordinates.isEmpty else {
             matrixProjectionComparisonDiagnostics = "\(spot.name) projection matrix 비교 실패: 투영할 좌표가 없습니다."
+            matrixProjectionDebugOverlay = nil
             return
         }
 
@@ -715,6 +736,7 @@ final class AppState: ObservableObject {
         }
         guard !matrixProjectedPoints.isEmpty else {
             matrixProjectionComparisonDiagnostics = "\(spot.name) projection matrix 비교 실패: 유효한 matrix 투영 좌표가 없습니다."
+            matrixProjectionDebugOverlay = nil
             return
         }
 
@@ -729,6 +751,15 @@ final class AppState: ObservableObject {
         let deltaText = "차이 x \(Int(deltaX))%p y \(Int(deltaY))%p"
 
         matrixProjectionComparisonDiagnostics = "\(spot.name) \(targetText) 투영 비교 / \(fovText) / \(matrixText) / \(deltaText) / matrix 화면 안 \(matrixInsideCount)/\(matrixProjectedPoints.count)개"
+        matrixProjectionDebugOverlay = MatrixProjectionDebugOverlay(
+            spotID: spot.id,
+            title: "matrix",
+            normalizedX: Double(matrixAnchor.x).clamped(to: 0.04...0.96),
+            normalizedY: Double(matrixAnchor.y).clamped(to: 0.08...0.86),
+            isInsideView: matrixInsideCount > 0,
+            insidePointCount: matrixInsideCount,
+            totalPointCount: matrixProjectedPoints.count
+        )
     }
 
     private func refreshSceneSemanticsScoring() {
