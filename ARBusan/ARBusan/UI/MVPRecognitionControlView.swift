@@ -108,6 +108,17 @@ struct MVPRecognitionControlView: View {
                 }
             }
 
+            RecognitionSignalSection(
+                title: "5. Scene Semantics 점수 보정",
+                caption: "목업과 TourAPI 후보 모두 VWorld Polygon이 확보되면 화면 투영 영역의 building 비율로 같은 방식의 점수 보정을 받습니다."
+            ) {
+                Text(appState.sceneSemanticsScoringDiagnostics)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(nil)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             HStack {
                 Button("건물 인식 실행") {
                     appState.runRecognition()

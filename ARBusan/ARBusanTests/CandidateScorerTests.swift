@@ -79,6 +79,60 @@ final class CandidateScorerTests: XCTestCase {
         XCTAssertEqual(confidence, .high)
     }
 
+    func testSceneSemanticsEvidenceBoostsCommonMockAndTourAPIScoringPath() {
+        let scorer = CandidateScorer()
+        let spots = MockTourismSpots.gimhae
+        let targetID = "mock-gimhae-twosome-inje-192"
+        let evidence = SceneSemanticsSpotEvidence(
+            buildingCoverageRatio: 0.5,
+            blockingCoverageRatio: 0.1,
+            skyCoverageRatio: 0,
+            treeCoverageRatio: 0,
+            roadCoverageRatio: 0.1,
+            waterCoverageRatio: 0,
+            sampledPixelCount: 100
+        )
+
+        let scored = scorer.score(
+            candidates: spots,
+            cameraText: "",
+            locationConfidence: .high,
+            cameraDirectionSpotIDs: [targetID],
+            polygonValidatedSpotIDs: [targetID],
+            sceneSemanticsEvidenceBySpotID: [targetID: evidence]
+        )
+
+        XCTAssertEqual(scored.first?.spot.id, targetID)
+        XCTAssertEqual(scored.first?.score, 102)
+        XCTAssertTrue(scored.first?.sceneSemanticsEvidence?.hasBuildingSupport == true)
+    }
+
+    func testSceneSemanticsBlockingLabelsPenalizeProjectedCandidate() {
+        let scorer = CandidateScorer()
+        let spots = MockTourismSpots.gimhae
+        let targetID = "mock-gimhae-twosome-inje-192"
+        let evidence = SceneSemanticsSpotEvidence(
+            buildingCoverageRatio: 0.02,
+            blockingCoverageRatio: 0.8,
+            skyCoverageRatio: 0.6,
+            treeCoverageRatio: 0.1,
+            roadCoverageRatio: 0.1,
+            waterCoverageRatio: 0,
+            sampledPixelCount: 100
+        )
+
+        let scored = scorer.score(
+            candidates: spots,
+            cameraText: "",
+            locationConfidence: .high,
+            cameraDirectionSpotIDs: [targetID],
+            polygonValidatedSpotIDs: [targetID],
+            sceneSemanticsEvidenceBySpotID: [targetID: evidence]
+        )
+
+        XCTAssertEqual(scored.first { $0.spot.id == targetID }?.score, 65)
+    }
+
     func testPipelinePrioritizesMatchingOCRAndCameraDirectionOverStaleSpatialSelection() {
         let pipeline = RecognitionPipeline()
 

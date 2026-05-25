@@ -8,14 +8,16 @@ struct RecognitionPipeline {
         cameraText: String,
         locationConfidence: RecognitionConfidence,
         cameraDirectionSpotIDs: Set<String>,
-        polygonValidatedSpotIDs: Set<String>
+        polygonValidatedSpotIDs: Set<String>,
+        sceneSemanticsEvidenceBySpotID: [String: SceneSemanticsSpotEvidence] = [:]
     ) -> RecognitionResult {
         let scored = scorer.score(
             candidates: candidates,
             cameraText: cameraText,
             locationConfidence: locationConfidence,
             cameraDirectionSpotIDs: cameraDirectionSpotIDs,
-            polygonValidatedSpotIDs: polygonValidatedSpotIDs
+            polygonValidatedSpotIDs: polygonValidatedSpotIDs,
+            sceneSemanticsEvidenceBySpotID: sceneSemanticsEvidenceBySpotID
         )
 
         guard let first = scored.first else {
@@ -44,7 +46,7 @@ struct RecognitionPipeline {
             return .recognized(
                 spot: first.spot,
                 confidence: .high,
-                reason: "카메라 OCR/방향 후보와 Polygon 검증이 같은 건물을 가리킵니다. VPS는 위치 정확도 신호로만 반영했습니다."
+                reason: highConfidenceReason(for: first)
             )
         }
 
@@ -52,7 +54,7 @@ struct RecognitionPipeline {
             return .recognized(
                 spot: first.spot,
                 confidence: .medium,
-                reason: "일부 건물 인식 신호가 일치했습니다. 현장에서는 후보 선택 또는 추가 카메라 검증이 필요합니다."
+                reason: mediumConfidenceReason(for: first)
             )
         }
 
@@ -95,5 +97,23 @@ struct RecognitionPipeline {
             candidates: Array(candidates),
             reason: "OCR은 \(textMatched.spot.name)을 가리키지만 Polygon 후보는 \(spatialNames)을 가리킵니다. 현재는 자동 확정하지 않고 후보 선택이 필요합니다."
         )
+    }
+
+    private func highConfidenceReason(for scored: ScoredTourismSpot) -> String {
+        var signals = ["카메라 OCR/방향 후보와 Polygon 검증이 같은 건물을 가리킵니다."]
+        if let evidence = scored.sceneSemanticsEvidence {
+            signals.append("Scene Semantics 보정: \(evidence.diagnosticText).")
+        }
+        signals.append("VPS는 위치 정확도 신호로만 반영했습니다.")
+        return signals.joined(separator: " ")
+    }
+
+    private func mediumConfidenceReason(for scored: ScoredTourismSpot) -> String {
+        var signals = ["일부 건물 인식 신호가 일치했습니다."]
+        if let evidence = scored.sceneSemanticsEvidence {
+            signals.append("Scene Semantics 보정: \(evidence.diagnosticText).")
+        }
+        signals.append("현장에서는 후보 선택 또는 추가 카메라 검증이 필요합니다.")
+        return signals.joined(separator: " ")
     }
 }

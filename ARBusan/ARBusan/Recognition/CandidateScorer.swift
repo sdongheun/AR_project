@@ -6,9 +6,10 @@ struct ScoredTourismSpot {
     let hasTextMatch: Bool
     let hasCameraDirectionMatch: Bool
     let hasPolygonMatch: Bool
+    let sceneSemanticsEvidence: SceneSemanticsSpotEvidence?
 
     var hasVisualMatch: Bool {
-        hasTextMatch || hasCameraDirectionMatch
+        hasTextMatch || hasCameraDirectionMatch || (sceneSemanticsEvidence?.hasBuildingSupport ?? false)
     }
 
     var hasSpatialMatch: Bool {
@@ -22,7 +23,8 @@ struct CandidateScorer {
         cameraText: String,
         locationConfidence: RecognitionConfidence,
         cameraDirectionSpotIDs: Set<String>,
-        polygonValidatedSpotIDs: Set<String>
+        polygonValidatedSpotIDs: Set<String>,
+        sceneSemanticsEvidenceBySpotID: [String: SceneSemanticsSpotEvidence] = [:]
     ) -> [ScoredTourismSpot] {
         candidates
             .map { spot in
@@ -33,6 +35,7 @@ struct CandidateScorer {
                 }
                 let hasCameraDirectionMatch = cameraDirectionSpotIDs.contains(spot.id)
                 let hasPolygonMatch = polygonValidatedSpotIDs.contains(spot.id)
+                let sceneSemanticsEvidence = sceneSemanticsEvidenceBySpotID[spot.id]
 
                 if hasTextMatch {
                     score += 45
@@ -55,12 +58,15 @@ struct CandidateScorer {
                     score += 5
                 }
 
+                score += sceneSemanticsEvidence?.scoreAdjustment ?? 0
+
                 return ScoredTourismSpot(
                     spot: spot,
                     score: score,
                     hasTextMatch: hasTextMatch,
                     hasCameraDirectionMatch: hasCameraDirectionMatch,
-                    hasPolygonMatch: hasPolygonMatch
+                    hasPolygonMatch: hasPolygonMatch,
+                    sceneSemanticsEvidence: sceneSemanticsEvidence
                 )
             }
             .sorted { $0.score > $1.score }

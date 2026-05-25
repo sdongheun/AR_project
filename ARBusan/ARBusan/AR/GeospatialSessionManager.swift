@@ -4,18 +4,24 @@ import Foundation
 @_implementationOnly import ARCore
 @_implementationOnly import ARCoreGARSession
 @_implementationOnly import ARCoreGeospatial
+@_implementationOnly import ARCoreSemantics
 
 final class GeospatialSessionManager: NSObject, CLLocationManagerDelegate {
     private let locationManager = CLLocationManager()
     private let apiKeysProvider: () -> APIKeys
     private var garSession: GARSession?
     private var isConfigured = false
+    private var isSceneSemanticsEnabled = false
+    private var lastSceneSemanticsTimestamp: TimeInterval = 0
+    private let sceneSemanticsInterval: TimeInterval = 0.25
 
     private(set) var latestSnapshot: LocationSnapshot?
     private(set) var latestStatusMessage = "ARCore Geospatial 세션을 아직 시작하지 않았습니다."
 
     var onSnapshotUpdated: ((LocationSnapshot) -> Void)?
     var onStatusChanged: ((String) -> Void)?
+    var onSceneSemanticsUpdated: ((SceneSemanticsSnapshot) -> Void)?
+    var onSceneSemanticsStatusChanged: ((String) -> Void)?
 
     init(apiKeysProvider: @escaping () -> APIKeys = { APIKeyProvider.load() }) {
         self.apiKeysProvider = apiKeysProvider
@@ -54,6 +60,13 @@ final class GeospatialSessionManager: NSObject, CLLocationManagerDelegate {
         let configuration = GARSessionConfiguration()
         configuration.geospatialMode = .enabled
         configuration.streetscapeGeometryMode = .disabled
+        if session.isSemanticModeSupported(.enabled) {
+            configuration.semanticMode = .enabled
+            isSceneSemanticsEnabled = true
+        } else {
+            isSceneSemanticsEnabled = false
+            updateSceneSemanticsStatus("Scene Semantics 미지원 기기입니다.")
+        }
 
         var configurationError: NSError?
         session.setConfiguration(configuration, error: &configurationError)
@@ -66,6 +79,9 @@ final class GeospatialSessionManager: NSObject, CLLocationManagerDelegate {
         garSession = session
         isConfigured = true
         updateStatus("ARCore Geospatial 세션이 구성되었습니다.")
+        if isSceneSemanticsEnabled {
+            updateSceneSemanticsStatus("Scene Semantics 활성화됨. semantic image 수신 대기 중입니다.")
+        }
     }
 
     func update(with frame: ARFrame) {
@@ -82,6 +98,8 @@ final class GeospatialSessionManager: NSObject, CLLocationManagerDelegate {
             updateStatus("GARFrame 업데이트 실패: \(error.localizedDescription)")
             return
         }
+
+        publishSceneSemanticsIfNeeded(from: garFrame)
 
         guard
             let earth = garFrame.earth,
@@ -104,6 +122,33 @@ final class GeospatialSessionManager: NSObject, CLLocationManagerDelegate {
         )
         publish(snapshot)
         updateStatus("VPS 위치 추정 중: 정확도 약 \(Int(transform.horizontalAccuracy))m")
+    }
+
+    private func publishSceneSemanticsIfNeeded(from garFrame: GARFrame) {
+        guard isSceneSemanticsEnabled else {
+            return
+        }
+
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - lastSceneSemanticsTimestamp >= sceneSemanticsInterval else {
+            return
+        }
+        lastSceneSemanticsTimestamp = now
+
+        guard let semanticImage = garFrame.semanticImage else {
+            updateSceneSemanticsStatus("Scene Semantics semantic image 수신 대기 중입니다.")
+            return
+        }
+
+        guard let snapshot = SceneSemanticsOverlayRenderer.render(from: semanticImage) else {
+            updateSceneSemanticsStatus("Scene Semantics overlay 생성 실패")
+            return
+        }
+
+        DispatchQueue.main.async { [onSceneSemanticsUpdated, onSceneSemanticsStatusChanged] in
+            onSceneSemanticsUpdated?(snapshot)
+            onSceneSemanticsStatusChanged?(snapshot.diagnosticText)
+        }
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
@@ -143,6 +188,12 @@ final class GeospatialSessionManager: NSObject, CLLocationManagerDelegate {
         latestStatusMessage = message
         DispatchQueue.main.async { [onStatusChanged] in
             onStatusChanged?(message)
+        }
+    }
+
+    private func updateSceneSemanticsStatus(_ message: String) {
+        DispatchQueue.main.async { [onSceneSemanticsStatusChanged] in
+            onSceneSemanticsStatusChanged?(message)
         }
     }
 }

@@ -5,58 +5,75 @@ struct ARExploreView: View {
     @State private var showsCollection = false
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            ARViewContainer()
-                .ignoresSafeArea()
+        GeometryReader { geometry in
+            ZStack(alignment: .bottom) {
+                ARViewContainer()
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .ignoresSafeArea()
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    APIKeyStatusView(statuses: appState.apiKeys.statuses)
-                    GeospatialStatusView(
-                        status: appState.geospatialStatus,
-                        coreLocationSnapshot: appState.latestCoreLocationSnapshot,
-                        geospatialSnapshot: appState.latestGeospatialLocationSnapshot
-                    )
-                    TourismDataStatusView(status: appState.tourismDataStatus)
+                if let overlayImage = appState.sceneSemanticsOverlayImage {
+                    Image(uiImage: overlayImage)
+                        .resizable()
+                        .interpolation(.none)
+                        .scaledToFill()
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .clipped()
+                        .opacity(0.55)
+                        .ignoresSafeArea()
+                        .allowsHitTesting(false)
+                }
 
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(appState.recognitionResult.title)
-                            .font(.headline)
-                        Text(appState.recognitionResult.detail)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        APIKeyStatusView(statuses: appState.apiKeys.statuses)
+                        GeospatialStatusView(
+                            status: appState.geospatialStatus,
+                            coreLocationSnapshot: appState.latestCoreLocationSnapshot,
+                            geospatialSnapshot: appState.latestGeospatialLocationSnapshot
+                        )
+                        SceneSemanticsStatusView(status: appState.sceneSemanticsStatus)
+                        TourismDataStatusView(status: appState.tourismDataStatus)
 
-                    MVPRecognitionControlView()
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(appState.recognitionResult.title)
+                                .font(.headline)
+                            Text(appState.recognitionResult.detail)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
 
-                    CandidateSelectionView(result: appState.recognitionResult) { spot in
-                        appState.selectCandidate(spot)
-                    }
+                        MVPRecognitionControlView()
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("김해 목업 건물 후보")
-                            .font(.subheadline.weight(.semibold))
-                        ForEach(appState.spots) { spot in
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(spot.name)
-                                    .font(.caption.weight(.semibold))
-                                Text("\(spot.address) / \(spot.source.displayName)")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
+                        CandidateSelectionView(result: appState.recognitionResult) { spot in
+                            appState.selectCandidate(spot)
+                        }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("김해 목업 건물 후보")
+                                .font(.subheadline.weight(.semibold))
+                            ForEach(appState.spots) { spot in
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(spot.name)
+                                        .font(.caption.weight(.semibold))
+                                    Text("\(spot.address) / \(spot.source.displayName)")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                         }
-                    }
 
-                    Button("도감 열기") {
-                        showsCollection = true
+                        Button("도감 열기") {
+                            showsCollection = true
+                        }
+                        .buttonStyle(.bordered)
                     }
-                    .buttonStyle(.bordered)
+                    .padding()
+                    .frame(width: geometry.size.width, alignment: .leading)
                 }
-                .padding()
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(width: geometry.size.width)
+                .frame(maxHeight: min(430, geometry.size.height * 0.48))
+                .background(.regularMaterial)
             }
-            .frame(maxHeight: 430)
-            .background(.regularMaterial)
         }
         .sheet(isPresented: $showsCollection) {
             CollectionBookView(spots: appState.spots, selectedSpot: appState.selectedSpot)
@@ -81,6 +98,49 @@ private struct ARViewContainer: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ uiViewController: ARSessionViewController, context: Context) {}
+}
+
+private struct SceneSemanticsStatusView: View {
+    let status: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Scene Semantics 디버그")
+                .font(.caption.weight(.semibold))
+            Text(status)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 82), alignment: .leading)],
+                alignment: .leading,
+                spacing: 6
+            ) {
+                SemanticLegendItem(color: .blue, title: "building")
+                SemanticLegendItem(color: .red, title: "sky")
+                SemanticLegendItem(color: .yellow, title: "tree")
+                SemanticLegendItem(color: .gray, title: "road")
+                SemanticLegendItem(color: .cyan, title: "water")
+            }
+        }
+    }
+}
+
+private struct SemanticLegendItem: View {
+    let color: Color
+    let title: String
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Rectangle()
+                .fill(color.opacity(0.8))
+                .frame(width: 9, height: 9)
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
 }
 
 private struct GeospatialStatusView: View {

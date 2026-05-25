@@ -27,22 +27,23 @@
 		6210DEF1E5F9F8301D39BCB9 /* CandidateScorerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EFD43C9EA369B80D30136EB /* CandidateScorerTests.swift */; };
 		65C23FE023190522FE3AD9E6 /* ARBusanApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECD728BE6794199852CB60FE /* ARBusanApp.swift */; };
 		691E24F81A545CA7B015022F /* ARSessionViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 176A6D9A524E66E5F1660B66 /* ARSessionViewController.swift */; };
-		71C9C5F38E30ED858BACD1FE /* Pods_ARBusan.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E30595C2875A391B87280C4C /* Pods_ARBusan.framework */; };
 		7C398F6AEE5E151DB70FC09D /* APIKeys.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E030A117A08223595D36A2 /* APIKeys.swift */; };
 		83CC298794C59CB252DB785D /* ARExploreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34305BA710A2F58FF0E393E3 /* ARExploreView.swift */; };
 		86FBD656E9E7B9F01E5B67D0 /* RealityKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9C6BDBD65F5F41B4E29AC0D8 /* RealityKit.framework */; };
 		8A5C20B607E66F54B70639EC /* SwiftData.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9997A22255DB4A2B06DC9654 /* SwiftData.framework */; };
 		8E766E0AF2FAF7D4BCA7A123 /* Vision.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 42017936B64E3D57C601D1F4 /* Vision.framework */; };
 		936ED82EAEAC978F407EB2CA /* VisitState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68FCF9E05E8FE78FF4222117 /* VisitState.swift */; };
-		9A020C946F169FFE52D55F56 /* Pods_ARBusanTests.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9B73602D6A3BCC6F95BF6AB7 /* Pods_ARBusanTests.framework */; };
 		9A2C46E705E9BC7F540D3A67 /* AppStatePolygonLookupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90D3B240A096A12D6848EA33 /* AppStatePolygonLookupTests.swift */; };
 		9B05FAEA79811C6D4AD265E0 /* CoreLocation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 67757602351B050E84917B7E /* CoreLocation.framework */; };
 		9FB4F7B4D0D81F0E23C5B4DE /* ARKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1BEEFAABBBBDE97B3D65763B /* ARKit.framework */; };
 		A2CA9E9B2CA16976E69DBA19 /* TourismSpotEntity.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF75EB13A6FB8209F1C5B6EB /* TourismSpotEntity.swift */; };
+		A5535A43DEA252FD7D38B824 /* Pods_ARBusan.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8166283AD161B35905C1E566 /* Pods_ARBusan.framework */; };
 		A6E235E0B1A944FF6EA011C5 /* RealityAnchorRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39DF0E4705621DEB16B3F29D /* RealityAnchorRenderer.swift */; };
+		A7F0B6ED3BDBB52DB76FEBCB /* Pods_ARBusanTests.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 2ECC29C3EA0E2E43C9FFD960 /* Pods_ARBusanTests.framework */; };
 		ACFD2C7B9394260B73C7EB47 /* APIKeyStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CCCFF3E16B9F9E0B24B976 /* APIKeyStatusView.swift */; };
 		B5BDF2E53FE1AF4CA2D4E73B /* GeospatialSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21D260256C3BC47708FAC2B8 /* GeospatialSessionManager.swift */; };
 		B8D0F1FB5A8E829DBFA20226 /* RecognitionPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1679F3B9837757C3DC24386B /* RecognitionPipeline.swift */; };
+		B9E47DFC6663045173808E77 /* SceneSemanticsSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADD79F9408CE21AB49905898 /* SceneSemanticsSnapshot.swift */; };
 		CE278E2CF97EF8E79876A4FF /* VisitRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6900F8BE2E7DA41660DE44DD /* VisitRepository.swift */; };
 		DE915522041BBBB4C04B9CA3 /* RecognitionResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC0A994209BEEAC3EE4B42C7 /* RecognitionResult.swift */; };
 		E491AE0DF4774D3193982B81 /* PermissionStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B94377B0F6A4D737C1A4D39 /* PermissionStatus.swift */; };
@@ -61,18 +62,19 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		0E5887C42E71D1745E1EA901 /* Pods-ARBusan.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ARBusan.debug.xcconfig"; path = "Target Support Files/Pods-ARBusan/Pods-ARBusan.debug.xcconfig"; sourceTree = "<group>"; };
 		0F2DF903FCD974FC53B53400 /* OCRRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OCRRecognizer.swift; sourceTree = "<group>"; };
 		1679F3B9837757C3DC24386B /* RecognitionPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecognitionPipeline.swift; sourceTree = "<group>"; };
 		176A6D9A524E66E5F1660B66 /* ARSessionViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARSessionViewController.swift; sourceTree = "<group>"; };
 		1BEEFAABBBBDE97B3D65763B /* ARKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ARKit.framework; path = System/Library/Frameworks/ARKit.framework; sourceTree = SDKROOT; };
 		20F5E8A02E2E4F8ACD84B20B /* VisualLandmarkRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisualLandmarkRecognizer.swift; sourceTree = "<group>"; };
 		21D260256C3BC47708FAC2B8 /* GeospatialSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeospatialSessionManager.swift; sourceTree = "<group>"; };
+		2ECC29C3EA0E2E43C9FFD960 /* Pods_ARBusanTests.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_ARBusanTests.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		34305BA710A2F58FF0E393E3 /* ARExploreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARExploreView.swift; sourceTree = "<group>"; };
 		39DF0E4705621DEB16B3F29D /* RealityAnchorRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealityAnchorRenderer.swift; sourceTree = "<group>"; };
 		3D6991536C9EC37416447648 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		42017936B64E3D57C601D1F4 /* Vision.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Vision.framework; path = System/Library/Frameworks/Vision.framework; sourceTree = SDKROOT; };
 		436B845C11E88760A1D14EE6 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		437C32C5935DE0A2BE4FF7DE /* Pods-ARBusanTests.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ARBusanTests.debug.xcconfig"; path = "Target Support Files/Pods-ARBusanTests/Pods-ARBusanTests.debug.xcconfig"; sourceTree = "<group>"; };
 		494635BC1A7B61CEA73DF29E /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
 		576FC25B48053261FDE3B2E6 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		5964D7CE5BBC53E7B950D19C /* ARBusan.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ARBusan.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -82,13 +84,13 @@
 		68B56749C003FF8BEF153564 /* TourAPIAreaRequest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TourAPIAreaRequest.swift; sourceTree = "<group>"; };
 		68FCF9E05E8FE78FF4222117 /* VisitState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisitState.swift; sourceTree = "<group>"; };
 		6900F8BE2E7DA41660DE44DD /* VisitRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisitRepository.swift; sourceTree = "<group>"; };
-		69A4E8458620F69210319299 /* Pods-ARBusanTests.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ARBusanTests.debug.xcconfig"; path = "Target Support Files/Pods-ARBusanTests/Pods-ARBusanTests.debug.xcconfig"; sourceTree = "<group>"; };
 		6B204D4D867B80E2A2A6AF5C /* VWorldClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VWorldClientTests.swift; sourceTree = "<group>"; };
 		720E65E6365B610695833BFD /* MockTourismSpots.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockTourismSpots.swift; sourceTree = "<group>"; };
 		7DCBF102F4329D2C8C8B3747 /* ARBusanTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ARBusanTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		8166283AD161B35905C1E566 /* Pods_ARBusan.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_ARBusan.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		8305A11BDD8F08EA07A1F426 /* TourAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TourAPIClient.swift; sourceTree = "<group>"; };
+		8609A4A5C83D63A4B7064F4A /* Pods-ARBusan.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ARBusan.debug.xcconfig"; path = "Target Support Files/Pods-ARBusan/Pods-ARBusan.debug.xcconfig"; sourceTree = "<group>"; };
 		86E1BEFF4915330160AE3E1A /* CameraHeadingCalculatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraHeadingCalculatorTests.swift; sourceTree = "<group>"; };
-		885E22A9E5842F4C953C4136 /* Pods-ARBusan.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ARBusan.release.xcconfig"; path = "Target Support Files/Pods-ARBusan/Pods-ARBusan.release.xcconfig"; sourceTree = "<group>"; };
 		8989B3268BB30B85032504D3 /* TourismSpot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TourismSpot.swift; sourceTree = "<group>"; };
 		8DD2933412888BDFAA02FDE4 /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
 		8E0B7DAD76CBD4F6A2BD0087 /* CandidateSelectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CandidateSelectionView.swift; sourceTree = "<group>"; };
@@ -96,11 +98,12 @@
 		90D3B240A096A12D6848EA33 /* AppStatePolygonLookupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStatePolygonLookupTests.swift; sourceTree = "<group>"; };
 		9997A22255DB4A2B06DC9654 /* SwiftData.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftData.framework; path = System/Library/Frameworks/SwiftData.framework; sourceTree = SDKROOT; };
 		9B2F58EBC16053C84F1F7741 /* MVPRecognitionControlView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MVPRecognitionControlView.swift; sourceTree = "<group>"; };
-		9B73602D6A3BCC6F95BF6AB7 /* Pods_ARBusanTests.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_ARBusanTests.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		9C6BDBD65F5F41B4E29AC0D8 /* RealityKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = RealityKit.framework; path = System/Library/Frameworks/RealityKit.framework; sourceTree = SDKROOT; };
+		9F140144E01AF55B96ACB16C /* Pods-ARBusanTests.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ARBusanTests.release.xcconfig"; path = "Target Support Files/Pods-ARBusanTests/Pods-ARBusanTests.release.xcconfig"; sourceTree = "<group>"; };
+		A1989F412C9AA2854626F097 /* Pods-ARBusan.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ARBusan.release.xcconfig"; path = "Target Support Files/Pods-ARBusan/Pods-ARBusan.release.xcconfig"; sourceTree = "<group>"; };
 		AD485DEC85E1FE8A7281CD65 /* CandidateScorer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CandidateScorer.swift; sourceTree = "<group>"; };
+		ADD79F9408CE21AB49905898 /* SceneSemanticsSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneSemanticsSnapshot.swift; sourceTree = "<group>"; };
 		B7E030A117A08223595D36A2 /* APIKeys.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIKeys.swift; sourceTree = "<group>"; };
-		C1B75E7CBAB5143B0E1C57CA /* Pods-ARBusanTests.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ARBusanTests.release.xcconfig"; path = "Target Support Files/Pods-ARBusanTests/Pods-ARBusanTests.release.xcconfig"; sourceTree = "<group>"; };
 		C1CCCFF3E16B9F9E0B24B976 /* APIKeyStatusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIKeyStatusView.swift; sourceTree = "<group>"; };
 		CEDEA81D6A17B3DC0A507522 /* CameraDirectionCandidateProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraDirectionCandidateProvider.swift; sourceTree = "<group>"; };
 		CEFB2B3C248DAEC56E3E9272 /* VWorldClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VWorldClient.swift; sourceTree = "<group>"; };
@@ -108,12 +111,19 @@
 		DC0A994209BEEAC3EE4B42C7 /* RecognitionResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecognitionResult.swift; sourceTree = "<group>"; };
 		DEE8767B9A27B53F27D6586A /* CollectionBookView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollectionBookView.swift; sourceTree = "<group>"; };
 		DF75EB13A6FB8209F1C5B6EB /* TourismSpotEntity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TourismSpotEntity.swift; sourceTree = "<group>"; };
-		E30595C2875A391B87280C4C /* Pods_ARBusan.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_ARBusan.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		E3C1EB7D834ACCD23C5208F0 /* LocationSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationSnapshot.swift; sourceTree = "<group>"; };
 		ECD728BE6794199852CB60FE /* ARBusanApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARBusanApp.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		2865D96981FDDC020F7583A7 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A7F0B6ED3BDBB52DB76FEBCB /* Pods_ARBusanTests.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		59BA39DDD96BA0E588C76220 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -123,21 +133,24 @@
 				8E766E0AF2FAF7D4BCA7A123 /* Vision.framework in Frameworks */,
 				9B05FAEA79811C6D4AD265E0 /* CoreLocation.framework in Frameworks */,
 				8A5C20B607E66F54B70639EC /* SwiftData.framework in Frameworks */,
-				71C9C5F38E30ED858BACD1FE /* Pods_ARBusan.framework in Frameworks */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		E73585B244E317CD6059E9EE /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				9A020C946F169FFE52D55F56 /* Pods_ARBusanTests.framework in Frameworks */,
+				A5535A43DEA252FD7D38B824 /* Pods_ARBusan.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		0486F640B43A5D73B969086C /* Pods */ = {
+			isa = PBXGroup;
+			children = (
+				8609A4A5C83D63A4B7064F4A /* Pods-ARBusan.debug.xcconfig */,
+				A1989F412C9AA2854626F097 /* Pods-ARBusan.release.xcconfig */,
+				437C32C5935DE0A2BE4FF7DE /* Pods-ARBusanTests.debug.xcconfig */,
+				9F140144E01AF55B96ACB16C /* Pods-ARBusanTests.release.xcconfig */,
+			);
+			path = Pods;
+			sourceTree = "<group>";
+		};
 		0A4EC039C8ECB79B64ADB34C /* App */ = {
 			isa = PBXGroup;
 			children = (
@@ -163,17 +176,6 @@
 				8305A11BDD8F08EA07A1F426 /* TourAPIClient.swift */,
 			);
 			path = TourAPI;
-			sourceTree = "<group>";
-		};
-		439864A5F2BEC20BE1285CCE /* Pods */ = {
-			isa = PBXGroup;
-			children = (
-				0E5887C42E71D1745E1EA901 /* Pods-ARBusan.debug.xcconfig */,
-				885E22A9E5842F4C953C4136 /* Pods-ARBusan.release.xcconfig */,
-				69A4E8458620F69210319299 /* Pods-ARBusanTests.debug.xcconfig */,
-				C1B75E7CBAB5143B0E1C57CA /* Pods-ARBusanTests.release.xcconfig */,
-			);
-			path = Pods;
 			sourceTree = "<group>";
 		};
 		55F800E240A35202EB42C5A8 /* Products */ = {
@@ -210,8 +212,8 @@
 				9C6BDBD65F5F41B4E29AC0D8 /* RealityKit.framework */,
 				9997A22255DB4A2B06DC9654 /* SwiftData.framework */,
 				42017936B64E3D57C601D1F4 /* Vision.framework */,
-				E30595C2875A391B87280C4C /* Pods_ARBusan.framework */,
-				9B73602D6A3BCC6F95BF6AB7 /* Pods_ARBusanTests.framework */,
+				8166283AD161B35905C1E566 /* Pods_ARBusan.framework */,
+				2ECC29C3EA0E2E43C9FFD960 /* Pods_ARBusanTests.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -251,7 +253,7 @@
 				B4D0064FD8D762A142A82630 /* Config */,
 				6BAE9E0C562EB8F9C053D3E7 /* Frameworks */,
 				55F800E240A35202EB42C5A8 /* Products */,
-				439864A5F2BEC20BE1285CCE /* Pods */,
+				0486F640B43A5D73B969086C /* Pods */,
 			);
 			sourceTree = "<group>";
 		};
@@ -326,6 +328,7 @@
 				D4B48ED7C36C89A0059CC6C6 /* CameraHeadingCalculator.swift */,
 				21D260256C3BC47708FAC2B8 /* GeospatialSessionManager.swift */,
 				39DF0E4705621DEB16B3F29D /* RealityAnchorRenderer.swift */,
+				ADD79F9408CE21AB49905898 /* SceneSemanticsSnapshot.swift */,
 			);
 			path = AR;
 			sourceTree = "<group>";
@@ -345,12 +348,12 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 88937E3B58BE4BFACA450DCA /* Build configuration list for PBXNativeTarget "ARBusan" */;
 			buildPhases = (
-				4183E682D61BB86D463E7085 /* [CP] Check Pods Manifest.lock */,
+				1584DEA4BD3AEF751DDA64F6 /* [CP] Check Pods Manifest.lock */,
 				8B39F1837E8CBF5DC7FDAABA /* Sources */,
 				9630C0C03F6FE66F196C8F78 /* Resources */,
 				59BA39DDD96BA0E588C76220 /* Frameworks */,
-				2DC9BCE2F0B4851267CC770C /* [CP] Embed Pods Frameworks */,
-				9A1D09556148351EF15D34E0 /* [CP] Copy Pods Resources */,
+				E40E411F7D985B7AA38980B8 /* [CP] Embed Pods Frameworks */,
+				19F139C001F2352ED9F8BA6E /* [CP] Copy Pods Resources */,
 			);
 			buildRules = (
 			);
@@ -365,11 +368,11 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 95458C92C23D0500CF5AD3A6 /* Build configuration list for PBXNativeTarget "ARBusanTests" */;
 			buildPhases = (
-				3935F88268FA194E19516BF1 /* [CP] Check Pods Manifest.lock */,
+				6C72FB545E0C25DD79518E2A /* [CP] Check Pods Manifest.lock */,
 				E4F6D52858B288E6D3C3B20D /* Sources */,
-				E73585B244E317CD6059E9EE /* Frameworks */,
-				90DF0EAB10611BE600152C99 /* [CP] Embed Pods Frameworks */,
-				2B9B75452EA6B4808E299464 /* [CP] Copy Pods Resources */,
+				2865D96981FDDC020F7583A7 /* Frameworks */,
+				2AB7311C1FC8DD435A5100FD /* [CP] Embed Pods Frameworks */,
+				4B6D05037A7CECA5E669FFF0 /* [CP] Copy Pods Resources */,
 			);
 			buildRules = (
 			);
@@ -422,71 +425,7 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		2B9B75452EA6B4808E299464 /* [CP] Copy Pods Resources */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-ARBusanTests/Pods-ARBusanTests-resources-${CONFIGURATION}-input-files.xcfilelist",
-			);
-			inputPaths = (
-			);
-			name = "[CP] Copy Pods Resources";
-			outputFileListPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-ARBusanTests/Pods-ARBusanTests-resources-${CONFIGURATION}-output-files.xcfilelist",
-			);
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-ARBusanTests/Pods-ARBusanTests-resources.sh\"\n";
-			showEnvVarsInLog = 0;
-		};
-		2DC9BCE2F0B4851267CC770C /* [CP] Embed Pods Frameworks */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-ARBusan/Pods-ARBusan-frameworks-${CONFIGURATION}-input-files.xcfilelist",
-			);
-			inputPaths = (
-			);
-			name = "[CP] Embed Pods Frameworks";
-			outputFileListPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-ARBusan/Pods-ARBusan-frameworks-${CONFIGURATION}-output-files.xcfilelist",
-			);
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-ARBusan/Pods-ARBusan-frameworks.sh\"\n";
-			showEnvVarsInLog = 0;
-		};
-		3935F88268FA194E19516BF1 /* [CP] Check Pods Manifest.lock */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
-				"${PODS_ROOT}/Manifest.lock",
-			);
-			name = "[CP] Check Pods Manifest.lock";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-				"$(DERIVED_FILE_DIR)/Pods-ARBusanTests-checkManifestLockResult.txt",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
-			showEnvVarsInLog = 0;
-		};
-		4183E682D61BB86D463E7085 /* [CP] Check Pods Manifest.lock */ = {
+		1584DEA4BD3AEF751DDA64F6 /* [CP] Check Pods Manifest.lock */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -508,7 +447,28 @@
 			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
 			showEnvVarsInLog = 0;
 		};
-		90DF0EAB10611BE600152C99 /* [CP] Embed Pods Frameworks */ = {
+		19F139C001F2352ED9F8BA6E /* [CP] Copy Pods Resources */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-ARBusan/Pods-ARBusan-resources-${CONFIGURATION}-input-files.xcfilelist",
+			);
+			inputPaths = (
+			);
+			name = "[CP] Copy Pods Resources";
+			outputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-ARBusan/Pods-ARBusan-resources-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-ARBusan/Pods-ARBusan-resources.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
+		2AB7311C1FC8DD435A5100FD /* [CP] Embed Pods Frameworks */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -529,25 +489,68 @@
 			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-ARBusanTests/Pods-ARBusanTests-frameworks.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
-		9A1D09556148351EF15D34E0 /* [CP] Copy Pods Resources */ = {
+		4B6D05037A7CECA5E669FFF0 /* [CP] Copy Pods Resources */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 			);
 			inputFileListPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-ARBusan/Pods-ARBusan-resources-${CONFIGURATION}-input-files.xcfilelist",
+				"${PODS_ROOT}/Target Support Files/Pods-ARBusanTests/Pods-ARBusanTests-resources-${CONFIGURATION}-input-files.xcfilelist",
 			);
 			inputPaths = (
 			);
 			name = "[CP] Copy Pods Resources";
 			outputFileListPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-ARBusan/Pods-ARBusan-resources-${CONFIGURATION}-output-files.xcfilelist",
+				"${PODS_ROOT}/Target Support Files/Pods-ARBusanTests/Pods-ARBusanTests-resources-${CONFIGURATION}-output-files.xcfilelist",
 			);
 			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-ARBusan/Pods-ARBusan-resources.sh\"\n";
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-ARBusanTests/Pods-ARBusanTests-resources.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
+		6C72FB545E0C25DD79518E2A /* [CP] Check Pods Manifest.lock */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
+				"${PODS_ROOT}/Manifest.lock",
+			);
+			name = "[CP] Check Pods Manifest.lock";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/Pods-ARBusanTests-checkManifestLockResult.txt",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+			showEnvVarsInLog = 0;
+		};
+		E40E411F7D985B7AA38980B8 /* [CP] Embed Pods Frameworks */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-ARBusan/Pods-ARBusan-frameworks-${CONFIGURATION}-input-files.xcfilelist",
+			);
+			inputPaths = (
+			);
+			name = "[CP] Embed Pods Frameworks";
+			outputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-ARBusan/Pods-ARBusan-frameworks-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-ARBusan/Pods-ARBusan-frameworks.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
 /* End PBXShellScriptBuildPhase section */
@@ -577,6 +580,7 @@
 				A6E235E0B1A944FF6EA011C5 /* RealityAnchorRenderer.swift in Sources */,
 				B8D0F1FB5A8E829DBFA20226 /* RecognitionPipeline.swift in Sources */,
 				DE915522041BBBB4C04B9CA3 /* RecognitionResult.swift in Sources */,
+				B9E47DFC6663045173808E77 /* SceneSemanticsSnapshot.swift in Sources */,
 				1B2F9463791F8452B3A1FCF2 /* TourAPIAreaRequest.swift in Sources */,
 				4236B7EA554BA6BC155EB78B /* TourAPIClient.swift in Sources */,
 				2FE822F2A24B515C5DBF089B /* TourismSpot.swift in Sources */,
@@ -682,7 +686,7 @@
 		};
 		25A42F9467E189272872530D /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 69A4E8458620F69210319299 /* Pods-ARBusanTests.debug.xcconfig */;
+			baseConfigurationReference = 437C32C5935DE0A2BE4FF7DE /* Pods-ARBusanTests.debug.xcconfig */;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -698,7 +702,7 @@
 		};
 		301E84B92CA036A24B951F36 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = C1B75E7CBAB5143B0E1C57CA /* Pods-ARBusanTests.release.xcconfig */;
+			baseConfigurationReference = 9F140144E01AF55B96ACB16C /* Pods-ARBusanTests.release.xcconfig */;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				LD_RUNPATH_SEARCH_PATHS = (

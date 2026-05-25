@@ -1,5 +1,6 @@
 import CoreLocation
 import Foundation
+import UIKit
 
 @MainActor
 final class AppState: ObservableObject {
@@ -14,6 +15,9 @@ final class AppState: ObservableObject {
     @Published var latestCoreLocationSnapshot: LocationSnapshot?
     @Published var latestGeospatialLocationSnapshot: LocationSnapshot?
     @Published var geospatialStatus = "ARCore Geospatial 세션을 아직 시작하지 않았습니다."
+    @Published var sceneSemanticsOverlayImage: UIImage?
+    @Published var sceneSemanticsStatus = "Scene Semantics를 아직 시작하지 않았습니다."
+    @Published var sceneSemanticsScoringDiagnostics = "Scene Semantics 점수 보정을 아직 계산하지 않았습니다."
     @Published var cameraHeadingDegrees: Double?
     @Published var cameraHeadingSampleCount = 0
     @Published var cameraHeadingLastUpdatedAt: Date?
@@ -48,6 +52,8 @@ final class AppState: ObservableObject {
     private var polygonLookupTask: Task<Void, Never>?
     private var polygonLookupInFlightSpotID: TourismSpot.ID?
     private var polygonLookupNotFoundSpotIDs: Set<TourismSpot.ID> = []
+    private var latestSceneSemanticsSnapshot: SceneSemanticsSnapshot?
+    private var sceneSemanticsEvidenceBySpotID: [TourismSpot.ID: SceneSemanticsSpotEvidence] = [:]
     let geospatialSessionManager: GeospatialSessionManager
 
     init(
@@ -86,6 +92,19 @@ final class AppState: ObservableObject {
         self.geospatialSessionManager.onStatusChanged = { [weak self] status in
             Task { @MainActor in
                 self?.geospatialStatus = status
+            }
+        }
+        self.geospatialSessionManager.onSceneSemanticsUpdated = { [weak self] snapshot in
+            Task { @MainActor in
+                self?.sceneSemanticsOverlayImage = snapshot.overlayImage
+                self?.latestSceneSemanticsSnapshot = snapshot
+                self?.refreshSceneSemanticsScoring()
+                self?.runRecognition()
+            }
+        }
+        self.geospatialSessionManager.onSceneSemanticsStatusChanged = { [weak self] status in
+            Task { @MainActor in
+                self?.sceneSemanticsStatus = status
             }
         }
 
@@ -161,6 +180,8 @@ final class AppState: ObservableObject {
             locationConfidence: effectiveSpatialConfidence,
             cameraDirectionSpotIDs: Set([cameraDirectionSpotID].compactMap { $0 }),
             polygonValidatedSpotIDs: Set([polygonValidatedSpotID].compactMap { $0 })
+                .union(sceneSemanticsEvidenceBySpotID.compactMap { $0.value.hasBuildingSupport ? $0.key : nil }),
+            sceneSemanticsEvidenceBySpotID: sceneSemanticsEvidenceBySpotID
         )
 
         if case let .recognized(spot, _, _) = recognitionResult {
@@ -223,6 +244,7 @@ final class AppState: ObservableObject {
         cameraDirectionStatus = "\(candidate.spot.name) 방향 후보 / 각도 차이 \(Int(candidate.headingDifferenceDegrees))도 / 거리 \(Int(candidate.distanceMeters))m"
         updateSpatialAlignmentDiagnostics(for: candidate)
         updateBuildingPolygon(for: candidate.spot)
+        refreshSceneSemanticsScoring()
 
         if previousCandidateID != candidate.spot.id {
             runRecognition()
@@ -236,6 +258,7 @@ final class AppState: ObservableObject {
             polygonValidatedSpotID = spot.id
             polygonValidationStatus = "\(spot.name) 브이월드 Polygon 확보 / 외곽 좌표 \(polygon.vertexCount)개 / 높이 \(resolvedHeight.displayText)"
             updateSpatialAlignmentDiagnostics(for: spot, polygon: polygon)
+            refreshSceneSemanticsScoring()
             return
         }
 
@@ -296,6 +319,7 @@ final class AppState: ObservableObject {
                         self.appendPolygonLookupLog("앱 높이 결정 사유: \(resolvedHeight.explanation)")
                         self.polygonValidationStatus = "\(spot.name) 브이월드 Polygon 확보 / 외곽 좌표 \(polygon.vertexCount)개 / 높이 \(resolvedHeight.displayText)"
                         self.updateSpatialAlignmentDiagnostics(for: spot, polygon: polygon)
+                        self.refreshSceneSemanticsScoring()
                     } else {
                         self.polygonLookupNotFoundSpotIDs.insert(spot.id)
                         self.polygonValidatedSpotID = nil
@@ -350,6 +374,8 @@ final class AppState: ObservableObject {
         polygonLookupInFlightSpotID = nil
         polygonLookupNotFoundSpotIDs = []
         resolvedBuildingHeightsBySpotID = [:]
+        sceneSemanticsEvidenceBySpotID = [:]
+        sceneSemanticsScoringDiagnostics = "후보 초기화로 Scene Semantics 점수 보정도 초기화했습니다."
         cameraDirectionSpotID = nil
         selectedSpot = nil
         polygonLookupTask?.cancel()
@@ -499,7 +525,72 @@ final class AppState: ObservableObject {
         let verticalRange = projectedPoints.map(\.verticalDeltaDegrees).rangeDescription
         let visibleText = intersectsView ? "시야 교차" : "시야 밖"
 
-        polygonProjectionDiagnostics = "\(spot.name) 화면 투영: \(visibleText) / 화면 안 외곽점 \(insideCount)/\(projectedPoints.count)개 / 수평각 \(horizontalRange) / 수직각 \(verticalRange) / FOV \(Int(projectionHorizontalFOVDegrees))x\(Int(projectionVerticalFOVDegrees))도"
+        var message = "\(spot.name) 화면 투영: \(visibleText) / 화면 안 외곽점 \(insideCount)/\(projectedPoints.count)개 / 수평각 \(horizontalRange) / 수직각 \(verticalRange) / FOV \(Int(projectionHorizontalFOVDegrees))x\(Int(projectionVerticalFOVDegrees))도"
+        if let evidence = sceneSemanticsEvidenceBySpotID[spot.id] {
+            message += " / \(evidence.diagnosticText)"
+        }
+        polygonProjectionDiagnostics = message
+    }
+
+    private func refreshSceneSemanticsScoring() {
+        guard let snapshot = latestSceneSemanticsSnapshot else {
+            sceneSemanticsEvidenceBySpotID = [:]
+            sceneSemanticsScoringDiagnostics = "Scene Semantics semantic image를 아직 받지 못했습니다."
+            return
+        }
+
+        guard let latestLocationSnapshot,
+              let heading = cameraHeadingDegrees,
+              let pose = cameraPoseSnapshot else {
+            sceneSemanticsEvidenceBySpotID = [:]
+            sceneSemanticsScoringDiagnostics = "위치/heading/pose 중 일부가 없어 Scene Semantics 점수 보정을 계산하지 못했습니다."
+            return
+        }
+
+        let visibleSpotIDs = Set(spots.map(\.id))
+        let evidenceBySpotID = buildingPolygonsBySpotID.reduce(into: [TourismSpot.ID: SceneSemanticsSpotEvidence]()) { partialResult, item in
+            let spotID = item.key
+            let polygon = item.value
+            guard visibleSpotIDs.contains(spotID) else {
+                return
+            }
+
+            let projectedPolygon = polygon.rings
+                .flatMap { $0 }
+                .map {
+                    projectCoordinate(
+                        $0,
+                        from: latestLocationSnapshot.coordinate,
+                        headingDegrees: heading,
+                        pitchDegrees: pose.pitchDegrees
+                    )
+                }
+            guard polygonIntersectsView(projectedPolygon) else {
+                return
+            }
+
+            let normalizedPoints = projectedPolygon.map {
+                CGPoint(x: $0.screenX, y: $0.screenY)
+            }
+            if let evidence = snapshot.evidence(in: normalizedPoints) {
+                partialResult[spotID] = evidence
+            }
+        }
+
+        sceneSemanticsEvidenceBySpotID = evidenceBySpotID
+
+        if evidenceBySpotID.isEmpty {
+            sceneSemanticsScoringDiagnostics = "화면에 투영된 Polygon 중 Scene Semantics 점수 보정 대상이 없습니다."
+            return
+        }
+
+        let spotNamesByID = Dictionary(uniqueKeysWithValues: spots.map { ($0.id, $0.name) })
+        sceneSemanticsScoringDiagnostics = evidenceBySpotID
+            .sorted { $0.value.scoreAdjustment > $1.value.scoreAdjustment }
+            .map { spotID, evidence in
+                "\(spotNamesByID[spotID] ?? spotID): \(evidence.diagnosticText)"
+            }
+            .joined(separator: "\n")
     }
 
     private func projectCoordinate(
