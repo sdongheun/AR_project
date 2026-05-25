@@ -216,6 +216,87 @@ Scene Semantics:
 - 화면 비율/렌즈/FOV를 더 정확히 반영
 - 건물 외벽 라벨 위치가 더 자연스러워짐
 
+진행 원칙:
+
+- 아래 체크리스트는 한 번에 모두 진행하지 않는다.
+- 각 단계 구현 후 사용자가 실기 테스트 결과를 알려준다.
+- 테스트 결과가 기대와 다르면 다음 단계로 넘어가지 않고 해당 단계의 가정부터 수정한다.
+- 기존 `heading + pitch + FOV` 방식은 바로 제거하지 않고, projection matrix 방식과 병렬 로그로 비교한다.
+
+체크리스트:
+
+```text
+[x] 6.4.1 ARFrame camera matrix 디버그 로그 추가
+    목적:
+        ARFrame에서 view/projection matrix, camera transform, viewport size, orientation을 안정적으로 읽는지 확인한다.
+    구현:
+        - ARSessionViewController에서 ARFrame.camera projection/view/transform 값 수집
+        - UI 로그에 matrix 수신 여부, 화면 크기, orientation, tracking 상태 표시
+        - 구현 완료. 실기 테스트 결과 확인 전까지 다음 단계로 넘어가지 않는다.
+    사용자 테스트 확인:
+        - 기기 실행 시 matrix 로그가 실시간으로 갱신되는가?
+        - 세로 화면에서 orientation/viewport 값이 예상대로 나오는가?
+        - 카메라를 움직일 때 transform 값이 변하는가?
+
+[x] 6.4.2 좌표계 기준점 설정 및 local ENU 변환 로그
+    목적:
+        TourAPI/목업/VWorld 위도경도를 AR world에 넣기 전, 현재 위치 기준 동/북/상대좌표로 안정적으로 바꾸는지 확인한다.
+    구현:
+        - 현재 위치를 origin으로 설정
+        - POI/Polygon 좌표를 east/north/up 로 변환
+        - 기존 bearing/distance 값과 ENU 거리/방향이 비슷한지 로그 비교
+        - 구현 완료. 실기 테스트 결과 확인 전까지 다음 단계로 넘어가지 않는다.
+    사용자 테스트 확인:
+        - 내가 바라보는 목업 건물의 east/north 방향이 상식적으로 맞는가?
+        - 거리값이 기존 거리 로그와 크게 다르지 않은가?
+
+[x] 6.4.3 기존 FOV 투영과 projection matrix 투영 병렬 비교
+    목적:
+        새 projection 좌표가 실제 화면에서 기존 방식보다 나은지 비교한다.
+    구현:
+        - 기존 heading/FOV 라벨 좌표 유지
+        - projection matrix 기반 후보 좌표를 별도 로그로 출력
+        - UI에 두 좌표의 x/y 차이 표시
+        - 구현 완료. 실기 테스트 결과 확인 전까지 다음 단계로 넘어가지 않는다.
+    사용자 테스트 확인:
+        - 실제 건물을 볼 때 projection 좌표가 라벨 위치에 더 가까운가?
+        - 좌우/상하 중 어느 축이 더 틀어지는가?
+        - 실내/실외에서 차이가 커지는가?
+
+[ ] 6.4.4 projection matrix 좌표를 임시 라벨로 표시
+    목적:
+        로그만으로 판단하기 어려운 좌표 차이를 화면에서 직접 비교한다.
+    구현:
+        - 기존 라벨은 유지
+        - projection matrix 좌표에는 작은 디버그 마커 또는 보조 라벨 표시
+        - 두 좌표가 겹치면 하나로 보이도록 단순 처리
+    사용자 테스트 확인:
+        - 디버그 마커가 실제 건물 위치에 더 자연스럽게 붙는가?
+        - 기기 회전/움직임에서 마커가 과하게 튀지 않는가?
+
+[ ] 6.4.5 라벨 좌표 계산을 projection matrix 방식으로 전환
+    목적:
+        6.4.3~6.4.4에서 projection 방식이 더 낫다는 테스트 결과가 확인된 뒤 실제 라벨 기준을 교체한다.
+    구현:
+        - 기본 라벨 좌표를 projection matrix 방식으로 변경
+        - 기존 heading/FOV 방식은 fallback으로 유지
+        - Scene Semantics는 계속 라벨 위치 보정용으로만 사용
+    사용자 테스트 확인:
+        - 기존보다 라벨이 건물 근처에 안정적으로 뜨는가?
+        - Scene Semantics가 없어도 fallback 라벨이 표시되는가?
+
+[ ] 6.4.6 projection 기반 라벨 안정화
+    목적:
+        실제 사용감을 위해 위치 흔들림과 표시 조건을 정리한다.
+    구현:
+        - smoothing 계수 조정
+        - 화면 밖/가장자리 처리
+        - 근거리/중거리/원거리별 라벨 위치와 크기 조정
+    사용자 테스트 확인:
+        - 걷거나 손을 조금 흔들어도 라벨이 과하게 튀지 않는가?
+        - 가까운 건물과 먼 관광지 모두 위치감이 자연스러운가?
+```
+
 ### 6.5 Streetscape Geometry 높이/mesh 보정
 
 VPS/Street View 지원 지역에서만 기대한다.

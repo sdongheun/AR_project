@@ -155,6 +155,9 @@ private struct ARViewContainer: UIViewControllerRepresentable {
         viewController.onCameraPoseUpdated = { pose in
             appState.updateCameraPose(pose)
         }
+        viewController.onCameraProjectionUpdated = { projection in
+            appState.updateCameraProjection(projection)
+        }
         return viewController
     }
 

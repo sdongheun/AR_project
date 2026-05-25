@@ -63,4 +63,26 @@ final class AppStateHeadingDiagnosticsTests: XCTestCase {
         XCTAssertTrue(appState.cameraPoseDiagnostics.contains("pitch 10도"))
         XCTAssertTrue(appState.cameraPoseDiagnostics.contains("roll -5도"))
     }
+
+    func testCameraProjectionUpdatesMatrixDiagnostics() {
+        let appState = AppState()
+        let projection = CameraProjectionSnapshot(
+            timestamp: 1,
+            viewportWidth: 390,
+            viewportHeight: 844,
+            interfaceOrientation: "portrait",
+            trackingState: "normal",
+            cameraTransformTranslation: SIMD3<Double>(1, 2, 3),
+            viewMatrixColumnZ: SIMD4<Double>(0, 0, 1, 0),
+            projectionMatrixDiagonal: SIMD2<Double>(2.1, 1.2)
+        )
+
+        appState.updateCameraProjection(projection)
+
+        XCTAssertEqual(appState.cameraProjectionSnapshot, projection)
+        XCTAssertTrue(appState.cameraProjectionDiagnostics.contains("matrix 수신"))
+        XCTAssertTrue(appState.cameraProjectionDiagnostics.contains("390x844"))
+        XCTAssertTrue(appState.cameraProjectionDiagnostics.contains("portrait"))
+        XCTAssertTrue(appState.cameraProjectionDiagnostics.contains("normal"))
+    }
 }

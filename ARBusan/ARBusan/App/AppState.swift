@@ -37,10 +37,14 @@ final class AppState: ObservableObject {
     @Published var cameraHeadingDiagnostics = "카메라 heading 샘플을 아직 받지 못했습니다."
     @Published var cameraPoseSnapshot: CameraPoseSnapshot?
     @Published var cameraPoseDiagnostics = "AR camera pose 샘플을 아직 받지 못했습니다."
+    @Published var cameraProjectionSnapshot: CameraProjectionSnapshot?
+    @Published var cameraProjectionDiagnostics = "ARFrame camera matrix 샘플을 아직 받지 못했습니다."
     @Published var effectiveSpatialConfidence: RecognitionConfidence = .high
     @Published var spatialTrackingDiagnostics = "위치/heading 안정도 샘플을 아직 받지 못했습니다."
     @Published var spatialAlignmentDiagnostics = "선택 Polygon과 카메라 heading 정렬을 아직 계산하지 않았습니다."
+    @Published var localCoordinateDiagnostics = "local ENU 좌표 변환을 아직 계산하지 않았습니다."
     @Published var polygonProjectionDiagnostics = "선택 Polygon 화면 투영을 아직 계산하지 않았습니다."
+    @Published var matrixProjectionComparisonDiagnostics = "projection matrix 비교 좌표를 아직 계산하지 않았습니다."
     @Published var cameraDirectionSpotID: TourismSpot.ID?
     @Published var cameraDirectionStatus = "카메라 방향 후보를 아직 계산하지 않았습니다."
     @Published var polygonValidationStatus = "Polygon 자동 후보를 아직 계산하지 않았습니다."
@@ -99,6 +103,8 @@ final class AppState: ObservableObject {
                 self?.refreshSpatialTrackingConfidence()
                 self?.applyNearbySpotFilter()
                 self?.updateCameraDirectionCandidate()
+                self?.refreshLocalCoordinateDiagnostics()
+                self?.refreshMatrixProjectionComparisonDiagnostics()
             }
         }
         self.geospatialSessionManager.onStatusChanged = { [weak self] status in
@@ -170,6 +176,8 @@ final class AppState: ObservableObject {
 
         refreshSpatialTrackingConfidence()
         updateCameraDirectionCandidate()
+        refreshLocalCoordinateDiagnostics()
+        refreshMatrixProjectionComparisonDiagnostics()
         runRecognition()
     }
 
@@ -177,6 +185,13 @@ final class AppState: ObservableObject {
         cameraPoseSnapshot = pose
         cameraPoseDiagnostics = "pose 수신 / pitch \(Int(pose.pitchDegrees))도 / yaw \(Int(pose.yawDegrees))도 / roll \(Int(pose.rollDegrees))도 / position x \(pose.positionX.formatted(.number.precision(.fractionLength(2)))) y \(pose.positionY.formatted(.number.precision(.fractionLength(2)))) z \(pose.positionZ.formatted(.number.precision(.fractionLength(2))))"
         updateCameraHeading(pose.headingDegrees)
+    }
+
+    func updateCameraProjection(_ projection: CameraProjectionSnapshot) {
+        cameraProjectionSnapshot = projection
+        cameraProjectionDiagnostics = projection.diagnosticText
+        refreshLocalCoordinateDiagnostics()
+        refreshMatrixProjectionComparisonDiagnostics()
     }
 
     func runMockRecognition() {
@@ -218,7 +233,9 @@ final class AppState: ObservableObject {
             cameraDirectionStatus = "카메라 heading을 아직 받지 못했습니다."
             polygonValidationStatus = "카메라 heading이 없어 Polygon 자동 후보를 계산할 수 없습니다."
             spatialAlignmentDiagnostics = "카메라 heading이 없어 선택 Polygon 정렬을 계산할 수 없습니다."
+            refreshLocalCoordinateDiagnostics()
             polygonProjectionDiagnostics = "카메라 heading이 없어 Polygon 화면 투영을 계산할 수 없습니다."
+            matrixProjectionComparisonDiagnostics = "카메라 heading이 없어 projection matrix 비교를 계산할 수 없습니다."
             arLabelOverlay = nil
             arLabelOverlayDiagnostics = "카메라 heading이 없어 AR 라벨 위치를 계산할 수 없습니다."
             polygonLookupTask?.cancel()
@@ -232,7 +249,9 @@ final class AppState: ObservableObject {
             cameraDirectionStatus = "현재 위치가 없어 카메라 방향 후보를 계산할 수 없습니다."
             polygonValidationStatus = "현재 위치가 없어 Polygon 자동 후보를 계산할 수 없습니다."
             spatialAlignmentDiagnostics = "현재 위치가 없어 선택 Polygon 정렬을 계산할 수 없습니다."
+            refreshLocalCoordinateDiagnostics()
             polygonProjectionDiagnostics = "현재 위치가 없어 Polygon 화면 투영을 계산할 수 없습니다."
+            matrixProjectionComparisonDiagnostics = "현재 위치가 없어 projection matrix 비교를 계산할 수 없습니다."
             arLabelOverlay = nil
             arLabelOverlayDiagnostics = "현재 위치가 없어 AR 라벨 위치를 계산할 수 없습니다."
             polygonLookupTask?.cancel()
@@ -250,7 +269,9 @@ final class AppState: ObservableObject {
             cameraDirectionStatus = "카메라 방향과 일치하는 관광지 후보가 없습니다."
             polygonValidationStatus = "카메라 시야 방향과 일치하는 목업 Polygon 후보가 없습니다."
             spatialAlignmentDiagnostics = "현재 heading과 일치하는 후보가 없어 Polygon 정렬을 계산하지 않았습니다."
+            refreshLocalCoordinateDiagnostics()
             polygonProjectionDiagnostics = "현재 heading과 일치하는 후보가 없어 Polygon 화면 투영을 계산하지 않았습니다."
+            matrixProjectionComparisonDiagnostics = "현재 heading과 일치하는 후보가 없어 projection matrix 비교를 계산하지 않았습니다."
             arLabelOverlay = nil
             arLabelOverlayDiagnostics = "현재 heading과 일치하는 후보가 없어 AR 라벨을 숨깁니다."
             polygonLookupTask?.cancel()
@@ -263,6 +284,8 @@ final class AppState: ObservableObject {
         cameraDirectionStatus = "\(candidate.spot.name) 방향 후보 / 각도 차이 \(Int(candidate.headingDifferenceDegrees))도 / 거리 \(Int(candidate.distanceMeters))m"
         updateSpatialAlignmentDiagnostics(for: candidate)
         updateBuildingPolygon(for: candidate.spot)
+        refreshLocalCoordinateDiagnostics()
+        refreshMatrixProjectionComparisonDiagnostics()
         refreshSceneSemanticsScoring()
 
         if previousCandidateID != candidate.spot.id {
@@ -277,6 +300,8 @@ final class AppState: ObservableObject {
             polygonValidatedSpotID = spot.id
             polygonValidationStatus = "\(spot.name) 브이월드 Polygon 확보 / 외곽 좌표 \(polygon.vertexCount)개 / 높이 \(resolvedHeight.displayText)"
             updateSpatialAlignmentDiagnostics(for: spot, polygon: polygon)
+            refreshLocalCoordinateDiagnostics()
+            refreshMatrixProjectionComparisonDiagnostics()
             refreshSceneSemanticsScoring()
             return
         }
@@ -338,6 +363,8 @@ final class AppState: ObservableObject {
                         self.appendPolygonLookupLog("앱 높이 결정 사유: \(resolvedHeight.explanation)")
                         self.polygonValidationStatus = "\(spot.name) 브이월드 Polygon 확보 / 외곽 좌표 \(polygon.vertexCount)개 / 높이 \(resolvedHeight.displayText)"
                         self.updateSpatialAlignmentDiagnostics(for: spot, polygon: polygon)
+                        self.refreshLocalCoordinateDiagnostics()
+                        self.refreshMatrixProjectionComparisonDiagnostics()
                         self.refreshSceneSemanticsScoring()
                     } else {
                         self.polygonLookupNotFoundSpotIDs.insert(spot.id)
@@ -397,6 +424,8 @@ final class AppState: ObservableObject {
         sceneSemanticsScoringDiagnostics = "후보 초기화로 Scene Semantics 라벨 보정도 초기화했습니다."
         arLabelOverlay = nil
         arLabelOverlayDiagnostics = "후보 초기화로 AR 라벨도 초기화했습니다."
+        localCoordinateDiagnostics = "후보 초기화로 local ENU 좌표 변환도 초기화했습니다."
+        matrixProjectionComparisonDiagnostics = "후보 초기화로 projection matrix 비교도 초기화했습니다."
         cameraDirectionSpotID = nil
         selectedSpot = nil
         polygonLookupTask?.cancel()
@@ -477,6 +506,55 @@ final class AppState: ObservableObject {
         spatialTrackingDiagnostics = "공간 신뢰도 \(effectiveSpatialConfidence.displayName) / 위치 \(locationConfidence.displayName) / \(headingText)"
     }
 
+    private func refreshLocalCoordinateDiagnostics() {
+        guard let latestLocationSnapshot else {
+            localCoordinateDiagnostics = "현재 위치가 없어 local ENU 좌표를 계산할 수 없습니다."
+            return
+        }
+
+        guard let spot = localCoordinateTargetSpot(from: latestLocationSnapshot) else {
+            localCoordinateDiagnostics = "현재 위치 기준으로 비교할 POI 후보가 없습니다."
+            return
+        }
+
+        let poiENU = LocalENUProjector.project(spot.center, from: latestLocationSnapshot)
+        var message = "\(spot.name) local ENU / origin \(latestLocationSnapshot.source.rawValue) \(latestLocationSnapshot.latitude.formatted(.number.precision(.fractionLength(6)))), \(latestLocationSnapshot.longitude.formatted(.number.precision(.fractionLength(6)))) / POI east \(Int(poiENU.eastMeters))m north \(Int(poiENU.northMeters))m / 거리 \(Int(poiENU.groundDistanceMeters))m / 방향각 \(Int(poiENU.bearingDegrees))도"
+
+        if let polygon = buildingPolygonsBySpotID[spot.id],
+           let centroid = polygon.centroid {
+            let centroidENU = LocalENUProjector.project(centroid, from: latestLocationSnapshot)
+            message += " / Polygon centroid east \(Int(centroidENU.eastMeters))m north \(Int(centroidENU.northMeters))m"
+
+            let vertexENUs = polygon.rings.flatMap { $0 }.map {
+                LocalENUProjector.project($0, from: latestLocationSnapshot)
+            }
+            if let eastRange = vertexENUs.map(\.eastMeters).metersRangeDescription,
+               let northRange = vertexENUs.map(\.northMeters).metersRangeDescription {
+                message += " / 외곽 east \(eastRange) north \(northRange)"
+            }
+        } else {
+            message += " / Polygon ENU는 브이월드 Polygon 확보 후 표시됩니다."
+        }
+
+        localCoordinateDiagnostics = message
+    }
+
+    private func localCoordinateTargetSpot(from latestLocationSnapshot: LocationSnapshot) -> TourismSpot? {
+        if let cameraDirectionSpotID,
+           let spot = spots.first(where: { $0.id == cameraDirectionSpotID }) {
+            return spot
+        }
+
+        if let selectedSpot,
+           spots.contains(where: { $0.id == selectedSpot.id }) {
+            return selectedSpot
+        }
+
+        return spots.min {
+            latestLocationSnapshot.coordinate.distance(to: $0.center) < latestLocationSnapshot.coordinate.distance(to: $1.center)
+        }
+    }
+
     private func updateSpatialAlignmentDiagnostics(for candidate: CameraDirectionCandidate) {
         guard let heading = cameraHeadingDegrees else {
             spatialAlignmentDiagnostics = "카메라 heading이 없어 방향각 차이를 계산할 수 없습니다."
@@ -551,6 +629,106 @@ final class AppState: ObservableObject {
             message += " / \(evidence.diagnosticText)"
         }
         polygonProjectionDiagnostics = message
+        refreshMatrixProjectionComparisonDiagnostics(for: spot, polygon: polygon, fovProjectedPoints: projectedPoints)
+    }
+
+    private func refreshMatrixProjectionComparisonDiagnostics() {
+        guard let latestLocationSnapshot else {
+            matrixProjectionComparisonDiagnostics = "현재 위치가 없어 projection matrix 비교를 계산할 수 없습니다."
+            return
+        }
+
+        guard let heading = cameraHeadingDegrees,
+              let pose = cameraPoseSnapshot else {
+            matrixProjectionComparisonDiagnostics = "heading/pose 중 일부가 없어 projection matrix 비교를 계산할 수 없습니다."
+            return
+        }
+
+        guard let cameraProjectionSnapshot else {
+            matrixProjectionComparisonDiagnostics = "ARFrame camera matrix 샘플이 없어 projection matrix 비교를 계산할 수 없습니다."
+            return
+        }
+
+        guard let spot = localCoordinateTargetSpot(from: latestLocationSnapshot) else {
+            matrixProjectionComparisonDiagnostics = "projection matrix 비교 대상 후보가 없습니다."
+            return
+        }
+
+        let polygon = buildingPolygonsBySpotID[spot.id]
+        let coordinates = polygon?.rings.flatMap { $0 } ?? [spot.center]
+        let fovProjectedPoints = coordinates.map {
+            projectCoordinate(
+                $0,
+                from: latestLocationSnapshot.coordinate,
+                headingDegrees: heading,
+                pitchDegrees: pose.pitchDegrees
+            )
+        }
+        refreshMatrixProjectionComparisonDiagnostics(
+            for: spot,
+            polygon: polygon,
+            fovProjectedPoints: fovProjectedPoints,
+            cameraProjectionSnapshot: cameraProjectionSnapshot,
+            latestLocationSnapshot: latestLocationSnapshot
+        )
+    }
+
+    private func refreshMatrixProjectionComparisonDiagnostics(
+        for spot: TourismSpot,
+        polygon: BuildingPolygon?,
+        fovProjectedPoints: [ProjectedPolygonPoint]
+    ) {
+        guard let cameraProjectionSnapshot,
+              let latestLocationSnapshot else {
+            matrixProjectionComparisonDiagnostics = "\(spot.name) projection matrix 비교 대기: matrix/위치 중 일부가 없습니다."
+            return
+        }
+
+        refreshMatrixProjectionComparisonDiagnostics(
+            for: spot,
+            polygon: polygon,
+            fovProjectedPoints: fovProjectedPoints,
+            cameraProjectionSnapshot: cameraProjectionSnapshot,
+            latestLocationSnapshot: latestLocationSnapshot
+        )
+    }
+
+    private func refreshMatrixProjectionComparisonDiagnostics(
+        for spot: TourismSpot,
+        polygon: BuildingPolygon?,
+        fovProjectedPoints: [ProjectedPolygonPoint],
+        cameraProjectionSnapshot: CameraProjectionSnapshot,
+        latestLocationSnapshot: LocationSnapshot
+    ) {
+        let coordinates = polygon?.rings.flatMap { $0 } ?? [spot.center]
+        guard !coordinates.isEmpty else {
+            matrixProjectionComparisonDiagnostics = "\(spot.name) projection matrix 비교 실패: 투영할 좌표가 없습니다."
+            return
+        }
+
+        let matrixProjectedPoints = coordinates.compactMap {
+            CameraMatrixProjector.project(
+                $0,
+                from: latestLocationSnapshot,
+                using: cameraProjectionSnapshot
+            )
+        }
+        guard !matrixProjectedPoints.isEmpty else {
+            matrixProjectionComparisonDiagnostics = "\(spot.name) projection matrix 비교 실패: 유효한 matrix 투영 좌표가 없습니다."
+            return
+        }
+
+        let fovAnchor = overlayFallbackAnchor(for: fovProjectedPoints)
+        let matrixAnchor = matrixFallbackAnchor(for: matrixProjectedPoints)
+        let deltaX = Double(matrixAnchor.x - fovAnchor.x) * 100
+        let deltaY = Double(matrixAnchor.y - fovAnchor.y) * 100
+        let matrixInsideCount = matrixProjectedPoints.filter(\.isInsideView).count
+        let targetText = polygon == nil ? "POI" : "Polygon"
+        let fovText = "FOV x \(Int(fovAnchor.x * 100))% y \(Int(fovAnchor.y * 100))%"
+        let matrixText = "matrix x \(Int(matrixAnchor.x * 100))% y \(Int(matrixAnchor.y * 100))%"
+        let deltaText = "차이 x \(Int(deltaX))%p y \(Int(deltaY))%p"
+
+        matrixProjectionComparisonDiagnostics = "\(spot.name) \(targetText) 투영 비교 / \(fovText) / \(matrixText) / \(deltaText) / matrix 화면 안 \(matrixInsideCount)/\(matrixProjectedPoints.count)개"
     }
 
     private func refreshSceneSemanticsScoring() {
@@ -689,6 +867,22 @@ final class AppState: ObservableObject {
     }
 
     private func overlayFallbackAnchor(for projectedPoints: [ProjectedPolygonPoint]) -> CGPoint {
+        let visiblePoints = projectedPoints.map {
+            (x: $0.screenX.clamped(to: 0...1), y: $0.screenY.clamped(to: 0...1))
+        }
+        guard !visiblePoints.isEmpty else {
+            return CGPoint(x: 0.5, y: 0.45)
+        }
+
+        let minX = visiblePoints.map(\.x).min() ?? 0.5
+        let maxX = visiblePoints.map(\.x).max() ?? 0.5
+        let minY = visiblePoints.map(\.y).min() ?? 0.45
+        let maxY = visiblePoints.map(\.y).max() ?? minY
+        let y = minY + max(0.03, (maxY - minY) * 0.25)
+        return CGPoint(x: (minX + maxX) / 2, y: y)
+    }
+
+    private func matrixFallbackAnchor(for projectedPoints: [CameraMatrixProjectedPoint]) -> CGPoint {
         let visiblePoints = projectedPoints.map {
             (x: $0.screenX.clamped(to: 0...1), y: $0.screenY.clamped(to: 0...1))
         }
@@ -853,6 +1047,13 @@ private extension [Double] {
             return "없음"
         }
         return "\(Int(min))...\(Int(max))도"
+    }
+
+    var metersRangeDescription: String? {
+        guard let min = self.min(), let max = self.max() else {
+            return nil
+        }
+        return "\(Int(min))...\(Int(max))m"
     }
 }
 

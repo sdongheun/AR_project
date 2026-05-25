@@ -11,10 +11,13 @@ final class ARSessionViewController: UIViewController {
     private let ocrInterval: TimeInterval = 2.0
     private var lastHeadingTimestamp: TimeInterval = 0
     private let headingInterval: TimeInterval = 0.25
+    private var lastProjectionTimestamp: TimeInterval = 0
+    private let projectionInterval: TimeInterval = 0.5
 
     var onRecognizedCameraText: ((String) -> Void)?
     var onCameraHeadingUpdated: ((Double) -> Void)?
     var onCameraPoseUpdated: ((CameraPoseSnapshot) -> Void)?
+    var onCameraProjectionUpdated: ((CameraProjectionSnapshot) -> Void)?
 
     init(geospatialSessionManager: GeospatialSessionManager) {
         self.geospatialSessionManager = geospatialSessionManager
@@ -63,6 +66,7 @@ extension ARSessionViewController: ARSessionDelegate {
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
         geospatialSessionManager.update(with: frame)
         publishCameraHeadingIfNeeded(from: frame)
+        publishCameraProjectionIfNeeded(from: frame)
         recognizeTextIfNeeded(in: frame)
     }
 
@@ -81,6 +85,66 @@ extension ARSessionViewController: ARSessionDelegate {
         DispatchQueue.main.async { [weak self] in
             self?.onCameraPoseUpdated?(pose)
             self?.onCameraHeadingUpdated?(pose.headingDegrees)
+        }
+    }
+
+    private func publishCameraProjectionIfNeeded(from frame: ARFrame) {
+        guard frame.timestamp - lastProjectionTimestamp >= projectionInterval else {
+            return
+        }
+
+        let viewportSize = arView.bounds.size
+        guard viewportSize.width > 0, viewportSize.height > 0 else {
+            return
+        }
+
+        lastProjectionTimestamp = frame.timestamp
+        let orientation = view.window?.windowScene?.interfaceOrientation ?? .portrait
+        let viewMatrix = frame.camera.viewMatrix(for: orientation)
+        let projectionMatrix = frame.camera.projectionMatrix(
+            for: orientation,
+            viewportSize: viewportSize,
+            zNear: 0.001,
+            zFar: 1_000
+        )
+        let snapshot = CameraProjectionSnapshot.make(
+            timestamp: frame.timestamp,
+            cameraTransform: frame.camera.transform,
+            viewMatrix: viewMatrix,
+            projectionMatrix: projectionMatrix,
+            viewportSize: viewportSize,
+            interfaceOrientation: orientation,
+            trackingStateDescription: trackingStateDescription(frame.camera.trackingState)
+        )
+
+        DispatchQueue.main.async { [weak self] in
+            self?.onCameraProjectionUpdated?(snapshot)
+        }
+    }
+
+    private func trackingStateDescription(_ trackingState: ARCamera.TrackingState) -> String {
+        switch trackingState {
+        case .normal:
+            return "normal"
+        case .notAvailable:
+            return "notAvailable"
+        case let .limited(reason):
+            return "limited(\(limitedTrackingReasonDescription(reason)))"
+        }
+    }
+
+    private func limitedTrackingReasonDescription(_ reason: ARCamera.TrackingState.Reason) -> String {
+        switch reason {
+        case .initializing:
+            return "initializing"
+        case .excessiveMotion:
+            return "excessiveMotion"
+        case .insufficientFeatures:
+            return "insufficientFeatures"
+        case .relocalizing:
+            return "relocalizing"
+        @unknown default:
+            return "unknown"
         }
     }
 

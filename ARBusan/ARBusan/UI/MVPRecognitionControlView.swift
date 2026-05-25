@@ -38,13 +38,31 @@ struct MVPRecognitionControlView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
+                Text(appState.cameraProjectionDiagnostics)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(nil)
+                    .fixedSize(horizontal: false, vertical: true)
+
                 Text(appState.spatialAlignmentDiagnostics)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
+                Text(appState.localCoordinateDiagnostics)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(nil)
+                    .fixedSize(horizontal: false, vertical: true)
+
                 Text(appState.polygonProjectionDiagnostics)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+
+                Text(appState.matrixProjectionComparisonDiagnostics)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(nil)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 if let lastUpdatedAt = appState.cameraHeadingLastUpdatedAt {
                     Text("마지막 heading 갱신: \(lastUpdatedAt.formatted(date: .omitted, time: .standard))")
