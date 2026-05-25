@@ -203,6 +203,7 @@ final class AppState: ObservableObject {
         cameraProjectionDiagnostics = projection.diagnosticText
         refreshLocalCoordinateDiagnostics()
         refreshMatrixProjectionComparisonDiagnostics()
+        refreshARLabelOverlay()
     }
 
     func runMockRecognition() {
@@ -863,18 +864,36 @@ final class AppState: ObservableObject {
             ]
         }
 
-        guard polygonIntersectsView(projectedPoints) else {
+        let matrixProjectedPoints = matrixProjectedPoints(for: spot, polygon: polygon, from: latestLocationSnapshot)
+        let matrixInsideCount = matrixProjectedPoints.filter(\.isInsideView).count
+        let useMatrixProjection = matrixInsideCount > 0
+        let fovIntersectsView = polygonIntersectsView(projectedPoints)
+
+        guard useMatrixProjection || fovIntersectsView else {
             arLabelOverlay = nil
-            arLabelOverlayDiagnostics = "\(spot.name) 라벨 숨김: 투영 좌표가 현재 화면 밖입니다."
+            arLabelOverlayDiagnostics = "\(spot.name) 라벨 숨김: matrix/FOV 투영 좌표가 모두 현재 화면 밖입니다."
             return
         }
 
-        let normalizedPolygon = projectedPoints.map {
-            CGPoint(x: $0.screenX.clamped(to: 0...1), y: $0.screenY.clamped(to: 0...1))
+        let projectionAnchor: CGPoint
+        let normalizedPolygon: [CGPoint]
+        let projectionSource: String
+        if useMatrixProjection {
+            projectionAnchor = matrixFallbackAnchor(for: matrixProjectedPoints)
+            normalizedPolygon = matrixProjectedPoints.map {
+                CGPoint(x: $0.screenX.clamped(to: 0...1), y: $0.screenY.clamped(to: 0...1))
+            }
+            projectionSource = "projection matrix"
+        } else {
+            projectionAnchor = overlayFallbackAnchor(for: projectedPoints)
+            normalizedPolygon = projectedPoints.map {
+                CGPoint(x: $0.screenX.clamped(to: 0...1), y: $0.screenY.clamped(to: 0...1))
+            }
+            projectionSource = "FOV fallback"
         }
-        let fallbackAnchor = overlayFallbackAnchor(for: projectedPoints)
+
         let semanticAnchor = latestSceneSemanticsSnapshot?.buildingLabelAnchor(in: normalizedPolygon)
-        let anchor = semanticAnchor ?? fallbackAnchor
+        let anchor = semanticAnchor ?? projectionAnchor
         let smoothedAnchor = smoothedLabelAnchor(for: spot.id, next: anchor)
         let confidence = recognitionResult.labelConfidence ?? .medium
         let distance = latestLocationSnapshot.coordinate.distance(to: spot.center)
@@ -893,8 +912,27 @@ final class AppState: ObservableObject {
             isSceneSemanticsAdjusted: semanticAnchor != nil
         )
 
-        let anchorSource = semanticAnchor == nil ? "투영 좌표 fallback" : "Scene Semantics building 중심"
-        arLabelOverlayDiagnostics = "\(spot.name) AR 라벨 표시 / \(anchorSource) / x \(Int(smoothedAnchor.x * 100))% y \(Int(smoothedAnchor.y * 100))%"
+        let anchorSource = semanticAnchor == nil ? projectionSource : "\(projectionSource) + Scene Semantics building 중심"
+        arLabelOverlayDiagnostics = "\(spot.name) AR 라벨 표시 / \(anchorSource) / x \(Int(smoothedAnchor.x * 100))% y \(Int(smoothedAnchor.y * 100))% / matrix 화면 안 \(matrixInsideCount)/\(max(matrixProjectedPoints.count, 1))개"
+    }
+
+    private func matrixProjectedPoints(
+        for spot: TourismSpot,
+        polygon: BuildingPolygon?,
+        from latestLocationSnapshot: LocationSnapshot
+    ) -> [CameraMatrixProjectedPoint] {
+        guard let cameraProjectionSnapshot else {
+            return []
+        }
+
+        let coordinates = polygon?.rings.flatMap { $0 } ?? [spot.center]
+        return coordinates.compactMap {
+            CameraMatrixProjector.project(
+                $0,
+                from: latestLocationSnapshot,
+                using: cameraProjectionSnapshot
+            )
+        }
     }
 
     private func overlayFallbackAnchor(for projectedPoints: [ProjectedPolygonPoint]) -> CGPoint {

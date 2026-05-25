@@ -275,13 +275,14 @@ Scene Semantics:
         - 디버그 마커가 실제 건물 위치에 더 자연스럽게 붙는가?
         - 기기 회전/움직임에서 마커가 과하게 튀지 않는가?
 
-[ ] 6.4.5 라벨 좌표 계산을 projection matrix 방식으로 전환
+[x] 6.4.5 라벨 좌표 계산을 projection matrix 방식으로 전환
     목적:
         6.4.3~6.4.4에서 projection 방식이 더 낫다는 테스트 결과가 확인된 뒤 실제 라벨 기준을 교체한다.
     구현:
         - 기본 라벨 좌표를 projection matrix 방식으로 변경
         - 기존 heading/FOV 방식은 fallback으로 유지
         - Scene Semantics는 계속 라벨 위치 보정용으로만 사용
+        - 구현 완료. 실기 테스트 결과 확인 전까지 다음 단계로 넘어가지 않는다.
     사용자 테스트 확인:
         - 기존보다 라벨이 건물 근처에 안정적으로 뜨는가?
         - Scene Semantics가 없어도 fallback 라벨이 표시되는가?
