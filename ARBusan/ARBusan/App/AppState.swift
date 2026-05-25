@@ -74,6 +74,7 @@ final class AppState: ObservableObject {
     private let headingInstabilityThresholdDegrees: Double = 12
     private let projectionHorizontalFOVDegrees: Double = 60
     private let projectionVerticalFOVDegrees: Double = 45
+    private let fovFallbackMaxHeadingDeltaDegrees: Double = 75
     private let buildingHeightResolver = BuildingHeightResolver()
     private var loadedTourismSpots: [TourismSpot] = []
     private var polygonLookupTask: Task<Void, Never>?
@@ -868,10 +869,22 @@ final class AppState: ObservableObject {
         let matrixInsideCount = matrixProjectedPoints.filter(\.isInsideView).count
         let useMatrixProjection = matrixInsideCount > 0
         let fovIntersectsView = polygonIntersectsView(projectedPoints)
+        let fallbackHeadingDelta = fovFallbackHeadingDelta(
+            for: spot,
+            polygon: polygon,
+            from: latestLocationSnapshot,
+            headingDegrees: heading
+        )
+        let fovFallbackAllowed = fovIntersectsView
+            && fallbackHeadingDelta <= fovFallbackMaxHeadingDeltaDegrees
 
-        guard useMatrixProjection || fovIntersectsView else {
+        guard useMatrixProjection || fovFallbackAllowed else {
             arLabelOverlay = nil
-            arLabelOverlayDiagnostics = "\(spot.name) 라벨 숨김: matrix/FOV 투영 좌표가 모두 현재 화면 밖입니다."
+            if fovIntersectsView {
+                arLabelOverlayDiagnostics = "\(spot.name) 라벨 숨김: matrix 화면 밖, FOV fallback 방향각 차이 \(Int(fallbackHeadingDelta))도가 허용값 \(Int(fovFallbackMaxHeadingDeltaDegrees))도를 초과했습니다."
+            } else {
+                arLabelOverlayDiagnostics = "\(spot.name) 라벨 숨김: matrix/FOV 투영 좌표가 모두 현재 화면 밖입니다."
+            }
             return
         }
 
@@ -889,7 +902,7 @@ final class AppState: ObservableObject {
             normalizedPolygon = projectedPoints.map {
                 CGPoint(x: $0.screenX.clamped(to: 0...1), y: $0.screenY.clamped(to: 0...1))
             }
-            projectionSource = "FOV fallback"
+            projectionSource = "FOV fallback 방향각 차이 \(Int(fallbackHeadingDelta))도"
         }
 
         let semanticAnchor = latestSceneSemanticsSnapshot?.buildingLabelAnchor(in: normalizedPolygon)
@@ -914,6 +927,17 @@ final class AppState: ObservableObject {
 
         let anchorSource = semanticAnchor == nil ? projectionSource : "\(projectionSource) + Scene Semantics building 중심"
         arLabelOverlayDiagnostics = "\(spot.name) AR 라벨 표시 / \(anchorSource) / x \(Int(smoothedAnchor.x * 100))% y \(Int(smoothedAnchor.y * 100))% / matrix 화면 안 \(matrixInsideCount)/\(max(matrixProjectedPoints.count, 1))개"
+    }
+
+    private func fovFallbackHeadingDelta(
+        for spot: TourismSpot,
+        polygon: BuildingPolygon?,
+        from latestLocationSnapshot: LocationSnapshot,
+        headingDegrees: Double
+    ) -> Double {
+        let targetCoordinate = polygon?.centroid ?? spot.center
+        let bearing = latestLocationSnapshot.coordinate.bearing(to: targetCoordinate)
+        return headingDegrees.angularDifference(to: bearing)
     }
 
     private func matrixProjectedPoints(

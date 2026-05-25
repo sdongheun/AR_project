@@ -291,6 +291,8 @@ Scene Semantics:
     목적:
         실제 사용감을 위해 위치 흔들림과 표시 조건을 정리한다.
     구현:
+        - 완료: matrix가 화면 밖일 때 FOV fallback은 대상 방향각 차이 75도 이내에서만 허용
+        - 완료: 180도 반대 방향에서 FOV fallback + Scene Semantics로 라벨이 재생성되는 현상 방지
         - smoothing 계수 조정
         - 화면 밖/가장자리 처리
         - 근거리/중거리/원거리별 라벨 위치와 크기 조정
