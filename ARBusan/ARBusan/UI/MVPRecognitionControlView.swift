@@ -109,10 +109,21 @@ struct MVPRecognitionControlView: View {
             }
 
             RecognitionSignalSection(
-                title: "5. Scene Semantics 점수 보정",
-                caption: "목업과 TourAPI 후보 모두 VWorld Polygon이 확보되면 화면 투영 영역의 building 비율로 같은 방식의 점수 보정을 받습니다."
+                title: "5. Scene Semantics 라벨 보정",
+                caption: "Scene Semantics는 인식 점수에 반영하지 않습니다. building 영역이 잡히면 라벨 위치 보정과 디버그에만 사용합니다."
             ) {
                 Text(appState.sceneSemanticsScoringDiagnostics)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(nil)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            RecognitionSignalSection(
+                title: "6. 화면 Overlay 라벨",
+                caption: "인식된 후보를 현재 화면 좌표에 표시합니다. Scene Semantics building 영역이 있으면 라벨 위치를 그쪽으로 보정합니다."
+            ) {
+                Text(appState.arLabelOverlayDiagnostics)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(nil)

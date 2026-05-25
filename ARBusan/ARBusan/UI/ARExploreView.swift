@@ -23,6 +23,16 @@ struct ARExploreView: View {
                         .allowsHitTesting(false)
                 }
 
+                if let label = appState.arLabelOverlay {
+                    ARSpotLabelView(label: label)
+                        .position(
+                            x: label.normalizedX * geometry.size.width,
+                            y: label.normalizedY * geometry.size.height
+                        )
+                        .allowsHitTesting(false)
+                        .animation(.easeOut(duration: 0.18), value: label)
+                }
+
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         APIKeyStatusView(statuses: appState.apiKeys.statuses)
@@ -77,6 +87,57 @@ struct ARExploreView: View {
         }
         .sheet(isPresented: $showsCollection) {
             CollectionBookView(spots: appState.spots, selectedSpot: appState.selectedSpot)
+        }
+    }
+}
+
+private struct ARSpotLabelView: View {
+    let label: ARLabelOverlay
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(label.confidence.tintColor)
+                    .frame(width: 8, height: 8)
+                Text(label.title)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+
+            Text(label.subtitle)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            if label.isSceneSemanticsAdjusted {
+                Text("building 영역 보정")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.blue)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: 210, alignment: .leading)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(label.confidence.tintColor.opacity(0.65), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.25), radius: 8, x: 0, y: 4)
+    }
+}
+
+private extension RecognitionConfidence {
+    var tintColor: Color {
+        switch self {
+        case .high:
+            return .green
+        case .medium:
+            return .orange
+        case .low:
+            return .red
         }
     }
 }

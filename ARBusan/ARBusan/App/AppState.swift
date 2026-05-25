@@ -2,6 +2,16 @@ import CoreLocation
 import Foundation
 import UIKit
 
+struct ARLabelOverlay: Equatable {
+    let spotID: TourismSpot.ID
+    let title: String
+    let subtitle: String
+    let normalizedX: Double
+    let normalizedY: Double
+    let confidence: RecognitionConfidence
+    let isSceneSemanticsAdjusted: Bool
+}
+
 @MainActor
 final class AppState: ObservableObject {
     @Published var spots: [TourismSpot]
@@ -17,7 +27,9 @@ final class AppState: ObservableObject {
     @Published var geospatialStatus = "ARCore Geospatial 세션을 아직 시작하지 않았습니다."
     @Published var sceneSemanticsOverlayImage: UIImage?
     @Published var sceneSemanticsStatus = "Scene Semantics를 아직 시작하지 않았습니다."
-    @Published var sceneSemanticsScoringDiagnostics = "Scene Semantics 점수 보정을 아직 계산하지 않았습니다."
+    @Published var sceneSemanticsScoringDiagnostics = "Scene Semantics 라벨 보정을 아직 계산하지 않았습니다."
+    @Published var arLabelOverlay: ARLabelOverlay?
+    @Published var arLabelOverlayDiagnostics = "AR 라벨 후보를 아직 계산하지 않았습니다."
     @Published var cameraHeadingDegrees: Double?
     @Published var cameraHeadingSampleCount = 0
     @Published var cameraHeadingLastUpdatedAt: Date?
@@ -100,6 +112,7 @@ final class AppState: ObservableObject {
                 self?.latestSceneSemanticsSnapshot = snapshot
                 self?.refreshSceneSemanticsScoring()
                 self?.runRecognition()
+                self?.refreshARLabelOverlay()
             }
         }
         self.geospatialSessionManager.onSceneSemanticsStatusChanged = { [weak self] status in
@@ -180,13 +193,12 @@ final class AppState: ObservableObject {
             locationConfidence: effectiveSpatialConfidence,
             cameraDirectionSpotIDs: Set([cameraDirectionSpotID].compactMap { $0 }),
             polygonValidatedSpotIDs: Set([polygonValidatedSpotID].compactMap { $0 })
-                .union(sceneSemanticsEvidenceBySpotID.compactMap { $0.value.hasBuildingSupport ? $0.key : nil }),
-            sceneSemanticsEvidenceBySpotID: sceneSemanticsEvidenceBySpotID
         )
 
         if case let .recognized(spot, _, _) = recognitionResult {
             selectedSpot = spot
         }
+        refreshARLabelOverlay()
     }
 
     func selectCandidate(_ spot: TourismSpot) {
@@ -196,6 +208,7 @@ final class AppState: ObservableObject {
             confidence: .medium,
             reason: "사용자가 모호한 건물 후보 중 \(spot.name)을 선택했습니다."
         )
+        refreshARLabelOverlay()
     }
 
     private func updateCameraDirectionCandidate() {
@@ -206,6 +219,8 @@ final class AppState: ObservableObject {
             polygonValidationStatus = "카메라 heading이 없어 Polygon 자동 후보를 계산할 수 없습니다."
             spatialAlignmentDiagnostics = "카메라 heading이 없어 선택 Polygon 정렬을 계산할 수 없습니다."
             polygonProjectionDiagnostics = "카메라 heading이 없어 Polygon 화면 투영을 계산할 수 없습니다."
+            arLabelOverlay = nil
+            arLabelOverlayDiagnostics = "카메라 heading이 없어 AR 라벨 위치를 계산할 수 없습니다."
             polygonLookupTask?.cancel()
             polygonLookupInFlightSpotID = nil
             return
@@ -218,6 +233,8 @@ final class AppState: ObservableObject {
             polygonValidationStatus = "현재 위치가 없어 Polygon 자동 후보를 계산할 수 없습니다."
             spatialAlignmentDiagnostics = "현재 위치가 없어 선택 Polygon 정렬을 계산할 수 없습니다."
             polygonProjectionDiagnostics = "현재 위치가 없어 Polygon 화면 투영을 계산할 수 없습니다."
+            arLabelOverlay = nil
+            arLabelOverlayDiagnostics = "현재 위치가 없어 AR 라벨 위치를 계산할 수 없습니다."
             polygonLookupTask?.cancel()
             polygonLookupInFlightSpotID = nil
             return
@@ -234,6 +251,8 @@ final class AppState: ObservableObject {
             polygonValidationStatus = "카메라 시야 방향과 일치하는 목업 Polygon 후보가 없습니다."
             spatialAlignmentDiagnostics = "현재 heading과 일치하는 후보가 없어 Polygon 정렬을 계산하지 않았습니다."
             polygonProjectionDiagnostics = "현재 heading과 일치하는 후보가 없어 Polygon 화면 투영을 계산하지 않았습니다."
+            arLabelOverlay = nil
+            arLabelOverlayDiagnostics = "현재 heading과 일치하는 후보가 없어 AR 라벨을 숨깁니다."
             polygonLookupTask?.cancel()
             polygonLookupInFlightSpotID = nil
             return
@@ -375,7 +394,9 @@ final class AppState: ObservableObject {
         polygonLookupNotFoundSpotIDs = []
         resolvedBuildingHeightsBySpotID = [:]
         sceneSemanticsEvidenceBySpotID = [:]
-        sceneSemanticsScoringDiagnostics = "후보 초기화로 Scene Semantics 점수 보정도 초기화했습니다."
+        sceneSemanticsScoringDiagnostics = "후보 초기화로 Scene Semantics 라벨 보정도 초기화했습니다."
+        arLabelOverlay = nil
+        arLabelOverlayDiagnostics = "후보 초기화로 AR 라벨도 초기화했습니다."
         cameraDirectionSpotID = nil
         selectedSpot = nil
         polygonLookupTask?.cancel()
@@ -543,7 +564,7 @@ final class AppState: ObservableObject {
               let heading = cameraHeadingDegrees,
               let pose = cameraPoseSnapshot else {
             sceneSemanticsEvidenceBySpotID = [:]
-            sceneSemanticsScoringDiagnostics = "위치/heading/pose 중 일부가 없어 Scene Semantics 점수 보정을 계산하지 못했습니다."
+            sceneSemanticsScoringDiagnostics = "위치/heading/pose 중 일부가 없어 Scene Semantics 라벨 보정을 계산하지 못했습니다."
             return
         }
 
@@ -578,19 +599,122 @@ final class AppState: ObservableObject {
         }
 
         sceneSemanticsEvidenceBySpotID = evidenceBySpotID
+        refreshARLabelOverlay()
 
         if evidenceBySpotID.isEmpty {
-            sceneSemanticsScoringDiagnostics = "화면에 투영된 Polygon 중 Scene Semantics 점수 보정 대상이 없습니다."
+            sceneSemanticsScoringDiagnostics = "화면에 투영된 Polygon 중 Scene Semantics 라벨 보정 대상이 없습니다."
             return
         }
 
         let spotNamesByID = Dictionary(uniqueKeysWithValues: spots.map { ($0.id, $0.name) })
         sceneSemanticsScoringDiagnostics = evidenceBySpotID
-            .sorted { $0.value.scoreAdjustment > $1.value.scoreAdjustment }
+            .sorted { $0.value.buildingCoverageRatio > $1.value.buildingCoverageRatio }
             .map { spotID, evidence in
                 "\(spotNamesByID[spotID] ?? spotID): \(evidence.diagnosticText)"
             }
             .joined(separator: "\n")
+    }
+
+    private func refreshARLabelOverlay() {
+        guard let spot = recognitionResult.labelSpot ?? selectedSpot else {
+            arLabelOverlay = nil
+            arLabelOverlayDiagnostics = "인식/선택된 후보가 없어 AR 라벨을 숨깁니다."
+            return
+        }
+
+        guard let latestLocationSnapshot,
+              let heading = cameraHeadingDegrees,
+              let pose = cameraPoseSnapshot else {
+            arLabelOverlay = nil
+            arLabelOverlayDiagnostics = "\(spot.name) 라벨 계산 대기: 위치/heading/pose 중 일부가 없습니다."
+            return
+        }
+
+        let polygon = buildingPolygonsBySpotID[spot.id]
+        let projectedPoints: [ProjectedPolygonPoint]
+        if let polygon {
+            projectedPoints = polygon.rings
+                .flatMap { $0 }
+                .map {
+                    projectCoordinate(
+                        $0,
+                        from: latestLocationSnapshot.coordinate,
+                        headingDegrees: heading,
+                        pitchDegrees: pose.pitchDegrees
+                    )
+                }
+        } else {
+            projectedPoints = [
+                projectCoordinate(
+                    spot.center,
+                    from: latestLocationSnapshot.coordinate,
+                    headingDegrees: heading,
+                    pitchDegrees: pose.pitchDegrees
+                )
+            ]
+        }
+
+        guard polygonIntersectsView(projectedPoints) else {
+            arLabelOverlay = nil
+            arLabelOverlayDiagnostics = "\(spot.name) 라벨 숨김: 투영 좌표가 현재 화면 밖입니다."
+            return
+        }
+
+        let normalizedPolygon = projectedPoints.map {
+            CGPoint(x: $0.screenX.clamped(to: 0...1), y: $0.screenY.clamped(to: 0...1))
+        }
+        let fallbackAnchor = overlayFallbackAnchor(for: projectedPoints)
+        let semanticAnchor = latestSceneSemanticsSnapshot?.buildingLabelAnchor(in: normalizedPolygon)
+        let anchor = semanticAnchor ?? fallbackAnchor
+        let smoothedAnchor = smoothedLabelAnchor(for: spot.id, next: anchor)
+        let confidence = recognitionResult.labelConfidence ?? .medium
+        let distance = latestLocationSnapshot.coordinate.distance(to: spot.center)
+        let evidenceText = sceneSemanticsEvidenceBySpotID[spot.id].map {
+            " / building \(Int(($0.buildingCoverageRatio * 100).rounded()))%"
+        } ?? ""
+        let subtitle = "\(Int(distance))m / \(confidence.displayName)\(evidenceText)"
+
+        arLabelOverlay = ARLabelOverlay(
+            spotID: spot.id,
+            title: spot.name,
+            subtitle: subtitle,
+            normalizedX: Double(smoothedAnchor.x).clamped(to: 0.08...0.92),
+            normalizedY: Double(smoothedAnchor.y).clamped(to: 0.12...0.78),
+            confidence: confidence,
+            isSceneSemanticsAdjusted: semanticAnchor != nil
+        )
+
+        let anchorSource = semanticAnchor == nil ? "투영 좌표 fallback" : "Scene Semantics building 중심"
+        arLabelOverlayDiagnostics = "\(spot.name) AR 라벨 표시 / \(anchorSource) / x \(Int(smoothedAnchor.x * 100))% y \(Int(smoothedAnchor.y * 100))%"
+    }
+
+    private func overlayFallbackAnchor(for projectedPoints: [ProjectedPolygonPoint]) -> CGPoint {
+        let visiblePoints = projectedPoints.map {
+            (x: $0.screenX.clamped(to: 0...1), y: $0.screenY.clamped(to: 0...1))
+        }
+        guard !visiblePoints.isEmpty else {
+            return CGPoint(x: 0.5, y: 0.45)
+        }
+
+        let minX = visiblePoints.map(\.x).min() ?? 0.5
+        let maxX = visiblePoints.map(\.x).max() ?? 0.5
+        let minY = visiblePoints.map(\.y).min() ?? 0.45
+        let maxY = visiblePoints.map(\.y).max() ?? minY
+        let y = minY + max(0.03, (maxY - minY) * 0.25)
+        return CGPoint(x: (minX + maxX) / 2, y: y)
+    }
+
+    private func smoothedLabelAnchor(for spotID: TourismSpot.ID, next: CGPoint) -> CGPoint {
+        guard let current = arLabelOverlay, current.spotID == spotID else {
+            return next
+        }
+
+        let previousWeight = 0.72
+        let nextWeight = 1 - previousWeight
+        return CGPoint(
+            x: current.normalizedX * previousWeight + Double(next.x) * nextWeight,
+            y: current.normalizedY * previousWeight + Double(next.y) * nextWeight
+        )
     }
 
     private func projectCoordinate(
@@ -660,6 +784,28 @@ private struct ProjectedPolygonPoint {
     let isInsideView: Bool
 }
 
+private extension RecognitionResult {
+    var labelSpot: TourismSpot? {
+        switch self {
+        case let .recognized(spot, _, _), let .nearby(spot, _):
+            return spot
+        case .ambiguous, .none:
+            return nil
+        }
+    }
+
+    var labelConfidence: RecognitionConfidence? {
+        switch self {
+        case let .recognized(_, confidence, _):
+            return confidence
+        case .nearby:
+            return .medium
+        case .ambiguous, .none:
+            return nil
+        }
+    }
+}
+
 private extension [TourismSpot] {
     var isMockFallback: Bool {
         !isEmpty && allSatisfy { $0.source == .mock }
@@ -694,6 +840,10 @@ private extension Double {
             difference += 360
         }
         return difference
+    }
+
+    func clamped(to range: ClosedRange<Double>) -> Double {
+        min(max(self, range.lowerBound), range.upperBound)
     }
 }
 

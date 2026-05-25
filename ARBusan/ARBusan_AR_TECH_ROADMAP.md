@@ -17,10 +17,10 @@
 
 ```text
 대상 판단:
-TourAPI/목업 POI + 브이월드 Polygon + camera pose/heading
+TourAPI/목업 POI + 브이월드 Polygon + camera pose/heading + OCR
 
 화면 라벨 위치:
-Scene Semantics building 영역을 1순위로 사용
+Polygon/POI 화면 투영 좌표를 기본으로 사용하고, Scene Semantics building 영역은 보조 보정으로만 사용
 
 3D 높이/Anchor 보조:
 브이월드 HEIGHT -> Streetscape Geometry mesh -> 층수 추정 -> 기본값
@@ -54,6 +54,19 @@ Scene Semantics building 영역을 1순위로 사용
 - 브이월드 properties 로그 및 `buld_nm`, `buld_nm_dc`, `gro_flo_co`, `HEIGHT` 계열 파싱
 - 부산 TourAPI POI 1322개 대상 터미널 검증 스크립트
 - `ResolvedBuildingHeight` 높이 결정 정책
+- ARCore Scene Semantics 활성화
+- Scene Semantics 디버그 overlay
+  - `building`: 파란색
+  - `sky`: 빨간색
+  - `tree`: 노란색
+  - `road`: 회색
+  - `water`: 하늘색
+  - 그 외: 투명
+- Scene Semantics label 데이터를 보존하고 building/sky/tree/road/water 비율 계산
+- 투영된 Polygon 주변 semantic label 샘플링
+- Scene Semantics는 인식 점수에 반영하지 않고 라벨 위치 보정/디버그에만 사용
+  - building 영역이 있으면 라벨 위치를 그쪽으로 보정
+  - building 영역이 없어도 인식 점수를 낮추거나 라벨을 강제로 숨기지 않음
 
 현재 높이 결정 정책:
 
@@ -83,8 +96,8 @@ else:
 4. 포함 Polygon이 없으면 외곽 최단 거리로 보수적 fallback
 5. 현재 위치, camera pose, heading으로 대상 Polygon/POI를 화면에 투영
 6. Scene Semantics로 화면의 building 영역을 찾음
-7. 투영된 대상 영역과 building 픽셀 영역이 충분히 겹치면 인식 신뢰도 상승
-8. 라벨은 Scene Semantics building 영역 중심/상단 근처에 우선 표시
+7. 투영된 대상 영역 주변의 building 픽셀을 라벨 위치 보정에만 사용
+8. 라벨은 Polygon/POI 투영 좌표를 기본으로 하고, 가능하면 Scene Semantics building 영역 중심 근처로 보정
 9. 3D Anchor가 필요하면 높이 결정 정책과 Terrain/WGS84/Rooftop/Streetscape Anchor를 사용
 10. 가까운 대상은 외벽/입구 근처 라벨, 먼 대상은 방향/거리 중심 overlay 라벨로 표현
 ```
@@ -98,14 +111,14 @@ else:
 | CoreLocation | 기본 현재 위치 | VPS 미지원 지역 fallback |
 | ARCore Geospatial/VPS | 현재 위치/방향 보정 | 지원 지역에서 신뢰도 향상 |
 | ARKit camera pose | 카메라 자세, pitch/yaw/roll, 투영 계산 | 필수 |
-| Scene Semantics | 화면에서 building 영역 찾기 | 다음 핵심 작업 |
+| Scene Semantics | 화면에서 building 영역 찾기, 라벨 위치 보정, 디버그 overlay | 보조 기능으로 유지 |
 | Streetscape Geometry | 지원 지역에서 3D 건물 mesh와 높이 보정 | Scene Semantics 이후 |
 | Depth/Geospatial Depth | 표면 거리, occlusion, hit-test 보정 | 근거리 자연스러움 개선 |
 | Terrain/WGS84/Rooftop Anchor | 실제 공간에 라벨 고정 | 라벨 후보 위치 계산 후 |
 
 ## 6. 다음 작업 순서
 
-### 6.1 Scene Semantics building 영역 검증
+### 6.1 Scene Semantics building 영역 검증 - 1차 완료
 
 목표:
 
@@ -113,37 +126,50 @@ else:
 - 사용자가 하늘/도로/나무를 보고 있을 때 건물 인식을 확정하지 않는다.
 - 높이값이 없어도 화면상 건물 영역에 정보 라벨을 붙일 수 있게 한다.
 
-구현 방향:
+반영된 내용:
 
 ```text
 ARCore Scene Semantics 활성화
 -> semantic image/confidence 수신
 -> building 픽셀 비율 계산
--> 선택 Polygon 투영 영역과 building 영역의 겹침 계산
--> building 비율/겹침이 낮으면 확정 방지
--> building 영역 중심 또는 상단 1/3 지점을 라벨 후보 화면 좌표로 사용
+-> 선택 Polygon 투영 영역 주변의 building 영역 확인
+-> building 영역이 있으면 라벨 위치 보정
 ```
 
-우선 UI 로그:
+현재 UI 로그:
 
 - Scene Semantics 지원 여부
 - building 픽셀 비율
 - sky/tree/road 비율
-- 선택 Polygon 투영 영역과 building 영역 겹침 여부
-- 라벨 후보 화면 좌표
+- 투영된 Polygon 주변 semantic 샘플링 결과
+- Scene Semantics 라벨 보정 참고값
 
-### 6.2 Polygon 투영 결과를 점수에 반영
+아직 남은 부분:
 
-현재는 Polygon 외곽점 화면 투영이 진단 로그 중심이다. 다음에는 실제 점수에 반영한다.
+- 라벨 후보 화면 좌표 산출
+- building 영역 중심 또는 상단 1/3 지점을 실제 overlay 라벨 위치로 사용
+
+### 6.2 Polygon 투영 결과와 Scene Semantics 관계 정리 - 완료
+
+Scene Semantics를 인식 점수에 직접 반영하는 방식은 제거했다. 이유는 사용자와 건물 사이에 나무/차량/사람/간판 등이 있으면 실제로는 건물을 보고 있어도 화면 semantic은 `tree`, `road`, 기타 객체로 잡힐 수 있기 때문이다.
 
 ```text
-선택 Polygon이 화면 안에 있음 + building semantic 겹침 높음:
-    공간 점수 상승
-선택 Polygon이 화면 밖이거나 building 비율 낮음:
-    인식 확정 방지
+인식 판단:
+    OCR + POI/Polygon + 위치 + heading/pose
+
+Scene Semantics:
+    점수 가점/감점 없음
+    building 영역이 있으면 라벨 위치 보정
+    없으면 Polygon/POI 투영 좌표 fallback
 ```
 
-### 6.3 화면 overlay 라벨 MVP
+주의:
+
+- Scene Semantics는 “이 건물이 맞다/아니다”를 결정하지 않는다.
+- Scene Semantics는 라벨이 더 자연스럽게 building 영역 근처에 뜨도록 돕는 보조 신호다.
+- 정확도 핵심은 Polygon/POI 투영과 projection matrix 개선에 둔다.
+
+### 6.3 화면 overlay 라벨 MVP - 1차 완료
 
 처음부터 3D Anchor에 고정하지 않는다. 먼저 화면 overlay로 사용자가 이해 가능한 라벨을 띄운다.
 
@@ -156,7 +182,41 @@ ARCore Scene Semantics 활성화
     거리, 방향, 신뢰도 표시
 ```
 
-### 6.4 Streetscape Geometry 높이/mesh 보정
+구현 우선순위:
+
+```text
+완료:
+1. 현재 선택/인식 후보의 화면 좌표 계산
+2. Scene Semantics building 영역 안쪽으로 라벨 좌표 보정
+3. 라벨 위치 smoothing 1차 적용
+4. Scene Semantics가 없거나 building 영역이 약하면 Polygon/POI 투영 좌표 fallback
+
+남음:
+1. 근거리/중거리/원거리 라벨 스타일 분리
+2. 라벨 겹침 회피
+3. projection matrix 기반 좌표로 교체
+4. 라벨 위치 품질 현장 튜닝
+```
+
+### 6.4 Projection Matrix 기반 화면 투영 개선
+
+현재 `heading + pitch + FOV` 방식은 빠른 검증용이다. 정확도를 높이려면 ARKit 카메라의 view/projection matrix를 사용해 현실 3D 좌표를 실제 화면 2D 좌표로 변환해야 한다.
+
+목표:
+
+- VWorld Polygon의 위도/경도를 AR world 좌표로 변환한다.
+- 높이가 있으면 외벽 상단/하단 3D 점을 만든다.
+- ARKit camera pose와 projection matrix로 화면 좌표를 얻는다.
+- Scene Semantics building 영역과 더 정확하게 overlap을 계산한다.
+- 이후 overlay 라벨과 anchor 위치 계산의 공통 기반으로 사용한다.
+
+예상 효과:
+
+- heading 흔들림만으로 좌우 위치가 크게 튀는 문제 감소
+- 화면 비율/렌즈/FOV를 더 정확히 반영
+- 건물 외벽 라벨 위치가 더 자연스러워짐
+
+### 6.5 Streetscape Geometry 높이/mesh 보정
 
 VPS/Street View 지원 지역에서만 기대한다.
 
@@ -172,7 +232,7 @@ VPS/Street View 지원 지역에서만 기대한다.
 - LOD1 mesh 높이는 부정확할 수 있다.
 - mesh가 있다고 해서 자동으로 대상 건물이라고 보면 안 된다. POI/Polygon/화면 투영과 매칭해야 한다.
 
-### 6.5 Anchor 기반 라벨 고정
+### 6.6 Anchor 기반 라벨 고정
 
 overlay가 충분히 동작한 뒤 진행한다.
 

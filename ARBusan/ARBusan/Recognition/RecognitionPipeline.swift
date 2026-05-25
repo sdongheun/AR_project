@@ -8,16 +8,14 @@ struct RecognitionPipeline {
         cameraText: String,
         locationConfidence: RecognitionConfidence,
         cameraDirectionSpotIDs: Set<String>,
-        polygonValidatedSpotIDs: Set<String>,
-        sceneSemanticsEvidenceBySpotID: [String: SceneSemanticsSpotEvidence] = [:]
+        polygonValidatedSpotIDs: Set<String>
     ) -> RecognitionResult {
         let scored = scorer.score(
             candidates: candidates,
             cameraText: cameraText,
             locationConfidence: locationConfidence,
             cameraDirectionSpotIDs: cameraDirectionSpotIDs,
-            polygonValidatedSpotIDs: polygonValidatedSpotIDs,
-            sceneSemanticsEvidenceBySpotID: sceneSemanticsEvidenceBySpotID
+            polygonValidatedSpotIDs: polygonValidatedSpotIDs
         )
 
         guard let first = scored.first else {
@@ -46,7 +44,7 @@ struct RecognitionPipeline {
             return .recognized(
                 spot: first.spot,
                 confidence: .high,
-                reason: highConfidenceReason(for: first)
+                reason: "카메라 OCR/방향 후보와 Polygon 검증이 같은 건물을 가리킵니다. VPS는 위치 정확도 신호로만 반영했습니다."
             )
         }
 
@@ -54,7 +52,7 @@ struct RecognitionPipeline {
             return .recognized(
                 spot: first.spot,
                 confidence: .medium,
-                reason: mediumConfidenceReason(for: first)
+                reason: "일부 건물 인식 신호가 일치했습니다. 현장에서는 후보 선택 또는 추가 카메라 검증이 필요합니다."
             )
         }
 
@@ -99,21 +97,4 @@ struct RecognitionPipeline {
         )
     }
 
-    private func highConfidenceReason(for scored: ScoredTourismSpot) -> String {
-        var signals = ["카메라 OCR/방향 후보와 Polygon 검증이 같은 건물을 가리킵니다."]
-        if let evidence = scored.sceneSemanticsEvidence {
-            signals.append("Scene Semantics 보정: \(evidence.diagnosticText).")
-        }
-        signals.append("VPS는 위치 정확도 신호로만 반영했습니다.")
-        return signals.joined(separator: " ")
-    }
-
-    private func mediumConfidenceReason(for scored: ScoredTourismSpot) -> String {
-        var signals = ["일부 건물 인식 신호가 일치했습니다."]
-        if let evidence = scored.sceneSemanticsEvidence {
-            signals.append("Scene Semantics 보정: \(evidence.diagnosticText).")
-        }
-        signals.append("현장에서는 후보 선택 또는 추가 카메라 검증이 필요합니다.")
-        return signals.joined(separator: " ")
-    }
 }

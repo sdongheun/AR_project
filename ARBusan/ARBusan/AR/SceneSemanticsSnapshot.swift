@@ -95,6 +95,57 @@ struct SceneSemanticsSnapshot {
         )
     }
 
+    func buildingLabelAnchor(in normalizedPolygon: [CGPoint]) -> CGPoint? {
+        guard labelWidth > 0, labelHeight > 0, !labelData.isEmpty else {
+            return nil
+        }
+
+        let region = SceneSemanticsSampleRegion(points: normalizedPolygon)
+        let data = [UInt8](labelData)
+        let minX = max(0, Int((region.minX * Double(labelWidth - 1)).rounded(.down)))
+        let maxX = min(labelWidth - 1, Int((region.maxX * Double(labelWidth - 1)).rounded(.up)))
+        let minY = max(0, Int((region.minY * Double(labelHeight - 1)).rounded(.down)))
+        let maxY = min(labelHeight - 1, Int((region.maxY * Double(labelHeight - 1)).rounded(.up)))
+        guard minX <= maxX, minY <= maxY else {
+            return nil
+        }
+
+        let xStride = max(1, (maxX - minX) / 64)
+        let yStride = max(1, (maxY - minY) / 64)
+        var buildingCount = 0
+        var totalX = 0.0
+        var totalY = 0.0
+
+        for y in stride(from: minY, through: maxY, by: yStride) {
+            for x in stride(from: minX, through: maxX, by: xStride) {
+                let normalizedPoint = CGPoint(
+                    x: CGFloat(Double(x) / Double(max(labelWidth - 1, 1))),
+                    y: CGFloat(Double(y) / Double(max(labelHeight - 1, 1)))
+                )
+                if region.shouldUseWholeBox == false && !Self.polygon(normalizedPolygon, contains: normalizedPoint) {
+                    continue
+                }
+
+                guard data[y * labelWidth + x] == 2 else {
+                    continue
+                }
+
+                buildingCount += 1
+                totalX += Double(normalizedPoint.x)
+                totalY += Double(normalizedPoint.y)
+            }
+        }
+
+        guard buildingCount > 0 else {
+            return nil
+        }
+
+        return CGPoint(
+            x: CGFloat(totalX / Double(buildingCount)),
+            y: CGFloat(totalY / Double(buildingCount))
+        )
+    }
+
     private static func polygon(_ polygon: [CGPoint], contains point: CGPoint) -> Bool {
         guard polygon.count >= 3 else {
             return false
@@ -127,28 +178,8 @@ struct SceneSemanticsSpotEvidence: Equatable {
     let waterCoverageRatio: Double
     let sampledPixelCount: Int
 
-    var scoreAdjustment: Int {
-        if buildingCoverageRatio >= 0.45 {
-            return 22
-        }
-        if buildingCoverageRatio >= 0.30 {
-            return 16
-        }
-        if buildingCoverageRatio >= 0.15 {
-            return 8
-        }
-        if blockingCoverageRatio >= 0.65 {
-            return -15
-        }
-        return 0
-    }
-
-    var hasBuildingSupport: Bool {
-        buildingCoverageRatio >= 0.15
-    }
-
     var diagnosticText: String {
-        "Scene Semantics 점수 \(scoreAdjustment >= 0 ? "+" : "")\(scoreAdjustment) / building \(Self.percent(buildingCoverageRatio)) / 비건물 \(Self.percent(blockingCoverageRatio)) / 샘플 \(sampledPixelCount)px"
+        "Scene Semantics 보조 / building \(Self.percent(buildingCoverageRatio)) / 비건물 \(Self.percent(blockingCoverageRatio)) / 샘플 \(sampledPixelCount)px"
     }
 
     private static func percent(_ value: Double) -> String {
