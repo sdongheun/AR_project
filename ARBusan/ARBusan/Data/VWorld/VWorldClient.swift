@@ -5,6 +5,10 @@ struct BuildingPolygon: Equatable {
     let spotID: TourismSpot.ID
     let rings: [[CLLocationCoordinate2D]]
     let sourceLayer: String
+    let buildingName: String?
+    let heightMeters: Double?
+    let groundFloorCount: Int?
+    let sourceProperties: [String: String]
 
     var vertexCount: Int {
         rings.reduce(0) { $0 + $1.count }
@@ -42,6 +46,86 @@ struct VWorldPolygonLookupResult {
     let logs: [String]
 }
 
+enum BuildingHeightSource: String {
+    case vworldHeight
+    case streetscapeMesh
+    case floorEstimate
+    case defaultFallback
+
+    var displayName: String {
+        switch self {
+        case .vworldHeight:
+            return "브이월드 HEIGHT"
+        case .streetscapeMesh:
+            return "ARCore Streetscape Geometry"
+        case .floorEstimate:
+            return "브이월드 층수 추정"
+        case .defaultFallback:
+            return "기본값"
+        }
+    }
+}
+
+struct ResolvedBuildingHeight: Equatable {
+    let valueMeters: Double
+    let source: BuildingHeightSource
+    let confidence: RecognitionConfidence
+    let explanation: String
+
+    var displayText: String {
+        "\(String(format: "%.1f", valueMeters))m / \(source.displayName) / 신뢰도 \(confidence.displayName)"
+    }
+}
+
+struct BuildingHeightResolver {
+    private let averageFloorHeightMeters: Double
+    private let defaultHeightMeters: Double
+
+    init(averageFloorHeightMeters: Double = 3.3, defaultHeightMeters: Double = 5.0) {
+        self.averageFloorHeightMeters = averageFloorHeightMeters
+        self.defaultHeightMeters = defaultHeightMeters
+    }
+
+    func resolve(
+        polygon: BuildingPolygon,
+        streetscapeMeshHeightMeters: Double? = nil
+    ) -> ResolvedBuildingHeight {
+        if let heightMeters = polygon.heightMeters, heightMeters > 0 {
+            return ResolvedBuildingHeight(
+                valueMeters: heightMeters,
+                source: .vworldHeight,
+                confidence: .high,
+                explanation: "브이월드가 제공한 실제 HEIGHT 값을 사용했습니다."
+            )
+        }
+
+        if let streetscapeMeshHeightMeters, streetscapeMeshHeightMeters > 0 {
+            return ResolvedBuildingHeight(
+                valueMeters: streetscapeMeshHeightMeters,
+                source: .streetscapeMesh,
+                confidence: .medium,
+                explanation: "ARCore Streetscape Geometry mesh 높이 범위를 사용했습니다."
+            )
+        }
+
+        if let floorCount = polygon.groundFloorCount, floorCount > 0 {
+            return ResolvedBuildingHeight(
+                valueMeters: Double(floorCount) * averageFloorHeightMeters,
+                source: .floorEstimate,
+                confidence: .medium,
+                explanation: "브이월드 지상층수 \(floorCount)층에 평균 층고 \(String(format: "%.1f", averageFloorHeightMeters))m를 곱해 추정했습니다."
+            )
+        }
+
+        return ResolvedBuildingHeight(
+            valueMeters: defaultHeightMeters,
+            source: .defaultFallback,
+            confidence: .low,
+            explanation: "브이월드 높이/층수와 Streetscape Geometry 높이가 없어 기본 표시 높이를 사용했습니다."
+        )
+    }
+}
+
 struct MockVWorldClient: VWorldClient {
     func validatePolygon(for spot: TourismSpot) async throws -> Bool {
         spot.geometryKind == .buildingPolygon
@@ -59,7 +143,11 @@ struct MockVWorldClient: VWorldClient {
                 CLLocationCoordinate2D(latitude: center.latitude + offset, longitude: center.longitude - offset),
                 CLLocationCoordinate2D(latitude: center.latitude - offset, longitude: center.longitude - offset),
             ]],
-            sourceLayer: "mock"
+            sourceLayer: "mock",
+            buildingName: spot.name,
+            heightMeters: nil,
+            groundFloorCount: nil,
+            sourceProperties: [:]
         )
     }
 }
@@ -69,6 +157,8 @@ struct VWorldDataAPIClient: VWorldDiagnosticClient {
     private let session: URLSession
     private let buildingLayer = "LT_C_SPBD"
     private let searchHalfSizeDegrees = 0.00025
+    private let nearBoundaryFallbackDistanceMeters: CLLocationDistance = 3
+    private let buildingCandidateDistanceMeters: CLLocationDistance = 8
 
     init(apiKey: String, session: URLSession = .shared) {
         self.apiKey = apiKey
@@ -124,15 +214,39 @@ struct VWorldDataAPIClient: VWorldDiagnosticClient {
             polygon = containingPolygon
             logs.append("브이월드 선택 기준: POI가 Polygon 내부에 포함됨")
         } else {
-            polygon = parseResult.polygons.min {
-                $0.distanceFromCentroid(to: spot.center) < $1.distanceFromCentroid(to: spot.center)
+            let nearestBoundaryCandidate = parseResult.polygons
+                .map { polygon in
+                    PolygonBoundaryCandidate(
+                        polygon: polygon,
+                        distanceMeters: polygon.distanceFromBoundary(to: spot.center)
+                    )
+                }
+                .min { $0.distanceMeters < $1.distanceMeters }
+
+            if let nearestBoundaryCandidate {
+                logs.append("브이월드 POI-Polygon 외곽 최단 거리: \(String(format: "%.2f", nearestBoundaryCandidate.distanceMeters))m")
             }
-            if polygon != nil {
-                logs.append("브이월드 선택 기준: POI 내부 포함 후보 없음, centroid 최단 거리 fallback")
+
+            if let nearestBoundaryCandidate,
+               nearestBoundaryCandidate.distanceMeters <= nearBoundaryFallbackDistanceMeters {
+                polygon = nearestBoundaryCandidate.polygon
+                logs.append("브이월드 선택 기준: POI 내부 포함 없음, 외곽 \(Int(nearBoundaryFallbackDistanceMeters))m 이내 fallback")
+            } else {
+                polygon = nil
+                if let nearestBoundaryCandidate,
+                   nearestBoundaryCandidate.distanceMeters <= buildingCandidateDistanceMeters {
+                    logs.append("브이월드 선택 기준: POI 내부 포함 없음, 외곽 \(Int(nearBoundaryFallbackDistanceMeters))~\(Int(buildingCandidateDistanceMeters))m 건물 후보. 자동 선택 보류")
+                } else {
+                    logs.append("브이월드 선택 기준: POI 내부 포함 없음, 비건물형/point 관광지로 처리")
+                }
             }
         }
         if let polygon {
             logs.append("브이월드 선택 Polygon: 외곽 좌표 \(polygon.vertexCount)개 / centroid \(polygon.centroid?.latitude ?? 0), \(polygon.centroid?.longitude ?? 0)")
+            logs.append("브이월드 선택 Polygon 속성: \(polygon.attributeSummary)")
+            let resolvedHeight = BuildingHeightResolver().resolve(polygon: polygon)
+            logs.append("건물 높이 결정: \(resolvedHeight.displayText)")
+            logs.append("건물 높이 결정 사유: \(resolvedHeight.explanation)")
         } else {
             logs.append("브이월드 선택 Polygon 없음")
         }
@@ -203,6 +317,7 @@ struct VWorldDataAPIClient: VWorldDiagnosticClient {
                   let coordinates = geometry["coordinates"] else {
                 return nil
             }
+            let properties = Self.normalizedProperties(from: feature["properties"])
 
             let rings: [[CLLocationCoordinate2D]]
             switch type {
@@ -221,15 +336,92 @@ struct VWorldDataAPIClient: VWorldDiagnosticClient {
             return BuildingPolygon(
                 spotID: spotID,
                 rings: rings,
-                sourceLayer: buildingLayer
+                sourceLayer: buildingLayer,
+                buildingName: Self.firstNonEmptyString(
+                    in: properties,
+                    keys: ["BLD_NM", "bld_nm", "BULD_NM", "buld_nm", "BULD_NM_DC", "buld_nm_dc", "BD_NM", "bd_nm"]
+                ),
+                heightMeters: Self.firstDouble(
+                    in: properties,
+                    keys: ["HEIGHT", "height", "HEIT", "heit", "BLD_HG", "bld_hg"]
+                ),
+                groundFloorCount: Self.firstInt(
+                    in: properties,
+                    keys: ["GRND_FLR", "grnd_flr", "GROUND_FLR", "ground_flr", "FLR", "flr", "GRO_FLO_CO", "gro_flo_co"]
+                ),
+                sourceProperties: properties
             )
         }
         logs.append("브이월드 파싱된 Polygon 개수: \(polygons.count)")
         for (index, polygon) in polygons.enumerated() {
             logs.append("브이월드 후보 Polygon #\(index + 1): 외곽 좌표 \(polygon.vertexCount)개 / centroid \(polygon.centroidDescription) / POI 포함 \(polygon.contains(spotCenter) ? "예" : "아니오")")
+            logs.append("브이월드 후보 Polygon #\(index + 1) 속성: \(polygon.attributeSummary)")
+            logs.append("브이월드 후보 Polygon #\(index + 1) properties: \(polygon.propertiesDescription)")
             logs.append("브이월드 후보 Polygon #\(index + 1) 좌표: \(polygon.coordinateListDescription)")
         }
         return VWorldPolygonParseResult(polygons: polygons, logs: logs)
+    }
+
+    private static func normalizedProperties(from value: Any?) -> [String: String] {
+        guard let dictionary = value as? [String: Any] else {
+            return [:]
+        }
+
+        return dictionary.reduce(into: [:]) { result, pair in
+            result[pair.key] = stringValue(from: pair.value)
+        }
+    }
+
+    private static func stringValue(from value: Any) -> String {
+        if let string = value as? String {
+            return string.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if value is NSNull {
+            return ""
+        }
+        return "\(value)"
+    }
+
+    private static func firstNonEmptyString(in properties: [String: String], keys: [String]) -> String? {
+        for key in keys {
+            guard let value = properties[key]?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !value.isEmpty else {
+                continue
+            }
+            return value
+        }
+        return nil
+    }
+
+    private static func firstDouble(in properties: [String: String], keys: [String]) -> Double? {
+        for key in keys {
+            guard let value = properties[key]?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !value.isEmpty else {
+                continue
+            }
+            let normalizedValue = value.replacingOccurrences(of: ",", with: "")
+            if let double = Double(normalizedValue) {
+                return double
+            }
+        }
+        return nil
+    }
+
+    private static func firstInt(in properties: [String: String], keys: [String]) -> Int? {
+        for key in keys {
+            guard let value = properties[key]?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !value.isEmpty else {
+                continue
+            }
+            let normalizedValue = value.replacingOccurrences(of: ",", with: "")
+            if let int = Int(normalizedValue) {
+                return int
+            }
+            if let double = Double(normalizedValue) {
+                return Int(double)
+            }
+        }
+        return nil
     }
 
     private static func parsePolygonRings(from value: Any) -> [[CLLocationCoordinate2D]] {
@@ -269,6 +461,11 @@ struct VWorldDataAPIClient: VWorldDiagnosticClient {
 private struct VWorldPolygonParseResult {
     let polygons: [BuildingPolygon]
     let logs: [String]
+}
+
+private struct PolygonBoundaryCandidate {
+    let polygon: BuildingPolygon
+    let distanceMeters: CLLocationDistance
 }
 
 enum VWorldClientError: LocalizedError {
@@ -369,6 +566,61 @@ private extension BuildingPolygon {
             .distance(from: CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude))
     }
 
+    func distanceFromBoundary(to coordinate: CLLocationCoordinate2D) -> CLLocationDistance {
+        rings
+            .map { Self.distanceFromRingBoundary($0, to: coordinate) }
+            .min() ?? .greatestFiniteMagnitude
+    }
+
+    private static func distanceFromRingBoundary(
+        _ ring: [CLLocationCoordinate2D],
+        to coordinate: CLLocationCoordinate2D
+    ) -> CLLocationDistance {
+        guard ring.count >= 2 else {
+            return .greatestFiniteMagnitude
+        }
+
+        var minDistance = CLLocationDistance.greatestFiniteMagnitude
+        for index in 1..<ring.count {
+            let distance = distanceFromCoordinate(
+                coordinate,
+                toSegmentStart: ring[index - 1],
+                end: ring[index]
+            )
+            minDistance = min(minDistance, distance)
+        }
+        return minDistance
+    }
+
+    private static func distanceFromCoordinate(
+        _ coordinate: CLLocationCoordinate2D,
+        toSegmentStart start: CLLocationCoordinate2D,
+        end: CLLocationCoordinate2D
+    ) -> CLLocationDistance {
+        let metersPerLatitudeDegree = 111_320.0
+        let metersPerLongitudeDegree = cos(coordinate.latitude * .pi / 180) * metersPerLatitudeDegree
+
+        let pointX = coordinate.longitude * metersPerLongitudeDegree
+        let pointY = coordinate.latitude * metersPerLatitudeDegree
+        let startX = start.longitude * metersPerLongitudeDegree
+        let startY = start.latitude * metersPerLatitudeDegree
+        let endX = end.longitude * metersPerLongitudeDegree
+        let endY = end.latitude * metersPerLatitudeDegree
+
+        let segmentX = endX - startX
+        let segmentY = endY - startY
+        let segmentLengthSquared = segmentX * segmentX + segmentY * segmentY
+        guard segmentLengthSquared > 0 else {
+            return hypot(pointX - startX, pointY - startY)
+        }
+
+        let rawProjection = ((pointX - startX) * segmentX + (pointY - startY) * segmentY) / segmentLengthSquared
+        let projection = min(1, max(0, rawProjection))
+        let projectedX = startX + projection * segmentX
+        let projectedY = startY + projection * segmentY
+        return hypot(pointX - projectedX, pointY - projectedY)
+    }
+
     var centroidDescription: String {
         guard let centroid else {
             return "없음"
@@ -381,6 +633,23 @@ private extension BuildingPolygon {
             .flatMap { $0 }
             .map { "\($0.latitude),\($0.longitude)" }
             .joined(separator: " | ")
+    }
+
+    var attributeSummary: String {
+        let nameText = buildingName ?? "없음"
+        let heightText = heightMeters.map { "\(String(format: "%.1f", $0))m" } ?? "없음"
+        let floorText = groundFloorCount.map { "\($0)층" } ?? "없음"
+        return "건물명 \(nameText) / 높이 \(heightText) / 지상층수 \(floorText)"
+    }
+
+    var propertiesDescription: String {
+        guard !sourceProperties.isEmpty else {
+            return "없음"
+        }
+        return sourceProperties
+            .sorted { $0.key < $1.key }
+            .map { "\($0.key)=\($0.value.isEmpty ? "빈 값" : $0.value)" }
+            .joined(separator: " / ")
     }
 }
 

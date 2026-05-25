@@ -34,6 +34,18 @@ struct MVPRecognitionControlView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
+                Text(appState.cameraPoseDiagnostics)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                Text(appState.spatialAlignmentDiagnostics)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                Text(appState.polygonProjectionDiagnostics)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
                 if let lastUpdatedAt = appState.cameraHeadingLastUpdatedAt {
                     Text("마지막 heading 갱신: \(lastUpdatedAt.formatted(date: .omitted, time: .standard))")
                         .font(.caption2)
@@ -47,6 +59,14 @@ struct MVPRecognitionControlView: View {
             ) {
                 Text("위치 신뢰도: \(appState.locationConfidence.displayName)")
                     .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text("점수화 반영 신뢰도: \(appState.effectiveSpatialConfidence.displayName)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                Text(appState.spatialTrackingDiagnostics)
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
 
                 Text(appState.geospatialStatus)

@@ -47,12 +47,17 @@ ARBusan/ARBusan/Data/Mock/MockTourismSpots.swift
 - ARCore Geospatial 세션 생성 및 ARFrame 전달
 - CoreLocation/VPS 결과를 `LocationSnapshot`으로 저장
 - AR 카메라 heading 계산
+- AR 카메라 pose 진단값 표시: pitch/yaw/roll, AR session position
 - 현재 위치 + heading + 후보 좌표로 `카메라 방향 후보` 자동 계산
+- heading 변화량이 크면 점수화에 쓰는 공간 신뢰도를 한 단계 낮춤
+- 선택 Polygon 외곽점의 화면 투영/시야 교차 진단 로그 표시
 - VPS는 건물 후보가 아니라 위치 정확도 신호로만 반영
 - 수동 `VPS 후보 건물`, 수동 `Polygon 일치 건물` 선택 UI 제거
 - 카메라 방향 후보가 바뀌면 브이월드 건물통합정보에서 해당 후보 주변 Polygon을 자동 조회
 - 조회한 Polygon 외곽 좌표를 `BuildingPolygon`으로 저장
 - 브이월드 후보 Polygon 중 POI 좌표가 내부에 포함되는 Polygon을 우선 선택
+- 브이월드 Polygon properties를 로그로 남기고 건물명/높이/지상층수를 파싱
+- 건물 높이 결정 정책 추가: 브이월드 HEIGHT, Streetscape Geometry 입력값, 층수 추정, 기본값 순서
 - OCR, 카메라 방향, 위치 정확도, Polygon 신호를 점수화하는 인식 파이프라인
 - OCR과 공간 후보가 충돌하면 자동 확정하지 않고 후보 선택으로 전환
 - OCR 없이 VPS/Polygon만 맞으면 `건물 인식됨`이 아니라 `근처 후보 감지`로 표시
@@ -86,7 +91,7 @@ TourAPI 코드는 삭제하지 않고 비활성화했다.
 -> BOX와 겹치는 브이월드 건물 feature 목록 수신
 -> Polygon geometry 파싱
 -> POI가 내부에 포함되는 Polygon 우선 선택
--> 없으면 centroid 최단 거리 Polygon으로 fallback
+-> 없으면 POI와 Polygon 외곽 최단 거리로 보수적 fallback 또는 비건물형 처리
 -> 선택된 Polygon을 공간 신호로 점수화
 ```
 
@@ -107,14 +112,20 @@ TourAPI 코드는 삭제하지 않고 비활성화했다.
 - BOX 안에서 반환된 `feature 개수`
 - 앱이 파싱한 `Polygon 개수`
 - 후보 Polygon별 외곽 좌표 수, centroid, POI 포함 여부, 전체 외곽 좌표
+- 후보 Polygon별 properties 전체와 파싱된 건물명/높이/지상층수
+- 선택 Polygon의 높이 결정 결과와 출처/신뢰도/사유
 - POI 포함 Polygon 개수
-- 최종 선택 기준: `POI 내부 포함` 또는 `centroid fallback`
+- POI와 Polygon 외곽 최단 거리
+- 최종 선택 기준: `POI 내부 포함`, `외곽 3m 이내 fallback`, `자동 선택 보류`, `비건물형/point 처리`
 
 중요한 해석:
 
 - `feature 개수 N`은 카메라 인식 결과가 아니라, 브이월드가 POI BOX와 겹친 건물 데이터를 N개 반환했다는 뜻이다.
 - 후보 Polygon 좌표는 BOX 안에 있는 좌표만 자른 것이 아니라, 브이월드가 반환한 각 건물 외곽 좌표다.
 - 현재 선택 기준은 `POI 포함 Polygon` 우선이다. TourAPI POI가 실제 건물 내부 좌표라면 이 방식이 centroid만 보는 방식보다 정확하다.
+- 브이월드 속성은 건물마다 제공 수준이 다르다. 부산/김해 샘플에서는 정확한 `HEIGHT`는 거의 없고, 층수는 `gro_flo_co`로 제공되는 경우가 많았다.
+- 현재 높이 결정은 `HEIGHT`가 있으면 사용하고, 이후 Streetscape Geometry mesh 높이 입력, `gro_flo_co * 3.3m`, 기본 5m 순서로 fallback한다.
+- POI가 어떤 Polygon에도 포함되지 않으면 가까운 건물에 무조건 붙이지 않는다. 외곽 3m 이내만 fallback하고, 3~8m는 후보 로그만 남기며, 8m 초과는 비건물형/point 관광지로 처리한다.
 - 실내에서는 VPS/위치/heading이 흔들릴 수 있으므로 Polygon 조회 성공과 “카메라가 실제 그 Polygon을 보고 있음”은 별개의 문제다.
 
 ## 6. API 키 관리
@@ -147,6 +158,12 @@ ARBusan/Config/Secrets.local.xcconfig
 
 ## 8. 정확도를 위해 개선해야 할 부분
 
+세부 기술 후보와 단계별 적용 판단은 아래 자식 문서에 둔다.
+
+```text
+ARBusan/ARBusan_AR_TECH_ROADMAP.md
+```
+
 우선순위:
 
 1. `heading ↔ 선택 Polygon` 디버그 로그 추가
@@ -158,6 +175,7 @@ ARBusan/Config/Secrets.local.xcconfig
 2. 카메라 시야 cone과 Polygon 교차 검사 구현
    - 단순 후보 centroid 방향이 아니라 Polygon 외곽점/선분이 시야각 안에 들어오는지 판단한다.
    - 건물 끝과 비건물 영역을 왔다갔다하는 테스트는 이 로직이 있어야 의미 있게 판별된다.
+   - 현재는 진단 로그까지 구현했고, 인식 점수 반영은 다음 단계다.
 3. 위치/heading 신뢰도 기반 보수적 판정
    - 실내 VPS `보통`, 위치 정확도 낮음, heading 흔들림이 크면 `높음` 확정을 막는다.
    - 최근 heading 샘플 변화량을 이용해 안정 상태일 때만 공간 점수를 높인다.
@@ -167,7 +185,10 @@ ARBusan/Config/Secrets.local.xcconfig
 5. 선택 Polygon 시각화
    - 디버그 UI 또는 지도/AR 오버레이에 POI, BOX, 후보 Polygon, 선택 Polygon을 구분 표시한다.
    - 이후 선택 Polygon 외곽 기준으로 3D 핀/텍스트 앵커를 만든다.
-6. TourAPI 재연결 전 확인
+6. Scene Semantics 보조 신호 추가 검토
+7. anchor 표시 높이 결정
+   - 브이월드 높이가 있으면 사용하고, 없으면 지상층수 * 평균층고, 그래도 없으면 기본 높이로 fallback한다.
+8. TourAPI 재연결 전 확인
    - TourAPI POI 좌표가 실제 건물 내부인지 샘플로 확인한다.
    - 관광지가 건물형이 아닌 경우에는 Polygon 필수 매칭이 아니라 area/point 관광지로 처리한다.
 

@@ -14,6 +14,7 @@ final class ARSessionViewController: UIViewController {
 
     var onRecognizedCameraText: ((String) -> Void)?
     var onCameraHeadingUpdated: ((Double) -> Void)?
+    var onCameraPoseUpdated: ((CameraPoseSnapshot) -> Void)?
 
     init(geospatialSessionManager: GeospatialSessionManager) {
         self.geospatialSessionManager = geospatialSessionManager
@@ -71,15 +72,16 @@ extension ARSessionViewController: ARSessionDelegate {
         }
 
         lastHeadingTimestamp = frame.timestamp
-        let heading = compassHeadingDegrees(from: frame)
+        let pose = CameraHeadingCalculator.poseSnapshot(
+            from: frame.camera.transform,
+            eulerAngles: frame.camera.eulerAngles,
+            timestamp: frame.timestamp
+        )
 
         DispatchQueue.main.async { [weak self] in
-            self?.onCameraHeadingUpdated?(heading)
+            self?.onCameraPoseUpdated?(pose)
+            self?.onCameraHeadingUpdated?(pose.headingDegrees)
         }
-    }
-
-    private func compassHeadingDegrees(from frame: ARFrame) -> Double {
-        CameraHeadingCalculator.compassHeadingDegrees(from: frame.camera.transform)
     }
 
     private func recognizeTextIfNeeded(in frame: ARFrame) {

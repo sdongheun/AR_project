@@ -44,6 +44,10 @@ final class VWorldClientTests: XCTestCase {
         XCTAssertEqual(polygon?.spotID, "mock-gimhae-twosome-inje-192")
         XCTAssertEqual(polygon?.sourceLayer, "LT_C_SPBD")
         XCTAssertEqual(polygon?.vertexCount, 5)
+        XCTAssertEqual(polygon?.buildingName, "테스트 건물")
+        XCTAssertEqual(polygon?.heightMeters, 14.5)
+        XCTAssertEqual(polygon?.groundFloorCount, 4)
+        XCTAssertEqual(polygon?.sourceProperties["buld_nm"], "테스트 건물")
         let firstCoordinate = try XCTUnwrap(polygon?.rings.first?.first)
         XCTAssertEqual(firstCoordinate.longitude, 128.90290, accuracy: 0.000001)
         XCTAssertEqual(firstCoordinate.latitude, 35.24640, accuracy: 0.000001)
@@ -84,6 +88,66 @@ final class VWorldClientTests: XCTestCase {
         XCTAssertTrue(result.logs.contains("브이월드 선택 기준: POI가 Polygon 내부에 포함됨"))
     }
 
+    func testVWorldClientSelectsNearBoundaryPolygonWhenPOIIsWithinThreeMeters() async throws {
+        MockURLProtocol.requestHandler = { request in
+            let url = try XCTUnwrap(request.url)
+            let response = HTTPURLResponse(
+                url: url,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (Self.nearBoundaryResponse, response)
+        }
+
+        let client = VWorldDataAPIClient(apiKey: "test-vworld-key", session: makeMockSession())
+        let result = try await client.fetchBuildingPolygonWithDiagnostics(for: MockTourismSpots.gimhae[0])
+
+        XCTAssertNotNil(result.polygon)
+        XCTAssertTrue(result.logs.contains("브이월드 POI 포함 Polygon 개수: 0"))
+        XCTAssertTrue(result.logs.contains("브이월드 선택 기준: POI 내부 포함 없음, 외곽 3m 이내 fallback"))
+    }
+
+    func testVWorldClientDoesNotAutoSelectBuildingCandidateBetweenThreeAndEightMeters() async throws {
+        MockURLProtocol.requestHandler = { request in
+            let url = try XCTUnwrap(request.url)
+            let response = HTTPURLResponse(
+                url: url,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (Self.buildingCandidateOnlyResponse, response)
+        }
+
+        let client = VWorldDataAPIClient(apiKey: "test-vworld-key", session: makeMockSession())
+        let result = try await client.fetchBuildingPolygonWithDiagnostics(for: MockTourismSpots.gimhae[0])
+
+        XCTAssertNil(result.polygon)
+        XCTAssertTrue(result.logs.contains("브이월드 POI 포함 Polygon 개수: 0"))
+        XCTAssertTrue(result.logs.contains("브이월드 선택 기준: POI 내부 포함 없음, 외곽 3~8m 건물 후보. 자동 선택 보류"))
+    }
+
+    func testVWorldClientTreatsDistantPolygonAsPointOrAreaTourismSpot() async throws {
+        MockURLProtocol.requestHandler = { request in
+            let url = try XCTUnwrap(request.url)
+            let response = HTTPURLResponse(
+                url: url,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (Self.distantPolygonResponse, response)
+        }
+
+        let client = VWorldDataAPIClient(apiKey: "test-vworld-key", session: makeMockSession())
+        let result = try await client.fetchBuildingPolygonWithDiagnostics(for: MockTourismSpots.gimhae[0])
+
+        XCTAssertNil(result.polygon)
+        XCTAssertTrue(result.logs.contains("브이월드 POI 포함 Polygon 개수: 0"))
+        XCTAssertTrue(result.logs.contains("브이월드 선택 기준: POI 내부 포함 없음, 비건물형/point 관광지로 처리"))
+    }
+
     func testVWorldClientRequiresConfiguredAPIKey() async {
         let client = VWorldDataAPIClient(apiKey: "", session: makeMockSession())
 
@@ -97,10 +161,73 @@ final class VWorldClientTests: XCTestCase {
         }
     }
 
+    func testBuildingHeightResolverUsesVWorldHeightFirst() {
+        let polygon = makeTestPolygon(heightMeters: 18.5, groundFloorCount: 4)
+        let resolvedHeight = BuildingHeightResolver().resolve(
+            polygon: polygon,
+            streetscapeMeshHeightMeters: 20
+        )
+
+        XCTAssertEqual(resolvedHeight.valueMeters, 18.5)
+        XCTAssertEqual(resolvedHeight.source, .vworldHeight)
+        XCTAssertEqual(resolvedHeight.confidence, .high)
+    }
+
+    func testBuildingHeightResolverUsesStreetscapeBeforeFloorEstimate() {
+        let polygon = makeTestPolygon(heightMeters: nil, groundFloorCount: 7)
+        let resolvedHeight = BuildingHeightResolver().resolve(
+            polygon: polygon,
+            streetscapeMeshHeightMeters: 22
+        )
+
+        XCTAssertEqual(resolvedHeight.valueMeters, 22)
+        XCTAssertEqual(resolvedHeight.source, .streetscapeMesh)
+        XCTAssertEqual(resolvedHeight.confidence, .medium)
+    }
+
+    func testBuildingHeightResolverEstimatesHeightFromFloorCount() {
+        let polygon = makeTestPolygon(heightMeters: nil, groundFloorCount: 5)
+        let resolvedHeight = BuildingHeightResolver().resolve(polygon: polygon)
+
+        XCTAssertEqual(resolvedHeight.valueMeters, 16.5, accuracy: 0.001)
+        XCTAssertEqual(resolvedHeight.source, .floorEstimate)
+        XCTAssertEqual(resolvedHeight.confidence, .medium)
+    }
+
+    func testBuildingHeightResolverFallsBackToDefaultHeight() {
+        let polygon = makeTestPolygon(heightMeters: nil, groundFloorCount: nil)
+        let resolvedHeight = BuildingHeightResolver().resolve(polygon: polygon)
+
+        XCTAssertEqual(resolvedHeight.valueMeters, 5)
+        XCTAssertEqual(resolvedHeight.source, .defaultFallback)
+        XCTAssertEqual(resolvedHeight.confidence, .low)
+    }
+
     private func makeMockSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [MockURLProtocol.self]
         return URLSession(configuration: configuration)
+    }
+
+    private func makeTestPolygon(
+        heightMeters: Double?,
+        groundFloorCount: Int?
+    ) -> BuildingPolygon {
+        BuildingPolygon(
+            spotID: "test-spot",
+            rings: [[
+                CLLocationCoordinate2D(latitude: 35.0, longitude: 128.0),
+                CLLocationCoordinate2D(latitude: 35.0, longitude: 128.1),
+                CLLocationCoordinate2D(latitude: 35.1, longitude: 128.1),
+                CLLocationCoordinate2D(latitude: 35.1, longitude: 128.0),
+                CLLocationCoordinate2D(latitude: 35.0, longitude: 128.0),
+            ]],
+            sourceLayer: "test",
+            buildingName: "테스트 건물",
+            heightMeters: heightMeters,
+            groundFloorCount: groundFloorCount,
+            sourceProperties: [:]
+        )
     }
 
     private static let samplePolygonResponse = """
@@ -125,7 +252,9 @@ final class VWorldClientTests: XCTestCase {
                   ]
                 },
                 "properties": {
-                  "buld_nm": "테스트 건물"
+                  "buld_nm": "테스트 건물",
+                  "height": "14.5",
+                  "gro_flo_co": "4"
                 }
               }
             ]
@@ -179,6 +308,27 @@ final class VWorldClientTests: XCTestCase {
     }
     """.data(using: .utf8)!
 
+    private static let nearBoundaryResponse = polygonResponse(
+        minLongitude: 128.90301,
+        minLatitude: 35.24640,
+        maxLongitude: 128.90308,
+        maxLatitude: 35.24652
+    )
+
+    private static let buildingCandidateOnlyResponse = polygonResponse(
+        minLongitude: 128.90304,
+        minLatitude: 35.24640,
+        maxLongitude: 128.90312,
+        maxLatitude: 35.24652
+    )
+
+    private static let distantPolygonResponse = polygonResponse(
+        minLongitude: 128.90320,
+        minLatitude: 35.24640,
+        maxLongitude: 128.90330,
+        maxLatitude: 35.24652
+    )
+
     private static let emptyFeatureResponse = """
     {
       "response": {
@@ -191,6 +341,42 @@ final class VWorldClientTests: XCTestCase {
       }
     }
     """.data(using: .utf8)!
+
+    private static func polygonResponse(
+        minLongitude: Double,
+        minLatitude: Double,
+        maxLongitude: Double,
+        maxLatitude: Double
+    ) -> Data {
+        """
+        {
+          "response": {
+            "status": "OK",
+            "result": {
+              "featureCollection": {
+                "features": [
+                  {
+                    "type": "Feature",
+                    "geometry": {
+                      "type": "Polygon",
+                      "coordinates": [
+                        [
+                          [\(minLongitude), \(minLatitude)],
+                          [\(maxLongitude), \(minLatitude)],
+                          [\(maxLongitude), \(maxLatitude)],
+                          [\(minLongitude), \(maxLatitude)],
+                          [\(minLongitude), \(minLatitude)]
+                        ]
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+        """.data(using: .utf8)!
+    }
 }
 
 private final class MockURLProtocol: URLProtocol {

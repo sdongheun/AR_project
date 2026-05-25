@@ -14,7 +14,8 @@ struct ARExploreView: View {
                     APIKeyStatusView(statuses: appState.apiKeys.statuses)
                     GeospatialStatusView(
                         status: appState.geospatialStatus,
-                        snapshot: appState.latestLocationSnapshot
+                        coreLocationSnapshot: appState.latestCoreLocationSnapshot,
+                        geospatialSnapshot: appState.latestGeospatialLocationSnapshot
                     )
                     TourismDataStatusView(status: appState.tourismDataStatus)
 
@@ -73,8 +74,8 @@ private struct ARViewContainer: UIViewControllerRepresentable {
         viewController.onRecognizedCameraText = { text in
             appState.updateCameraTextFromLiveOCR(text)
         }
-        viewController.onCameraHeadingUpdated = { heading in
-            appState.updateCameraHeading(heading)
+        viewController.onCameraPoseUpdated = { pose in
+            appState.updateCameraPose(pose)
         }
         return viewController
     }
@@ -84,7 +85,8 @@ private struct ARViewContainer: UIViewControllerRepresentable {
 
 private struct GeospatialStatusView: View {
     let status: String
-    let snapshot: LocationSnapshot?
+    let coreLocationSnapshot: LocationSnapshot?
+    let geospatialSnapshot: LocationSnapshot?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -94,11 +96,35 @@ private struct GeospatialStatusView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
 
-            if let snapshot {
-                Text("\(snapshot.source.rawValue) \(snapshot.latitude.formatted(.number.precision(.fractionLength(5)))), \(snapshot.longitude.formatted(.number.precision(.fractionLength(5)))) / 정확도 \(Int(snapshot.horizontalAccuracy))m")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
+            LocationSnapshotRow(
+                title: "CoreLocation 좌표",
+                snapshot: coreLocationSnapshot,
+                emptyText: "CoreLocation 좌표 수신 대기 중"
+            )
+
+            LocationSnapshotRow(
+                title: "VPS 보정 좌표",
+                snapshot: geospatialSnapshot,
+                emptyText: "ARCore Geospatial 좌표 수신 대기 중"
+            )
+        }
+    }
+}
+
+private struct LocationSnapshotRow: View {
+    let title: String
+    let snapshot: LocationSnapshot?
+    let emptyText: String
+
+    var body: some View {
+        if let snapshot {
+            Text("\(title): \(snapshot.latitude.formatted(.number.precision(.fractionLength(6)))), \(snapshot.longitude.formatted(.number.precision(.fractionLength(6)))) / 정확도 \(Int(snapshot.horizontalAccuracy))m")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        } else {
+            Text("\(title): \(emptyText)")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
     }
 }

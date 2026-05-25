@@ -159,6 +159,38 @@ final class AppStatePolygonLookupTests: XCTestCase {
         XCTAssertEqual(vworldClient.requestedSpotIDs, [target.id])
     }
 
+    func testPolygonProjectionDiagnosticsReportsViewIntersection() async {
+        let vworldClient = CapturingVWorldClient(result: .polygon)
+        let appState = AppState(vworldClient: vworldClient)
+        let target = MockTourismSpots.gimhae[0]
+
+        publishLocation(
+            latitude: target.center.latitude,
+            longitude: target.center.longitude - 0.00030,
+            to: appState
+        )
+        await waitUntil { appState.latestLocationSnapshot != nil }
+
+        appState.updateCameraPose(
+            CameraPoseSnapshot(
+                headingDegrees: 90,
+                pitchDegrees: 0,
+                yawDegrees: 0,
+                rollDegrees: 0,
+                positionX: 0,
+                positionY: 0,
+                positionZ: 0,
+                timestamp: 1
+            )
+        )
+
+        await waitUntil {
+            appState.polygonProjectionDiagnostics.contains("시야 교차")
+        }
+
+        XCTAssertTrue(appState.polygonProjectionDiagnostics.contains("화면 안 외곽점"))
+    }
+
     private func publishLocation(
         latitude: CLLocationDegrees,
         longitude: CLLocationDegrees,
@@ -232,7 +264,11 @@ private final class CapturingVWorldClient: VWorldClient {
                 CLLocationCoordinate2D(latitude: center.latitude + offset, longitude: center.longitude - offset),
                 CLLocationCoordinate2D(latitude: center.latitude - offset, longitude: center.longitude - offset),
             ]],
-            sourceLayer: "test-vworld"
+            sourceLayer: "test-vworld",
+            buildingName: spot.name,
+            heightMeters: nil,
+            groundFloorCount: nil,
+            sourceProperties: [:]
         )
     }
 }
