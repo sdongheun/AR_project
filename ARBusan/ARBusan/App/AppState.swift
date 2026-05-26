@@ -70,6 +70,7 @@ final class AppState: ObservableObject {
     @Published var onScreenCandidateMarkerOverlays: [OnScreenCandidateMarkerOverlay] = []
     @Published var showsMatrixDebugMarker = true
     @Published var showsOnScreenCandidateDebugMarkers = true
+    @Published var showsFullDebugLogs = false
     @Published var cameraHeadingDegrees: Double?
     @Published var cameraHeadingSampleCount = 0
     @Published var cameraHeadingLastUpdatedAt: Date?

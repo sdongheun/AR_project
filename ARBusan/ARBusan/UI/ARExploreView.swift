@@ -68,12 +68,20 @@ struct ARExploreView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         APIKeyStatusView(statuses: appState.apiKeys.statuses)
-                        GeospatialStatusView(
-                            status: appState.geospatialStatus,
-                            coreLocationSnapshot: appState.latestCoreLocationSnapshot,
-                            geospatialSnapshot: appState.latestGeospatialLocationSnapshot
-                        )
-                        SceneSemanticsStatusView(status: appState.sceneSemanticsStatus)
+                        if appState.showsFullDebugLogs {
+                            GeospatialStatusView(
+                                status: appState.geospatialStatus,
+                                coreLocationSnapshot: appState.latestCoreLocationSnapshot,
+                                geospatialSnapshot: appState.latestGeospatialLocationSnapshot
+                            )
+                            SceneSemanticsStatusView(status: appState.sceneSemanticsStatus)
+                        } else {
+                            CompactGeospatialStatusView(
+                                geospatialSnapshot: appState.latestGeospatialLocationSnapshot,
+                                coreLocationSnapshot: appState.latestCoreLocationSnapshot,
+                                locationConfidence: appState.locationConfidence
+                            )
+                        }
                         TourismDataStatusView(status: appState.tourismDataStatus)
 
                         VStack(alignment: .leading, spacing: 6) {
@@ -86,20 +94,22 @@ struct ARExploreView: View {
 
                         MVPRecognitionControlView()
 
-                        CandidateSelectionView(result: appState.recognitionResult) { spot in
-                            appState.selectCandidate(spot)
-                        }
+                        if appState.showsFullDebugLogs {
+                            CandidateSelectionView(result: appState.recognitionResult) { spot in
+                                appState.selectCandidate(spot)
+                            }
 
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("김해 목업 건물 후보")
-                                .font(.subheadline.weight(.semibold))
-                            ForEach(appState.spots) { spot in
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(spot.name)
-                                        .font(.caption.weight(.semibold))
-                                    Text("\(spot.address) / \(spot.source.displayName)")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("김해 목업 건물 후보")
+                                    .font(.subheadline.weight(.semibold))
+                                ForEach(appState.spots) { spot in
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(spot.name)
+                                            .font(.caption.weight(.semibold))
+                                        Text("\(spot.address) / \(spot.source.displayName)")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
                                 }
                             }
                         }
@@ -357,6 +367,33 @@ private struct GeospatialStatusView: View {
                 snapshot: geospatialSnapshot,
                 emptyText: "ARCore Geospatial 좌표 수신 대기 중"
             )
+        }
+    }
+}
+
+private struct CompactGeospatialStatusView: View {
+    let geospatialSnapshot: LocationSnapshot?
+    let coreLocationSnapshot: LocationSnapshot?
+    let locationConfidence: RecognitionConfidence
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("VPS/위치 요약")
+                .font(.caption.weight(.semibold))
+
+            if let geospatialSnapshot {
+                Text("VPS 보정 좌표 수신 / 정확도 약 \(Int(geospatialSnapshot.horizontalAccuracy))m / 위치 신뢰도 \(locationConfidence.displayName)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            } else if let coreLocationSnapshot {
+                Text("CoreLocation 수신 / 정확도 약 \(Int(coreLocationSnapshot.horizontalAccuracy))m / VPS 보정 대기")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("위치 수신 대기 중")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }
