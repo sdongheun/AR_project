@@ -148,6 +148,16 @@ struct MVPRecognitionControlView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            RecognitionSignalSection(
+                title: "7. 디버그 표시",
+                caption: "3D 라벨 전환 전까지 projection matrix와 화면 안 후보 마커를 검증용으로 켜고 끕니다."
+            ) {
+                Toggle("matrix 마커 표시", isOn: $appState.showsMatrixDebugMarker)
+                    .font(.caption)
+                Toggle("핑크/주황 후보 마커 표시", isOn: $appState.showsOnScreenCandidateDebugMarkers)
+                    .font(.caption)
+            }
+
             HStack {
                 Button("건물 인식 실행") {
                     appState.runRecognition()

@@ -33,7 +33,7 @@ struct ARExploreView: View {
                         .animation(.easeOut(duration: 0.18), value: label)
                 }
 
-                if let debugOverlay = appState.matrixProjectionDebugOverlay {
+                if appState.showsMatrixDebugMarker, let debugOverlay = appState.matrixProjectionDebugOverlay {
                     MatrixProjectionDebugMarkerView(overlay: debugOverlay)
                         .position(
                             x: debugOverlay.normalizedX * geometry.size.width,
@@ -41,6 +41,28 @@ struct ARExploreView: View {
                         )
                         .allowsHitTesting(false)
                         .animation(.easeOut(duration: 0.12), value: debugOverlay)
+                }
+
+                if appState.showsOnScreenCandidateDebugMarkers {
+                    ForEach(appState.onScreenCandidateMarkerOverlays) { marker in
+                        OnScreenCandidateMarkerView(marker: marker)
+                            .position(
+                                x: marker.normalizedX * geometry.size.width,
+                                y: marker.normalizedY * geometry.size.height
+                            )
+                            .allowsHitTesting(false)
+                            .animation(.easeOut(duration: 0.14), value: marker)
+                    }
+                }
+
+                ForEach(appState.edgeMarkerOverlays) { marker in
+                    EdgeMarkerView(marker: marker)
+                        .position(
+                            x: marker.normalizedX * geometry.size.width,
+                            y: marker.normalizedY * geometry.size.height
+                        )
+                        .allowsHitTesting(false)
+                        .animation(.easeOut(duration: 0.16), value: marker)
                 }
 
                 ScrollView {
@@ -97,6 +119,75 @@ struct ARExploreView: View {
         }
         .sheet(isPresented: $showsCollection) {
             CollectionBookView(spots: appState.spots, selectedSpot: appState.selectedSpot)
+        }
+    }
+}
+
+private struct OnScreenCandidateMarkerView: View {
+    let marker: OnScreenCandidateMarkerOverlay
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(marker.shortTitle)
+                .font(.caption.weight(.bold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            if let distanceText = marker.distanceText {
+                Text(distanceText)
+                    .font(.caption2.weight(.semibold))
+                    .opacity(0.9)
+            }
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(marker.role.markerColor.opacity(0.84), in: Capsule())
+        .overlay(
+            Capsule()
+                .stroke(.white.opacity(0.82), lineWidth: 1)
+        )
+        .scaleEffect(marker.scale)
+        .shadow(color: .black.opacity(0.4), radius: 5, x: 0, y: 2)
+    }
+}
+
+private struct EdgeMarkerView: View {
+    let marker: EdgeMarkerOverlay
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: marker.systemImageName)
+                .font(.caption2.weight(.bold))
+            Text(marker.shortTitle)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            if let distanceText = marker.distanceText {
+                Text(distanceText)
+                    .font(.caption2.weight(.semibold))
+                    .opacity(0.9)
+            }
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(.black.opacity(0.72), in: Capsule())
+        .overlay(
+            Capsule()
+                .stroke(.white.opacity(0.75), lineWidth: 1)
+        )
+        .scaleEffect(marker.scale)
+        .shadow(color: .black.opacity(0.45), radius: 6, x: 0, y: 3)
+    }
+}
+
+private extension OnScreenCandidateMarkerOverlay.Role {
+    var markerColor: Color {
+        switch self {
+        case .primary:
+            return .pink
+        case .secondary:
+            return .orange
         }
     }
 }

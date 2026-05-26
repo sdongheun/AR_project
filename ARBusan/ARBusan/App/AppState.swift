@@ -22,6 +22,31 @@ struct MatrixProjectionDebugOverlay: Equatable {
     let totalPointCount: Int
 }
 
+struct EdgeMarkerOverlay: Identifiable, Equatable {
+    let id: TourismSpot.ID
+    let shortTitle: String
+    let distanceText: String?
+    let normalizedX: Double
+    let normalizedY: Double
+    let scale: Double
+    let systemImageName: String
+}
+
+struct OnScreenCandidateMarkerOverlay: Identifiable, Equatable {
+    enum Role: Equatable {
+        case primary
+        case secondary
+    }
+
+    let id: TourismSpot.ID
+    let shortTitle: String
+    let distanceText: String?
+    let normalizedX: Double
+    let normalizedY: Double
+    let scale: Double
+    let role: Role
+}
+
 @MainActor
 final class AppState: ObservableObject {
     @Published var spots: [TourismSpot]
@@ -41,6 +66,10 @@ final class AppState: ObservableObject {
     @Published var arLabelOverlay: ARLabelOverlay?
     @Published var arLabelOverlayDiagnostics = "AR 라벨 후보를 아직 계산하지 않았습니다."
     @Published var matrixProjectionDebugOverlay: MatrixProjectionDebugOverlay?
+    @Published var edgeMarkerOverlays: [EdgeMarkerOverlay] = []
+    @Published var onScreenCandidateMarkerOverlays: [OnScreenCandidateMarkerOverlay] = []
+    @Published var showsMatrixDebugMarker = true
+    @Published var showsOnScreenCandidateDebugMarkers = true
     @Published var cameraHeadingDegrees: Double?
     @Published var cameraHeadingSampleCount = 0
     @Published var cameraHeadingLastUpdatedAt: Date?
@@ -75,6 +104,9 @@ final class AppState: ObservableObject {
     private let projectionHorizontalFOVDegrees: Double = 60
     private let projectionVerticalFOVDegrees: Double = 45
     private let fovFallbackMaxHeadingDeltaDegrees: Double = 75
+    private let maxEdgeMarkerCount = 3
+    private let distantMarkerThresholdMeters: CLLocationDistance = 1_000
+    private let distantMarkerScale = 0.78
     private let buildingHeightResolver = BuildingHeightResolver()
     private var loadedTourismSpots: [TourismSpot] = []
     private var polygonLookupTask: Task<Void, Never>?
@@ -117,6 +149,8 @@ final class AppState: ObservableObject {
                 self?.updateCameraDirectionCandidate()
                 self?.refreshLocalCoordinateDiagnostics()
                 self?.refreshMatrixProjectionComparisonDiagnostics()
+                self?.refreshEdgeMarkerOverlays()
+                self?.refreshOnScreenCandidateMarkerOverlays()
             }
         }
         self.geospatialSessionManager.onStatusChanged = { [weak self] status in
@@ -190,6 +224,8 @@ final class AppState: ObservableObject {
         updateCameraDirectionCandidate()
         refreshLocalCoordinateDiagnostics()
         refreshMatrixProjectionComparisonDiagnostics()
+        refreshEdgeMarkerOverlays()
+        refreshOnScreenCandidateMarkerOverlays()
         runRecognition()
     }
 
@@ -205,6 +241,8 @@ final class AppState: ObservableObject {
         refreshLocalCoordinateDiagnostics()
         refreshMatrixProjectionComparisonDiagnostics()
         refreshARLabelOverlay()
+        refreshEdgeMarkerOverlays()
+        refreshOnScreenCandidateMarkerOverlays()
     }
 
     func runMockRecognition() {
@@ -225,6 +263,7 @@ final class AppState: ObservableObject {
 
         if case let .recognized(spot, _, _) = recognitionResult {
             selectedSpot = spot
+            refreshEdgeMarkerOverlays()
         }
         refreshARLabelOverlay()
     }
@@ -236,6 +275,7 @@ final class AppState: ObservableObject {
             confidence: .medium,
             reason: "사용자가 모호한 건물 후보 중 \(spot.name)을 선택했습니다."
         )
+        refreshEdgeMarkerOverlays()
         refreshARLabelOverlay()
     }
 
@@ -250,6 +290,8 @@ final class AppState: ObservableObject {
             polygonProjectionDiagnostics = "카메라 heading이 없어 Polygon 화면 투영을 계산할 수 없습니다."
             matrixProjectionComparisonDiagnostics = "카메라 heading이 없어 projection matrix 비교를 계산할 수 없습니다."
             matrixProjectionDebugOverlay = nil
+            edgeMarkerOverlays = []
+            onScreenCandidateMarkerOverlays = []
             arLabelOverlay = nil
             arLabelOverlayDiagnostics = "카메라 heading이 없어 AR 라벨 위치를 계산할 수 없습니다."
             polygonLookupTask?.cancel()
@@ -267,6 +309,8 @@ final class AppState: ObservableObject {
             polygonProjectionDiagnostics = "현재 위치가 없어 Polygon 화면 투영을 계산할 수 없습니다."
             matrixProjectionComparisonDiagnostics = "현재 위치가 없어 projection matrix 비교를 계산할 수 없습니다."
             matrixProjectionDebugOverlay = nil
+            edgeMarkerOverlays = []
+            onScreenCandidateMarkerOverlays = []
             arLabelOverlay = nil
             arLabelOverlayDiagnostics = "현재 위치가 없어 AR 라벨 위치를 계산할 수 없습니다."
             polygonLookupTask?.cancel()
@@ -288,6 +332,8 @@ final class AppState: ObservableObject {
             polygonProjectionDiagnostics = "현재 heading과 일치하는 후보가 없어 Polygon 화면 투영을 계산하지 않았습니다."
             matrixProjectionComparisonDiagnostics = "현재 heading과 일치하는 후보가 없어 projection matrix 비교를 계산하지 않았습니다."
             matrixProjectionDebugOverlay = nil
+            edgeMarkerOverlays = []
+            onScreenCandidateMarkerOverlays = []
             arLabelOverlay = nil
             arLabelOverlayDiagnostics = "현재 heading과 일치하는 후보가 없어 AR 라벨을 숨깁니다."
             polygonLookupTask?.cancel()
@@ -316,6 +362,7 @@ final class AppState: ObservableObject {
             polygonValidatedSpotID = spot.id
             polygonValidationStatus = "\(spot.name) 브이월드 Polygon 확보 / 외곽 좌표 \(polygon.vertexCount)개 / 높이 \(resolvedHeight.displayText)"
             updateSpatialAlignmentDiagnostics(for: spot, polygon: polygon)
+            refreshEdgeMarkerOverlays()
             refreshLocalCoordinateDiagnostics()
             refreshMatrixProjectionComparisonDiagnostics()
             refreshSceneSemanticsScoring()
@@ -441,6 +488,8 @@ final class AppState: ObservableObject {
         arLabelOverlay = nil
         arLabelOverlayDiagnostics = "후보 초기화로 AR 라벨도 초기화했습니다."
         matrixProjectionDebugOverlay = nil
+        edgeMarkerOverlays = []
+        onScreenCandidateMarkerOverlays = []
         localCoordinateDiagnostics = "후보 초기화로 local ENU 좌표 변환도 초기화했습니다."
         matrixProjectionComparisonDiagnostics = "후보 초기화로 projection matrix 비교도 초기화했습니다."
         cameraDirectionSpotID = nil
@@ -500,6 +549,239 @@ final class AppState: ObservableObject {
         if let selectedSpot, !visibleSpotIDs.contains(selectedSpot.id) {
             self.selectedSpot = nil
         }
+        edgeMarkerOverlays.removeAll { !visibleSpotIDs.contains($0.id) }
+        onScreenCandidateMarkerOverlays.removeAll { !visibleSpotIDs.contains($0.id) }
+    }
+
+    private func refreshEdgeMarkerOverlays() {
+        updateEdgeMarkerOverlays(focusing: recognitionResult.labelSpot ?? selectedSpot)
+    }
+
+    private func refreshOnScreenCandidateMarkerOverlays() {
+        guard let latestLocationSnapshot,
+              let heading = cameraHeadingDegrees,
+              let pose = cameraPoseSnapshot else {
+            onScreenCandidateMarkerOverlays = []
+            return
+        }
+
+        let visibleCandidates = spots.compactMap { spot -> (spot: TourismSpot, anchor: CGPoint, centerDistance: Double)? in
+            let polygon = buildingPolygonsBySpotID[spot.id]
+            let fovProjectedPoints = projectedPoints(
+                for: spot,
+                polygon: polygon,
+                from: latestLocationSnapshot,
+                heading: heading,
+                pitch: pose.pitchDegrees
+            )
+            let matrixProjectedPoints = matrixProjectedPoints(for: spot, polygon: polygon, from: latestLocationSnapshot)
+            let isOnScreen = edgeMarkerScreenVisibility(
+                for: spot,
+                polygon: polygon,
+                fovProjectedPoints: fovProjectedPoints,
+                matrixProjectedPoints: matrixProjectedPoints,
+                from: latestLocationSnapshot,
+                headingDegrees: heading
+            )
+            guard isOnScreen else {
+                return nil
+            }
+
+            let anchor = matrixProjectedPoints.contains(where: \.isInsideView)
+                ? matrixFallbackAnchor(for: matrixProjectedPoints)
+                : overlayFallbackAnchor(for: fovProjectedPoints)
+            let centerDistance = hypot(Double(anchor.x) - 0.5, Double(anchor.y) - 0.5)
+            return (spot, anchor, centerDistance)
+        }
+        .sorted { $0.centerDistance < $1.centerDistance }
+
+        onScreenCandidateMarkerOverlays = visibleCandidates.enumerated().map { index, item in
+            let distance = latestLocationSnapshot.coordinate.distance(to: item.spot.center)
+            return OnScreenCandidateMarkerOverlay(
+                id: item.spot.id,
+                shortTitle: item.spot.edgeMarkerShortTitle,
+                distanceText: markerDistanceText(for: distance),
+                normalizedX: Double(item.anchor.x).clamped(to: 0.08...0.92),
+                normalizedY: Double(item.anchor.y).clamped(to: 0.12...0.78),
+                scale: markerScale(for: distance),
+                role: index == 0 ? .primary : .secondary
+            )
+        }
+    }
+
+    private func updateEdgeMarkerOverlays(focusing focusedSpot: TourismSpot?) {
+        guard let latestLocationSnapshot,
+              let heading = cameraHeadingDegrees,
+              let pose = cameraPoseSnapshot else {
+            edgeMarkerOverlays = []
+            return
+        }
+
+        let focusedSpotID = focusedSpot?.id
+        let visibleLabelSpotID = arLabelOverlay?.spotID
+        let overlays = spots
+            .compactMap { spot -> (overlay: EdgeMarkerOverlay, priority: Double)? in
+                let polygon = buildingPolygonsBySpotID[spot.id]
+                let targetCoordinate = polygon?.centroid ?? spot.center
+                let fovProjectedPoints = projectedPoints(for: spot, polygon: polygon, from: latestLocationSnapshot, heading: heading, pitch: pose.pitchDegrees)
+                let matrixProjectedPoints = matrixProjectedPoints(for: spot, polygon: polygon, from: latestLocationSnapshot)
+                let isOnScreen = edgeMarkerScreenVisibility(
+                    for: spot,
+                    polygon: polygon,
+                    fovProjectedPoints: fovProjectedPoints,
+                    matrixProjectedPoints: matrixProjectedPoints,
+                    from: latestLocationSnapshot,
+                    headingDegrees: heading
+                )
+
+                if spot.id == visibleLabelSpotID {
+                    return nil
+                }
+
+                if spot.id != focusedSpotID, isOnScreen {
+                    return nil
+                }
+
+                if spot.id == focusedSpotID, isOnScreen {
+                    return nil
+                }
+
+                let projectedPoint = projectCoordinate(
+                    targetCoordinate,
+                    from: latestLocationSnapshot.coordinate,
+                    headingDegrees: heading,
+                    pitchDegrees: pose.pitchDegrees
+                )
+                let edgePosition = edgeMarkerPosition(forScreenX: projectedPoint.screenX, screenY: projectedPoint.screenY)
+                let distance = latestLocationSnapshot.coordinate.distance(to: spot.center)
+                let overlay = EdgeMarkerOverlay(
+                    id: spot.id,
+                    shortTitle: spot.edgeMarkerShortTitle,
+                    distanceText: markerDistanceText(for: distance),
+                    normalizedX: edgePosition.x,
+                    normalizedY: edgePosition.y,
+                    scale: markerScale(for: distance),
+                    systemImageName: edgePosition.systemImageName
+                )
+                return (overlay, abs(projectedPoint.horizontalDeltaDegrees))
+            }
+            .sorted { $0.priority < $1.priority }
+            .prefix(maxEdgeMarkerCount)
+            .map(\.overlay)
+        edgeMarkerOverlays = overlays.enumerated().map { index, overlay in
+            EdgeMarkerOverlay(
+                id: overlay.id,
+                shortTitle: overlay.shortTitle,
+                distanceText: overlay.distanceText,
+                normalizedX: overlay.normalizedX,
+                normalizedY: (overlay.normalizedY + Double(index) * 0.065).clamped(to: 0.12...0.82),
+                scale: overlay.scale,
+                systemImageName: overlay.systemImageName
+            )
+        }
+    }
+
+    private func markerScale(for distance: CLLocationDistance) -> Double {
+        distance > distantMarkerThresholdMeters ? distantMarkerScale : 1
+    }
+
+    private func markerDistanceText(for distance: CLLocationDistance) -> String? {
+        guard distance > distantMarkerThresholdMeters else {
+            return nil
+        }
+
+        return distance >= 10_000
+            ? "\(Int((distance / 1_000).rounded()))km"
+            : String(format: "%.1fkm", distance / 1_000)
+    }
+
+    private func projectedPoints(
+        for spot: TourismSpot,
+        polygon: BuildingPolygon?,
+        from latestLocationSnapshot: LocationSnapshot,
+        heading: Double,
+        pitch: Double
+    ) -> [ProjectedPolygonPoint] {
+        let coordinates = polygon?.rings.flatMap { $0 } ?? [spot.center]
+        return coordinates.map {
+            projectCoordinate(
+                $0,
+                from: latestLocationSnapshot.coordinate,
+                headingDegrees: heading,
+                pitchDegrees: pitch
+            )
+        }
+    }
+
+    private func edgeMarkerScreenVisibility(
+        for spot: TourismSpot,
+        polygon: BuildingPolygon?,
+        fovProjectedPoints: [ProjectedPolygonPoint],
+        matrixProjectedPoints: [CameraMatrixProjectedPoint],
+        from latestLocationSnapshot: LocationSnapshot,
+        headingDegrees: Double
+    ) -> Bool {
+        if matrixProjectedPoints.contains(where: \.isInsideView) {
+            return true
+        }
+
+        let fallbackHeadingDelta = fovFallbackHeadingDelta(
+            for: spot,
+            polygon: polygon,
+            from: latestLocationSnapshot,
+            headingDegrees: headingDegrees
+        )
+        return polygonIntersectsView(fovProjectedPoints)
+            && fallbackHeadingDelta <= fovFallbackMaxHeadingDeltaDegrees
+    }
+
+    private func edgeMarkerPosition(forScreenX screenX: Double, screenY: Double) -> (x: Double, y: Double, systemImageName: String) {
+        let minX = 0.07
+        let maxX = 0.93
+        let minY = 0.12
+        let maxY = 0.82
+        let centerX = 0.5
+        let centerY = 0.5
+        let dx = screenX - centerX
+        let dy = screenY - centerY
+
+        guard abs(dx) > 0.001 || abs(dy) > 0.001 else {
+            return (maxX, centerY, "chevron.right")
+        }
+
+        var candidates: [(t: Double, x: Double, y: Double, systemImageName: String)] = []
+        if dx > 0 {
+            let t = (maxX - centerX) / dx
+            candidates.append((t, maxX, centerY + dy * t, "chevron.right"))
+        } else if dx < 0 {
+            let t = (minX - centerX) / dx
+            candidates.append((t, minX, centerY + dy * t, "chevron.left"))
+        }
+
+        if dy > 0 {
+            let t = (maxY - centerY) / dy
+            candidates.append((t, centerX + dx * t, maxY, "chevron.down"))
+        } else if dy < 0 {
+            let t = (minY - centerY) / dy
+            candidates.append((t, centerX + dx * t, minY, "chevron.up"))
+        }
+
+        let validCandidates = candidates
+            .filter { $0.t > 0 }
+            .map {
+                (
+                    t: $0.t,
+                    x: $0.x.clamped(to: minX...maxX),
+                    y: $0.y.clamped(to: minY...maxY),
+                    systemImageName: $0.systemImageName
+                )
+            }
+
+        guard let closestEdge = validCandidates.min(by: { $0.t < $1.t }) else {
+            return (maxX, centerY, "chevron.right")
+        }
+
+        return (closestEdge.x, closestEdge.y, closestEdge.systemImageName)
     }
 
     private func appendPolygonLookupLog(_ message: String) {
@@ -829,6 +1111,8 @@ final class AppState: ObservableObject {
     private func refreshARLabelOverlay() {
         guard let spot = recognitionResult.labelSpot ?? selectedSpot else {
             arLabelOverlay = nil
+            edgeMarkerOverlays = []
+            onScreenCandidateMarkerOverlays = []
             arLabelOverlayDiagnostics = "인식/선택된 후보가 없어 AR 라벨을 숨깁니다."
             return
         }
@@ -837,6 +1121,8 @@ final class AppState: ObservableObject {
               let heading = cameraHeadingDegrees,
               let pose = cameraPoseSnapshot else {
             arLabelOverlay = nil
+            edgeMarkerOverlays = []
+            onScreenCandidateMarkerOverlays = []
             arLabelOverlayDiagnostics = "\(spot.name) 라벨 계산 대기: 위치/heading/pose 중 일부가 없습니다."
             return
         }
@@ -880,6 +1166,7 @@ final class AppState: ObservableObject {
 
         guard useMatrixProjection || fovFallbackAllowed else {
             arLabelOverlay = nil
+            refreshEdgeMarkerOverlays()
             if fovIntersectsView {
                 arLabelOverlayDiagnostics = "\(spot.name) 라벨 숨김: matrix 화면 밖, FOV fallback 방향각 차이 \(Int(fallbackHeadingDelta))도가 허용값 \(Int(fovFallbackMaxHeadingDeltaDegrees))도를 초과했습니다."
             } else {
@@ -927,6 +1214,8 @@ final class AppState: ObservableObject {
 
         let anchorSource = semanticAnchor == nil ? projectionSource : "\(projectionSource) + Scene Semantics building 중심"
         arLabelOverlayDiagnostics = "\(spot.name) AR 라벨 표시 / \(anchorSource) / x \(Int(smoothedAnchor.x * 100))% y \(Int(smoothedAnchor.y * 100))% / matrix 화면 안 \(matrixInsideCount)/\(max(matrixProjectedPoints.count, 1))개"
+        refreshEdgeMarkerOverlays()
+        refreshOnScreenCandidateMarkerOverlays()
     }
 
     private func fovFallbackHeadingDelta(
@@ -1096,6 +1385,17 @@ private extension RecognitionResult {
 private extension [TourismSpot] {
     var isMockFallback: Bool {
         !isEmpty && allSatisfy { $0.source == .mock }
+    }
+}
+
+private extension TourismSpot {
+    var edgeMarkerShortTitle: String {
+        switch name {
+        case "투썸플레이스":
+            return "투썸"
+        default:
+            return name.replacingOccurrences(of: " ", with: "")
+        }
     }
 }
 
