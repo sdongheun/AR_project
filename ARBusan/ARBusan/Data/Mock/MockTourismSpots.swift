@@ -52,4 +52,57 @@ enum MockTourismSpots {
             notes: "상업 건물이 아닌 주택이다. 약 4~5층 건물이며 실기기 테스트 위치 변경에 맞춰 추가했다."
         ),
     ]
+
+    static let yongwon: [TourismSpot] = [
+        TourismSpot(
+            id: "mock-jinhae-yongwon-mcdonalds",
+            name: "맥도날드 진해 용원",
+            address: "좌표 기반 목업",
+            districtName: "창원시 진해구",
+            category: "목업 상가",
+            source: .mock,
+            geometryKind: .buildingPolygon,
+            center: CLLocationCoordinate2D(latitude: 35.101147, longitude: 128.810617),
+            recognitionHints: ["맥도날드", "맥도날드 진해 용원", "McDonald", "McDonald's", "MCDONALD"],
+            notes: "사용자가 제공한 진해 용원 테스트 좌표 기반 목업 건물이다."
+        ),
+        TourismSpot(
+            id: "mock-jinhae-yongwon-lg-electronics",
+            name: "LG전자 용원점",
+            address: "좌표 기반 목업",
+            districtName: "창원시 진해구",
+            category: "목업 상가",
+            source: .mock,
+            geometryKind: .buildingPolygon,
+            center: CLLocationCoordinate2D(latitude: 35.101105, longitude: 128.810946),
+            recognitionHints: ["LG전자", "LG 전자", "LG전자 용원점", "LG", "엘지전자"],
+            notes: "사용자가 제공한 진해 용원 테스트 좌표 기반 목업 건물이다."
+        ),
+        TourismSpot(
+            id: "mock-jinhae-yongwon-daiso",
+            name: "다이소 용원점",
+            address: "좌표 기반 목업",
+            districtName: "창원시 진해구",
+            category: "목업 상가",
+            source: .mock,
+            geometryKind: .buildingPolygon,
+            center: CLLocationCoordinate2D(latitude: 35.100603, longitude: 128.811471),
+            recognitionHints: ["다이소", "다이소 용원점", "DAISO"],
+            notes: "사용자가 제공한 진해 용원 테스트 좌표 기반 목업 건물이다."
+        ),
+        TourismSpot(
+            id: "mock-jinhae-yongwon-meat-restaurant",
+            name: "고기집",
+            address: "좌표 기반 목업",
+            districtName: "창원시 진해구",
+            category: "목업 식당",
+            source: .mock,
+            geometryKind: .buildingPolygon,
+            center: CLLocationCoordinate2D(latitude: 35.101033, longitude: 128.811171),
+            recognitionHints: ["고기집", "고기", "식당"],
+            notes: "사용자가 제공한 진해 용원 테스트 좌표 기반 목업 건물이다."
+        ),
+    ]
+
+    static let testBuildings: [TourismSpot] = gimhae + yongwon
 }

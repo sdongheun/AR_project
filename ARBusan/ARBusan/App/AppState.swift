@@ -94,7 +94,7 @@ final class AppState: ObservableObject {
     @Published var polygonLookupLogs: [String] = []
     @Published var buildingPolygonsBySpotID: [TourismSpot.ID: BuildingPolygon] = [:]
     @Published var resolvedBuildingHeightsBySpotID: [TourismSpot.ID: ResolvedBuildingHeight] = [:]
-    @Published var tourismDataStatus = "TourAPI는 비활성화되어 있고 김해 목업 건물 후보를 사용 중입니다."
+    @Published var tourismDataStatus = "TourAPI는 비활성화되어 있고 테스트 목업 건물 후보를 사용 중입니다."
 
     private let recognitionPipeline: RecognitionPipeline
     private let cameraDirectionCandidateProvider: CameraDirectionCandidateProvider
@@ -118,7 +118,7 @@ final class AppState: ObservableObject {
     let geospatialSessionManager: GeospatialSessionManager
 
     init(
-        spots: [TourismSpot] = MockTourismSpots.gimhae,
+        spots: [TourismSpot] = MockTourismSpots.testBuildings,
         recognitionPipeline: RecognitionPipeline = RecognitionPipeline(),
         cameraDirectionCandidateProvider: CameraDirectionCandidateProvider = CameraDirectionCandidateProvider(),
         apiKeys: APIKeys = APIKeyProvider.load(),
@@ -178,7 +178,7 @@ final class AppState: ObservableObject {
     }
 
     func loadTourAPISpots() async {
-        tourismDataStatus = "TourAPI는 현재 비활성화되어 있습니다. 김해 목업 건물 후보를 유지합니다."
+        tourismDataStatus = "TourAPI는 현재 비활성화되어 있습니다. 테스트 목업 건물 후보를 유지합니다."
         applyMockSpots()
     }
 
@@ -460,7 +460,7 @@ final class AppState: ObservableObject {
     }
 
     private func useMockFallback(reason: String) {
-        loadedTourismSpots = MockTourismSpots.gimhae
+        loadedTourismSpots = MockTourismSpots.testBuildings
         clearManualSpatialSelections()
         applyNearbySpotFilter(fallbackReason: reason)
         updateCameraDirectionCandidate()
@@ -468,10 +468,10 @@ final class AppState: ObservableObject {
     }
 
     private func applyMockSpots() {
-        loadedTourismSpots = MockTourismSpots.gimhae
-        spots = MockTourismSpots.gimhae
+        loadedTourismSpots = MockTourismSpots.testBuildings
+        spots = MockTourismSpots.testBuildings
         clearManualSpatialSelections()
-        tourismDataStatus = "TourAPI 김해/부산 후보는 비활성화되어 있고 김해 목업 건물 \(MockTourismSpots.gimhae.count)개를 사용 중입니다."
+        tourismDataStatus = "TourAPI 김해/부산 후보는 비활성화되어 있고 테스트 목업 건물 \(MockTourismSpots.testBuildings.count)개를 사용 중입니다."
         updateCameraDirectionCandidate()
         runRecognition()
     }
@@ -502,11 +502,11 @@ final class AppState: ObservableObject {
         guard let latestLocationSnapshot else {
             spots = []
             if let fallbackReason {
-                tourismDataStatus = "TourAPI 대신 김해 목업 후보를 불러왔지만, 현재 위치를 기다리는 중입니다. 사유: \(fallbackReason)"
+                tourismDataStatus = "TourAPI 대신 테스트 목업 후보를 불러왔지만, 현재 위치를 기다리는 중입니다. 사유: \(fallbackReason)"
             } else if loadedTourismSpots.isEmpty {
                 tourismDataStatus = "TourAPI 김해 중심 관광지 데이터를 아직 불러오지 않았습니다."
             } else if loadedTourismSpots.isMockFallback {
-                tourismDataStatus = "TourAPI 대신 김해 목업 후보를 불러왔고, 현재 위치를 기다리는 중입니다."
+                tourismDataStatus = "TourAPI 대신 테스트 목업 후보를 불러왔고, 현재 위치를 기다리는 중입니다."
             } else {
                 tourismDataStatus = "TourAPI 김해 중심 관광지 \(loadedTourismSpots.count)개를 불러왔고, 현재 위치를 기다리는 중입니다."
             }
@@ -530,9 +530,9 @@ final class AppState: ObservableObject {
 
         let radiusText = "\(Int(nearbySpotRadiusMeters / 1_000))km"
         if let fallbackReason {
-            tourismDataStatus = "TourAPI 대신 김해 목업 후보를 사용 중입니다. 현재 위치 기준 \(radiusText) 이내 \(filteredSpots.count)/\(loadedTourismSpots.count)개 표시. 사유: \(fallbackReason)"
+            tourismDataStatus = "TourAPI 대신 테스트 목업 후보를 사용 중입니다. 현재 위치 기준 \(radiusText) 이내 \(filteredSpots.count)/\(loadedTourismSpots.count)개 표시. 사유: \(fallbackReason)"
         } else if loadedTourismSpots.isMockFallback {
-            tourismDataStatus = "TourAPI 대신 김해 목업 후보를 사용 중입니다. 현재 위치 기준 \(radiusText) 이내 \(filteredSpots.count)/\(loadedTourismSpots.count)개 표시."
+            tourismDataStatus = "TourAPI 대신 테스트 목업 후보를 사용 중입니다. 현재 위치 기준 \(radiusText) 이내 \(filteredSpots.count)/\(loadedTourismSpots.count)개 표시."
         } else {
             tourismDataStatus = "TourAPI 김해 중심 관광지 \(loadedTourismSpots.count)개 중 현재 위치 기준 \(radiusText) 이내 \(filteredSpots.count)개를 표시합니다."
         }

@@ -124,7 +124,7 @@ struct LocalGovernmentHubTourAPIClient: TourAPIClient {
 
 struct MockTourAPIClient: TourAPIClient {
     func fetchTourismSpots() async throws -> [TourismSpot] {
-        MockTourismSpots.gimhae
+        MockTourismSpots.testBuildings
     }
 }
 

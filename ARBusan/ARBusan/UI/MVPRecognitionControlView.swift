@@ -31,7 +31,7 @@ struct MVPRecognitionControlView: View {
 
                 RecognitionSignalSection(
                     title: "2. 카메라 방향 후보",
-                    caption: "내 위치와 카메라 heading을 김해 목업 건물 좌표와 비교해 자동 계산한 후보입니다."
+                    caption: "내 위치와 카메라 heading을 테스트 목업 건물 좌표와 비교해 자동 계산한 후보입니다."
                 ) {
                     Text(appState.cameraDirectionStatus)
                         .font(.caption)

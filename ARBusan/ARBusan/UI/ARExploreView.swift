@@ -100,7 +100,7 @@ struct ARExploreView: View {
                             }
 
                             VStack(alignment: .leading, spacing: 8) {
-                                Text("김해 목업 건물 후보")
+                                Text("테스트 목업 건물 후보")
                                     .font(.subheadline.weight(.semibold))
                                 ForEach(appState.spots) { spot in
                                     VStack(alignment: .leading, spacing: 2) {
