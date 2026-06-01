@@ -36,6 +36,18 @@ enum LocalENUProjector {
             upMeters: up
         )
     }
+
+    static func coordinate(
+        eastMeters: Double,
+        northMeters: Double,
+        from origin: LocationSnapshot
+    ) -> CLLocationCoordinate2D {
+        let originLatitudeRadians = origin.latitude.degreesToRadians
+        let latitude = origin.latitude + (northMeters / earthRadiusMeters).radiansToDegrees
+        let longitude = origin.longitude + (eastMeters / (earthRadiusMeters * cos(originLatitudeRadians))).radiansToDegrees
+
+        return CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+    }
 }
 
 private extension Double {

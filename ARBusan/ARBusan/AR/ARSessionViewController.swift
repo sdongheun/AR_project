@@ -5,6 +5,8 @@ import UIKit
 final class ARSessionViewController: UIViewController {
     private var arView: ARView!
     private let geospatialSessionManager: GeospatialSessionManager
+    private var geospatialDebugAnchorEntity: AnchorEntity?
+    private var shows3DGeospatialDebugMarker = true
     private let ocrRecognizer = OCRRecognizer()
     private var lastOCRTimestamp: TimeInterval = 0
     private var isRecognizingText = false
@@ -32,6 +34,9 @@ final class ARSessionViewController: UIViewController {
     override func loadView() {
         arView = ARView(frame: .zero)
         arView.session.delegate = self
+        geospatialSessionManager.onDebugAnchorUpdated = { [weak self] snapshot in
+            self?.updateGeospatialDebugAnchor(snapshot)
+        }
         view = arView
     }
 
@@ -59,6 +64,76 @@ final class ARSessionViewController: UIViewController {
         }
 
         arView.session.run(configuration)
+    }
+
+    func setShows3DGeospatialDebugMarker(_ isVisible: Bool) {
+        shows3DGeospatialDebugMarker = isVisible
+        geospatialDebugAnchorEntity?.isEnabled = isVisible
+    }
+
+    private func updateGeospatialDebugAnchor(_ snapshot: GeospatialDebugAnchorSnapshot?) {
+        guard shows3DGeospatialDebugMarker else {
+            return
+        }
+
+        guard let snapshot else {
+            if let geospatialDebugAnchorEntity {
+                arView.scene.removeAnchor(geospatialDebugAnchorEntity)
+            }
+            geospatialDebugAnchorEntity = nil
+            return
+        }
+
+        if let geospatialDebugAnchorEntity {
+            geospatialDebugAnchorEntity.transform.matrix = snapshot.transform
+            geospatialDebugAnchorEntity.isEnabled = true
+            return
+        }
+
+        let anchorEntity = AnchorEntity(world: snapshot.transform)
+        let marker = makeGeospatialDebugMarker(kind: snapshot.kind)
+        let label = makeGeospatialDebugLabel(text: snapshot.label)
+        anchorEntity.addChild(marker)
+        anchorEntity.addChild(label)
+        geospatialDebugAnchorEntity = anchorEntity
+        arView.scene.addAnchor(anchorEntity)
+    }
+
+    private func makeGeospatialDebugMarker(kind: String) -> ModelEntity {
+        let mesh = MeshResource.generateSphere(radius: 0.85)
+        let color: UIColor = kind == "Terrain" ? .systemGreen : .systemPink
+        let material = SimpleMaterial(color: color, roughness: 0.1, isMetallic: false)
+        return ModelEntity(mesh: mesh, materials: [material])
+    }
+
+    private func makeGeospatialDebugLabel(text: String) -> Entity {
+        let root = Entity()
+        root.position = SIMD3<Float>(-0.9, 1.15, 0)
+
+        let backgroundMesh = MeshResource.generatePlane(width: 2.2, height: 0.72)
+        let backgroundMaterial = SimpleMaterial(
+            color: UIColor.black.withAlphaComponent(0.78),
+            roughness: 0.2,
+            isMetallic: false
+        )
+        let background = ModelEntity(mesh: backgroundMesh, materials: [backgroundMaterial])
+        background.position = SIMD3<Float>(0.78, 0.22, -0.02)
+
+        let textMesh = MeshResource.generateText(
+            text,
+            extrusionDepth: 0.018,
+            font: .boldSystemFont(ofSize: 0.36),
+            containerFrame: CGRect(x: 0, y: 0, width: 2.0, height: 0.5),
+            alignment: .center,
+            lineBreakMode: .byTruncatingTail
+        )
+        let textMaterial = SimpleMaterial(color: .white, roughness: 0.1, isMetallic: false)
+        let textEntity = ModelEntity(mesh: textMesh, materials: [textMaterial])
+        textEntity.position = SIMD3<Float>(0, 0, 0.02)
+
+        root.addChild(background)
+        root.addChild(textEntity)
+        return root
     }
 }
 

@@ -1,6 +1,12 @@
 # ARBusan Edge Marker Rules
 
-이 문서는 `ARBusan_AR_TECH_ROADMAP.md`의 `6.4.6 projection 기반 라벨 안정화` 중 화면 안 후보 마커와 화면 밖 edge marker 규칙을 정리한다. 목적은 다음 작업자가 현재 구현 의도와 남은 작업을 바로 이해하는 것이다.
+이 문서는 `ARBusan_AR_TECH_ROADMAP.md`의 `6.4.6 projection 기반 라벨 안정화` 자식 문서다. 화면 안 후보 마커와 화면 밖 edge marker 규칙을 정리한다. 목적은 다음 작업자가 현재 구현 의도와 남은 작업을 바로 이해하는 것이다.
+
+현재 판단:
+
+- 2D overlay 기준의 최소 라벨/마커 안정화는 완료했다.
+- 세부 smoothing, 최종 edge marker UX, 화면 안 짧은 이름 마커 탭 승격은 3D 라벨 배치 MVP 이후 다시 조정한다.
+- 따라서 이 문서는 3D 전환 전 기준선 문서이며, 3D anchor/외벽 라벨이 구현되면 최종 표시 규칙을 다시 갱신한다.
 
 ## 1. 용어
 
@@ -114,8 +120,121 @@
 ## 6. 다음 진행 순서 제안
 
 1. 다음 큰 단계로 3D 라벨 배치 MVP를 시작한다.
-2. 목업 POI와 VWorld polygon을 기준으로 3D anchor/label이 실제 공간에 고정되는지 확인한다.
-3. 2D overlay 라벨과 3D 라벨을 디버그 토글로 비교한다.
-4. 3D 배치가 안정된 뒤 화면 안 짧은 이름 마커 탭 승격을 구현한다.
-5. TourAPI를 다시 연결해 1km 후보와 거리 반응형 표시를 검증한다.
-6. 120m 방향 후보 제한을 유지할지, 1km까지 확장할지 결정한다.
+2. 목업 POI와 VWorld polygon을 기준으로 외벽 후보점을 계산한다.
+3. 외벽 후보점에 임시 3D 라벨 또는 3D 디버그 노드를 표시한다.
+4. 2D overlay 라벨, matrix 마커, 3D 라벨을 디버그 토글로 비교한다.
+5. 3D 배치가 실제 건물 근처에 안정적으로 붙는지 확인한 뒤 smoothing과 edge marker 최종 규칙을 다시 정한다.
+6. 3D 기준이 잡힌 뒤 화면 안 짧은 이름 마커 탭 승격을 구현한다.
+7. TourAPI를 다시 연결해 1km 후보와 거리 반응형 표시를 검증한다.
+8. 120m 방향 후보 제한을 유지할지, 1km까지 확장할지 결정한다.
+
+## 7. 3D 라벨 배치 MVP 체크리스트
+
+이 단계도 2D overlay 작업처럼 한 번에 전부 구현하지 않는다. 각 단계마다 실기 테스트 결과를 사용자에게 확인받고, 결과가 기대와 다르면 다음 단계로 넘어가지 않는다.
+
+```text
+[x] 7.1 외벽 후보점 계산 로그
+    목적:
+        VWorld Polygon 중 어느 외곽 선분을 3D 라벨 기준점으로 삼을지 먼저 검증한다.
+    구현:
+        - 선택/인식 후보의 Polygon 외곽 선분을 만든다.
+        - 현재 사용자 위치 기준 가장 가까운 외벽 선분을 우선 후보로 선택한다.
+        - 선택된 외벽의 양 끝점, 중점, 거리, 방향각, 길이를 로그로 표시한다.
+        - 구현 완료. 사용자 실기 테스트 확인 전까지 7.2로 넘어가지 않는다.
+    사용자 테스트:
+        - 실제 건물을 바라볼 때 선택된 외벽 후보가 사용자와 마주보는 면으로 보이는가?
+        - 외벽 중점 east/north 방향이 지도상 건물 위치와 상식적으로 맞는가?
+        - 건물 모서리 근처에서 후보 외벽이 과하게 바뀌지 않는가?
+    추후 고려:
+        - 3D 라벨 기준점을 외벽 중점으로 둘지, 내 위치에서 가장 가까운 외벽 지점으로 둘지, POI와 가장 가까운 외벽 지점으로 둘지 다시 판단한다.
+        - 현재 MVP는 가장 단순하고 안정적인 외벽 중점을 기준점으로 사용한다.
+
+[x] 7.2 높이 기준값 로그
+    목적:
+        3D 라벨을 어느 높이에 띄울지 결정한다.
+    구현:
+        - ResolvedBuildingHeight 값을 3D 라벨 후보 계산에 연결한다.
+        - HEIGHT, Streetscape, 층수 추정, 기본값 중 어떤 값이 쓰였는지 로그로 표시한다.
+        - 구현 완료. 사용자 실기 테스트 확인 전까지 7.3으로 넘어가지 않는다.
+    사용자 테스트:
+        - 건물 높이값이 말이 되는 범위인가?
+        - 높이 미제공 건물에서 기본값/층수 추정 fallback이 과하게 어색하지 않은가?
+
+[x] 7.3 Terrain Anchor 우선 + WGS84 Anchor fallback 상태 로그
+    목적:
+        Street View/VPS 지원 지역에서는 Terrain Anchor를 먼저 시도하고, 지원되지 않는 지점에서는 WGS84 Anchor fallback으로 3D 라벨 배치 가능성을 검증한다.
+    구현:
+        - Terrain Anchor를 먼저 시도하고, 테스트 결과가 지원 불가로 판단되면 WGS84 Anchor fallback으로 넘어간다.
+        - 순차 테스트 후보는 외벽 중점, 외벽에서 사용자 방향 2m 지면 후보, 외벽에서 사용자 방향 5m 지면 후보, 현재 위치 지면 지원 확인 후보 순서다.
+        - 외벽 중점/2m/5m 후보는 7.2 라벨 후보 높이를 지면 위 높이로 사용한다.
+        - 현재 위치 지면 지원 확인 후보는 해당 지역의 Google terrain data 지원 여부를 가르는 진단용이며, 실제 건물 라벨 위치로 확정하지 않는다.
+        - 모든 Terrain Anchor 후보가 `errorUnsupportedLocation`으로 실패하면 외벽 중점 좌표에 WGS84 Anchor를 생성한다.
+        - WGS84 Anchor 절대고도는 우선 ARCore Geospatial altitude를 사용하고, 없으면 CoreLocation altitude를 임시 fallback으로 사용한다.
+        - WGS84 절대고도 계산은 `현재 기기 고도 + 라벨 후보 높이 - 기기 높이 가정 1.5m`로 시작한다.
+        - ARCore Earth tracking 상태가 tracking일 때 Terrain Anchor 생성을 요청한다.
+        - anchor 생성 요청, 성공, 실패, 후보 번호, WGS84 fallback 생성 여부, tracking state를 로그로 표시한다.
+        - 실제 3D 마커 표시는 7.4에서 진행한다.
+        - VPS/Geospatial tracking이 약하면 anchor 생성 대기 로그만 표시한다.
+        - 구현 완료. 사용자 실기 테스트 확인 전까지 7.4로 넘어가지 않는다.
+    사용자 테스트:
+        - Street View 지원 지역에서 Earth tracking 상태가 tracking으로 잡히는가?
+        - Terrain Anchor 요청 좌표가 외벽 중점 -> 사용자 방향 2m -> 사용자 방향 5m -> 현재 위치 순서로 시도되는가?
+        - 외벽 중점만 실패하고 2m/5m 후보가 성공하면 건물 외벽 좌표가 Terrain Anchor에 부적합했던 것으로 본다.
+        - 현재 위치 후보까지 `errorUnsupportedLocation`이면 해당 테스트 구역은 Terrain Anchor 지원이 어렵다고 보고 WGS84 Anchor fallback으로 넘어간다.
+        - Terrain Anchor 최종 실패 후 `WGS84 Anchor 생성 완료` 로그가 뜨는가?
+        - WGS84 fallback의 절대고도 기준이 ARCore Geospatial altitude인지, CoreLocation altitude인지 로그로 확인한다.
+    결정:
+        - 김해 테스트에서 현재 위치 후보까지 `errorUnsupportedLocation`이 확인되면 현 개발 단계에서는 WGS84 Anchor fallback으로 진행한다.
+        - 다만 Terrain Anchor 지원 여부는 국가/도시 전체가 아니라 실제 지점의 Google terrain/VPS 데이터 상태에 따라 달라질 수 있으므로, 부산 현장 테스트 시 같은 4단계 후보 테스트를 다시 수행한다.
+        - 부산에서 Terrain Anchor가 성공하면 해당 지점은 Terrain Anchor를 1순위로 사용하고, 실패 지점은 WGS84 Anchor fallback을 유지한다.
+        - WGS84 fallback은 절대고도 추정 오차가 있으므로 최종 고도 정책은 VWorld DEM, 다른 고도 API, 현장 보정값을 추후 재검토한다.
+
+[x] 7.4 임시 3D 디버그 노드 표시
+    목적:
+        계산된 3D 후보점이 실제 카메라 화면에서 어디에 보이는지 확인한다.
+    구현:
+        - 현재 프로젝트 렌더러가 RealityKit `ARView`이므로 `AnchorEntity + ModelEntity`로 작은 3D 구체 마커를 표시한다.
+        - Terrain Anchor 성공 시 초록색 구체, WGS84 fallback 성공 시 하늘색 구체를 표시한다.
+        - ARCore `GARAnchor`의 유효한 transform을 RealityKit world anchor로 연결한다.
+        - 기존 2D overlay/matrix 마커는 유지한다.
+        - 3D 마커는 `3D 지리 앵커 마커 표시` 개발용 토글로 켜고 끈다.
+        - 구현 완료. 사용자 실기 테스트 확인 전까지 7.5로 넘어가지 않는다.
+    사용자 테스트:
+        - 3D 마커가 실제 건물 외벽 근처에 붙어 보이는가?
+        - 기기를 조금 움직여도 2D overlay보다 자연스럽게 공간에 고정되는가?
+        - WGS84 fallback일 경우 높이/위치 오차가 어느 방향으로 나타나는가?
+
+[x] 7.5 3D 라벨 카드 MVP
+    목적:
+        3D 마커 위치에 실제 건물 이름 라벨을 붙인다.
+    구현:
+        - 3D 마커와 같은 RealityKit anchor 아래에 건물 이름 텍스트와 검은 배경판을 표시한다.
+        - Terrain/WGS84 anchor가 갱신되면 해당 anchor transform을 따라 라벨 위치도 같이 갱신된다.
+        - 현재 MVP는 가시성 확인용 고정 방향 텍스트이며, 항상 카메라를 향하는 billboard 처리는 후속 보정 단계로 남긴다.
+        - 거리별 크기 조정은 아직 적용하지 않고 고정 크기로 테스트한다.
+        - 구현 완료. 사용자 실기 테스트 확인 전까지 7.6으로 넘어가지 않는다.
+    사용자 테스트:
+        - 가까운 건물 라벨이 외벽에 붙은 것처럼 보이는가?
+        - 너무 크거나 작지 않은가?
+        - 텍스트가 카메라 방향에 따라 뒤집히거나 안 보이는 구간이 있는가?
+
+[ ] 7.6 Anchor 후보 적용
+    목적:
+        3D 라벨을 실제 지리 좌표 기준으로 더 안정적으로 고정한다.
+    구현:
+        - 테스트 환경에 맞춰 WGS84/Terrain/Rooftop/Streetscape attached anchor 후보를 적용한다.
+        - VPS가 약하면 CoreLocation 기반 3D 노드 fallback을 유지한다.
+    사용자 테스트:
+        - 위치 보정이 잡힌 뒤 라벨이 더 안정적인가?
+        - VPS 미지원 지역에서도 fallback이 실패 없이 동작하는가?
+
+[ ] 7.7 3D 기준 UX 재정리
+    목적:
+        3D 라벨을 기준으로 2D overlay와 edge marker의 역할을 다시 나눈다.
+    구현:
+        - 3D 라벨은 근거리/중거리 건물형 중심으로 사용한다.
+        - 2D overlay는 fallback 또는 원거리/비건물형 안내로 유지한다.
+        - smoothing, edge marker, 다중 후보 탭 승격을 최종 UX 기준으로 재조정한다.
+    사용자 테스트:
+        - 가까운 건물, 1km 내 관광지, 비건물형 관광지 각각에서 정보 위치가 자연스러운가?
+```

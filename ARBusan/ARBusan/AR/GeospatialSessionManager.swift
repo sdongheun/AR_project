@@ -1,15 +1,55 @@
 import ARKit
 import CoreLocation
 import Foundation
+import simd
 @_implementationOnly import ARCore
 @_implementationOnly import ARCoreGARSession
 @_implementationOnly import ARCoreGeospatial
 @_implementationOnly import ARCoreSemantics
 
+struct GeospatialTerrainAnchorRequest {
+    let spotID: TourismSpot.ID
+    let spotName: String
+    let candidates: [GeospatialTerrainAnchorCandidate]
+    let wgs84Fallback: GeospatialWGS84AnchorCandidate?
+}
+
+struct GeospatialTerrainAnchorCandidate {
+    let label: String
+    let coordinate: CLLocationCoordinate2D
+    let altitudeAboveTerrain: CLLocationDistance
+}
+
+struct GeospatialWGS84AnchorCandidate {
+    let label: String
+    let coordinate: CLLocationCoordinate2D
+    let altitude: CLLocationDistance
+    let altitudeSource: String
+}
+
+struct GeospatialDebugAnchorSnapshot {
+    let id: UUID
+    let label: String
+    let kind: String
+    let transform: simd_float4x4
+    let trackingState: String
+}
+
 final class GeospatialSessionManager: NSObject, CLLocationManagerDelegate {
     private let locationManager = CLLocationManager()
     private let apiKeysProvider: () -> APIKeys
     private var garSession: GARSession?
+    private var terrainAnchor: GARAnchor?
+    private var wgs84Anchor: GARAnchor?
+    private var terrainAnchorKey: String?
+    private var terrainAnchorFuture: GARCreateAnchorOnTerrainFuture?
+    private var terrainAnchorRequest: GeospatialTerrainAnchorRequest?
+    private var terrainAnchorCandidateIndex = 0
+    private var activeDebugAnchorID: UUID?
+    private var activeDebugAnchorLabel: String?
+    private var activeDebugAnchorKind: String?
+    private var latestTerrainAnchorStatusMessage = "Geospatial Terrain Anchor 후보를 아직 생성하지 않았습니다."
+    private var latestEarthIsTracking = false
     private var isConfigured = false
     private var isSceneSemanticsEnabled = false
     private var lastSceneSemanticsTimestamp: TimeInterval = 0
@@ -22,6 +62,8 @@ final class GeospatialSessionManager: NSObject, CLLocationManagerDelegate {
     var onStatusChanged: ((String) -> Void)?
     var onSceneSemanticsUpdated: ((SceneSemanticsSnapshot) -> Void)?
     var onSceneSemanticsStatusChanged: ((String) -> Void)?
+    var onTerrainAnchorStatusChanged: ((String) -> Void)?
+    var onDebugAnchorUpdated: ((GeospatialDebugAnchorSnapshot?) -> Void)?
 
     init(apiKeysProvider: @escaping () -> APIKeys = { APIKeyProvider.load() }) {
         self.apiKeysProvider = apiKeysProvider
@@ -100,12 +142,16 @@ final class GeospatialSessionManager: NSObject, CLLocationManagerDelegate {
         }
 
         publishSceneSemanticsIfNeeded(from: garFrame)
+        publishDebugAnchorIfNeeded(from: garFrame)
 
-        guard
-            let earth = garFrame.earth,
-            earth.trackingState == GARTrackingState.tracking,
-            let transform = earth.cameraGeospatialTransform
-        else {
+        guard let earth = garFrame.earth else {
+            latestEarthIsTracking = false
+            return
+        }
+
+        latestEarthIsTracking = earth.trackingState == GARTrackingState.tracking
+        guard latestEarthIsTracking,
+              let transform = earth.cameraGeospatialTransform else {
             return
         }
 
@@ -122,6 +168,167 @@ final class GeospatialSessionManager: NSObject, CLLocationManagerDelegate {
         )
         publish(snapshot)
         updateStatus("VPS 위치 추정 중: 정확도 약 \(Int(transform.horizontalAccuracy))m")
+    }
+
+    func createTerrainAnchorIfPossible(for request: GeospatialTerrainAnchorRequest) {
+        configureIfPossible()
+
+        guard !request.candidates.isEmpty else {
+            updateTerrainAnchorStatus("\(request.spotName) Terrain Anchor 대기: 테스트 후보 좌표가 없습니다.")
+            return
+        }
+
+        guard let garSession else {
+            updateTerrainAnchorStatus("\(request.spotName) Terrain Anchor 대기: ARCore Geospatial 세션이 아직 없습니다.")
+            return
+        }
+
+        guard latestEarthIsTracking else {
+            updateTerrainAnchorStatus("\(request.spotName) Terrain Anchor 대기: Earth tracking이 아직 tracking 상태가 아닙니다.")
+            return
+        }
+
+        let nextKey = terrainAnchorKey(for: request)
+        if terrainAnchorKey == nextKey {
+            if let terrainAnchor {
+                updateTerrainAnchorStatus("\(latestTerrainAnchorStatusMessage) / anchor tracking \(terrainAnchor.trackingState.displayText)")
+            } else {
+                updateTerrainAnchorStatus(latestTerrainAnchorStatusMessage)
+            }
+            return
+        }
+
+        removeCurrentGeospatialAnchors(from: garSession)
+        terrainAnchor = nil
+        wgs84Anchor = nil
+        terrainAnchorKey = nextKey
+        terrainAnchorRequest = request
+        terrainAnchorCandidateIndex = 0
+        terrainAnchorFuture?.cancel()
+        terrainAnchorFuture = nil
+
+        requestTerrainAnchorCandidate(0, for: request)
+    }
+
+    private func requestTerrainAnchorCandidate(_ index: Int, for request: GeospatialTerrainAnchorRequest) {
+        guard let garSession,
+              request.candidates.indices.contains(index) else {
+            return
+        }
+
+        let candidate = request.candidates[index]
+
+        do {
+            let future = try garSession.createAnchorOnTerrain(
+                coordinate: candidate.coordinate,
+                altitudeAboveTerrain: candidate.altitudeAboveTerrain,
+                eastUpSouthQAnchor: simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
+            ) { [weak self] anchor, terrainState in
+                DispatchQueue.main.async {
+                    self?.terrainAnchorFuture = nil
+                    if let anchor {
+                        self?.terrainAnchor = anchor
+                        self?.setActiveDebugAnchor(anchor, label: request.spotName, kind: "Terrain")
+                        self?.updateTerrainAnchorStatus("\(request.spotName) Terrain Anchor 생성 완료 / 후보 \(index + 1)/\(request.candidates.count) \(candidate.label) / terrain \(terrainState.displayText) / tracking \(anchor.trackingState.displayText) / 좌표 \(candidate.coordinate.shortText) / 높이 \(String(format: "%.1f", candidate.altitudeAboveTerrain))m")
+                    } else {
+                        self?.terrainAnchor = nil
+                        let failureMessage = "\(request.spotName) Terrain Anchor 생성 실패 / 후보 \(index + 1)/\(request.candidates.count) \(candidate.label) / terrain \(terrainState.displayText) / 좌표 \(candidate.coordinate.shortText) / 높이 \(String(format: "%.1f", candidate.altitudeAboveTerrain))m"
+                        if let self,
+                           terrainState.shouldTryNextTerrainCandidate,
+                           request.candidates.indices.contains(index + 1) {
+                            self.updateTerrainAnchorStatus("\(failureMessage) / 다음 후보 테스트 중")
+                            self.terrainAnchorCandidateIndex = index + 1
+                            self.requestTerrainAnchorCandidate(index + 1, for: request)
+                        } else if let self,
+                                  let fallback = request.wgs84Fallback,
+                                  terrainState == GARTerrainAnchorState.errorUnsupportedLocation {
+                            self.updateTerrainAnchorStatus("\(failureMessage) / WGS84 fallback 생성 시도")
+                            self.createWGS84Anchor(fallback, spotName: request.spotName)
+                        } else {
+                            self?.updateTerrainAnchorStatus(failureMessage)
+                        }
+                    }
+                }
+            }
+            terrainAnchorFuture = future
+            updateTerrainAnchorStatus("\(request.spotName) Terrain Anchor 생성 요청 / 후보 \(index + 1)/\(request.candidates.count) \(candidate.label) / 좌표 \(candidate.coordinate.shortText) / 지면 위 높이 \(String(format: "%.1f", candidate.altitudeAboveTerrain))m")
+        } catch {
+            terrainAnchorKey = nil
+            terrainAnchorRequest = nil
+            updateTerrainAnchorStatus("\(request.spotName) Terrain Anchor 요청 실패: \(error.localizedDescription)")
+        }
+    }
+
+    private func createWGS84Anchor(_ candidate: GeospatialWGS84AnchorCandidate, spotName: String) {
+        guard let garSession else {
+            updateTerrainAnchorStatus("\(spotName) WGS84 Anchor 대기: ARCore Geospatial 세션이 아직 없습니다.")
+            return
+        }
+
+        do {
+            let anchor = try garSession.createAnchor(
+                coordinate: candidate.coordinate,
+                altitude: candidate.altitude,
+                eastUpSouthQAnchor: simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
+            )
+            wgs84Anchor = anchor
+            setActiveDebugAnchor(anchor, label: spotName, kind: "WGS84")
+            updateTerrainAnchorStatus("\(spotName) WGS84 Anchor 생성 완료 / \(candidate.label) / tracking \(anchor.trackingState.displayText) / 좌표 \(candidate.coordinate.shortText) / 절대고도 \(String(format: "%.1f", candidate.altitude))m / 기준 \(candidate.altitudeSource)")
+        } catch {
+            wgs84Anchor = nil
+            updateTerrainAnchorStatus("\(spotName) WGS84 Anchor 생성 실패 / \(candidate.label) / 좌표 \(candidate.coordinate.shortText) / 절대고도 \(String(format: "%.1f", candidate.altitude))m / \(error.localizedDescription)")
+        }
+    }
+
+    private func removeCurrentGeospatialAnchors(from garSession: GARSession) {
+        if let terrainAnchor {
+            garSession.remove(terrainAnchor)
+        }
+        if let wgs84Anchor {
+            garSession.remove(wgs84Anchor)
+        }
+        activeDebugAnchorID = nil
+        activeDebugAnchorLabel = nil
+        activeDebugAnchorKind = nil
+        onDebugAnchorUpdated?(nil)
+    }
+
+    private func setActiveDebugAnchor(_ anchor: GARAnchor, label: String, kind: String) {
+        activeDebugAnchorID = anchor.identifier
+        activeDebugAnchorLabel = label
+        activeDebugAnchorKind = kind
+        publishDebugAnchor(anchor)
+    }
+
+    private func publishDebugAnchorIfNeeded(from frame: GARFrame) {
+        guard let activeDebugAnchorID else {
+            return
+        }
+
+        guard let anchor = frame.anchors.first(where: { $0.identifier == activeDebugAnchorID }) else {
+            return
+        }
+        publishDebugAnchor(anchor)
+    }
+
+    private func publishDebugAnchor(_ anchor: GARAnchor) {
+        guard anchor.hasValidTransform else {
+            DispatchQueue.main.async { [onDebugAnchorUpdated] in
+                onDebugAnchorUpdated?(nil)
+            }
+            return
+        }
+
+        let snapshot = GeospatialDebugAnchorSnapshot(
+            id: anchor.identifier,
+            label: activeDebugAnchorLabel ?? "Geospatial Debug Anchor",
+            kind: activeDebugAnchorKind ?? "Geospatial",
+            transform: anchor.transform,
+            trackingState: anchor.trackingState.displayText
+        )
+        DispatchQueue.main.async { [onDebugAnchorUpdated] in
+            onDebugAnchorUpdated?(snapshot)
+        }
     }
 
     private func publishSceneSemanticsIfNeeded(from garFrame: GARFrame) {
@@ -195,6 +402,91 @@ final class GeospatialSessionManager: NSObject, CLLocationManagerDelegate {
         DispatchQueue.main.async { [onSceneSemanticsStatusChanged] in
             onSceneSemanticsStatusChanged?(message)
         }
+    }
+
+    private func updateTerrainAnchorStatus(_ message: String) {
+        latestTerrainAnchorStatusMessage = message
+        DispatchQueue.main.async { [onTerrainAnchorStatusChanged] in
+            onTerrainAnchorStatusChanged?(message)
+        }
+    }
+
+    private func terrainAnchorKey(for request: GeospatialTerrainAnchorRequest) -> String {
+        let candidateKey = request.candidates
+            .map { candidate -> String in
+                let latitude = (candidate.coordinate.latitude * 1_000_000).rounded()
+                let longitude = (candidate.coordinate.longitude * 1_000_000).rounded()
+                let height = (candidate.altitudeAboveTerrain * 10).rounded()
+                return "\(latitude)-\(longitude)-\(height)"
+            }
+            .joined(separator: "|")
+        let fallbackKey: String
+        if let fallback = request.wgs84Fallback {
+            let latitude = (fallback.coordinate.latitude * 1_000_000).rounded()
+            let longitude = (fallback.coordinate.longitude * 1_000_000).rounded()
+            let altitude = (fallback.altitude * 10).rounded()
+            fallbackKey = "\(latitude)-\(longitude)-\(altitude)"
+        } else {
+            fallbackKey = "none"
+        }
+        return "\(request.spotID)-\(candidateKey)-wgs84-\(fallbackKey)"
+    }
+}
+
+private extension GARTrackingState {
+    var displayText: String {
+        switch self {
+        case GARTrackingState.tracking:
+            return "tracking"
+        case GARTrackingState.paused:
+            return "paused"
+        case GARTrackingState.stopped:
+            return "stopped"
+        @unknown default:
+            return "unknown"
+        }
+    }
+}
+
+private extension GARTerrainAnchorState {
+    var displayText: String {
+        switch self {
+        case GARTerrainAnchorState.success:
+            return "success"
+        case GARTerrainAnchorState.taskInProgress:
+            return "taskInProgress"
+        case GARTerrainAnchorState.errorInternal:
+            return "errorInternal"
+        case GARTerrainAnchorState.errorNotAuthorized:
+            return "errorNotAuthorized"
+        case GARTerrainAnchorState.errorUnsupportedLocation:
+            return "errorUnsupportedLocation"
+        case GARTerrainAnchorState.none:
+            return "none"
+        @unknown default:
+            return "unknown"
+        }
+    }
+
+    var shouldTryNextTerrainCandidate: Bool {
+        switch self {
+        case GARTerrainAnchorState.errorUnsupportedLocation,
+            GARTerrainAnchorState.errorInternal,
+            GARTerrainAnchorState.none:
+            return true
+        case GARTerrainAnchorState.success,
+            GARTerrainAnchorState.taskInProgress,
+            GARTerrainAnchorState.errorNotAuthorized:
+            return false
+        @unknown default:
+            return false
+        }
+    }
+}
+
+private extension CLLocationCoordinate2D {
+    var shortText: String {
+        "\(latitude.formatted(.number.precision(.fractionLength(6)))), \(longitude.formatted(.number.precision(.fractionLength(6))))"
     }
 }
 

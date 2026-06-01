@@ -16,6 +16,8 @@ struct MVPRecognitionControlView: View {
                     .font(.caption)
                 Toggle("핑크/주황 후보 마커 표시", isOn: $appState.showsOnScreenCandidateDebugMarkers)
                     .font(.caption)
+                Toggle("3D 지리 앵커 마커 표시", isOn: $appState.shows3DGeospatialDebugMarker)
+                    .font(.caption)
                 Toggle("전체 로그 보기", isOn: $appState.showsFullDebugLogs)
                     .font(.caption)
             }
@@ -72,6 +74,24 @@ struct MVPRecognitionControlView: View {
                         .foregroundStyle(.secondary)
 
                     Text(appState.matrixProjectionComparisonDiagnostics)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(appState.buildingFacadeAnchorDiagnostics)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(appState.buildingLabelHeightDiagnostics)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(appState.geospatialTerrainAnchorDiagnostics)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(nil)

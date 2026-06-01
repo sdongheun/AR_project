@@ -297,7 +297,9 @@ private struct ARViewContainer: UIViewControllerRepresentable {
         return viewController
     }
 
-    func updateUIViewController(_ uiViewController: ARSessionViewController, context: Context) {}
+    func updateUIViewController(_ uiViewController: ARSessionViewController, context: Context) {
+        uiViewController.setShows3DGeospatialDebugMarker(appState.shows3DGeospatialDebugMarker)
+    }
 }
 
 private struct SceneSemanticsStatusView: View {

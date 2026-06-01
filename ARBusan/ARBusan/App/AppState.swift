@@ -70,6 +70,7 @@ final class AppState: ObservableObject {
     @Published var onScreenCandidateMarkerOverlays: [OnScreenCandidateMarkerOverlay] = []
     @Published var showsMatrixDebugMarker = true
     @Published var showsOnScreenCandidateDebugMarkers = true
+    @Published var shows3DGeospatialDebugMarker = true
     @Published var showsFullDebugLogs = false
     @Published var cameraHeadingDegrees: Double?
     @Published var cameraHeadingSampleCount = 0
@@ -86,6 +87,9 @@ final class AppState: ObservableObject {
     @Published var localCoordinateDiagnostics = "local ENU 좌표 변환을 아직 계산하지 않았습니다."
     @Published var polygonProjectionDiagnostics = "선택 Polygon 화면 투영을 아직 계산하지 않았습니다."
     @Published var matrixProjectionComparisonDiagnostics = "projection matrix 비교 좌표를 아직 계산하지 않았습니다."
+    @Published var buildingFacadeAnchorDiagnostics = "3D 외벽 후보점을 아직 계산하지 않았습니다."
+    @Published var buildingLabelHeightDiagnostics = "3D 라벨 높이 기준값을 아직 계산하지 않았습니다."
+    @Published var geospatialTerrainAnchorDiagnostics = "Geospatial Terrain Anchor 후보를 아직 생성하지 않았습니다."
     @Published var cameraDirectionSpotID: TourismSpot.ID?
     @Published var cameraDirectionStatus = "카메라 방향 후보를 아직 계산하지 않았습니다."
     @Published var polygonValidationStatus = "Polygon 자동 후보를 아직 계산하지 않았습니다."
@@ -115,6 +119,7 @@ final class AppState: ObservableObject {
     private var polygonLookupNotFoundSpotIDs: Set<TourismSpot.ID> = []
     private var latestSceneSemanticsSnapshot: SceneSemanticsSnapshot?
     private var sceneSemanticsEvidenceBySpotID: [TourismSpot.ID: SceneSemanticsSpotEvidence] = [:]
+    private var lastRequestedTerrainAnchorSpotID: TourismSpot.ID?
     let geospatialSessionManager: GeospatialSessionManager
 
     init(
@@ -149,6 +154,8 @@ final class AppState: ObservableObject {
                 self?.applyNearbySpotFilter()
                 self?.updateCameraDirectionCandidate()
                 self?.refreshLocalCoordinateDiagnostics()
+                self?.refreshBuildingFacadeAnchorDiagnostics()
+                self?.refreshBuildingLabelHeightDiagnostics()
                 self?.refreshMatrixProjectionComparisonDiagnostics()
                 self?.refreshEdgeMarkerOverlays()
                 self?.refreshOnScreenCandidateMarkerOverlays()
@@ -171,6 +178,11 @@ final class AppState: ObservableObject {
         self.geospatialSessionManager.onSceneSemanticsStatusChanged = { [weak self] status in
             Task { @MainActor in
                 self?.sceneSemanticsStatus = status
+            }
+        }
+        self.geospatialSessionManager.onTerrainAnchorStatusChanged = { [weak self] status in
+            Task { @MainActor in
+                self?.geospatialTerrainAnchorDiagnostics = status
             }
         }
 
@@ -224,6 +236,8 @@ final class AppState: ObservableObject {
         refreshSpatialTrackingConfidence()
         updateCameraDirectionCandidate()
         refreshLocalCoordinateDiagnostics()
+        refreshBuildingFacadeAnchorDiagnostics()
+        refreshBuildingLabelHeightDiagnostics()
         refreshMatrixProjectionComparisonDiagnostics()
         refreshEdgeMarkerOverlays()
         refreshOnScreenCandidateMarkerOverlays()
@@ -240,6 +254,8 @@ final class AppState: ObservableObject {
         cameraProjectionSnapshot = projection
         cameraProjectionDiagnostics = projection.diagnosticText
         refreshLocalCoordinateDiagnostics()
+        refreshBuildingFacadeAnchorDiagnostics()
+        refreshBuildingLabelHeightDiagnostics()
         refreshMatrixProjectionComparisonDiagnostics()
         refreshARLabelOverlay()
         refreshEdgeMarkerOverlays()
@@ -288,6 +304,8 @@ final class AppState: ObservableObject {
             polygonValidationStatus = "카메라 heading이 없어 Polygon 자동 후보를 계산할 수 없습니다."
             spatialAlignmentDiagnostics = "카메라 heading이 없어 선택 Polygon 정렬을 계산할 수 없습니다."
             refreshLocalCoordinateDiagnostics()
+            buildingFacadeAnchorDiagnostics = "카메라 heading이 없어 현재 방향 후보의 3D 외벽 후보점을 계산하지 않았습니다."
+            buildingLabelHeightDiagnostics = "카메라 heading이 없어 현재 방향 후보의 3D 라벨 높이 기준값을 계산하지 않았습니다."
             polygonProjectionDiagnostics = "카메라 heading이 없어 Polygon 화면 투영을 계산할 수 없습니다."
             matrixProjectionComparisonDiagnostics = "카메라 heading이 없어 projection matrix 비교를 계산할 수 없습니다."
             matrixProjectionDebugOverlay = nil
@@ -307,6 +325,8 @@ final class AppState: ObservableObject {
             polygonValidationStatus = "현재 위치가 없어 Polygon 자동 후보를 계산할 수 없습니다."
             spatialAlignmentDiagnostics = "현재 위치가 없어 선택 Polygon 정렬을 계산할 수 없습니다."
             refreshLocalCoordinateDiagnostics()
+            refreshBuildingFacadeAnchorDiagnostics()
+            refreshBuildingLabelHeightDiagnostics()
             polygonProjectionDiagnostics = "현재 위치가 없어 Polygon 화면 투영을 계산할 수 없습니다."
             matrixProjectionComparisonDiagnostics = "현재 위치가 없어 projection matrix 비교를 계산할 수 없습니다."
             matrixProjectionDebugOverlay = nil
@@ -330,6 +350,8 @@ final class AppState: ObservableObject {
             polygonValidationStatus = "카메라 시야 방향과 일치하는 목업 Polygon 후보가 없습니다."
             spatialAlignmentDiagnostics = "현재 heading과 일치하는 후보가 없어 Polygon 정렬을 계산하지 않았습니다."
             refreshLocalCoordinateDiagnostics()
+            refreshBuildingFacadeAnchorDiagnostics()
+            refreshBuildingLabelHeightDiagnostics()
             polygonProjectionDiagnostics = "현재 heading과 일치하는 후보가 없어 Polygon 화면 투영을 계산하지 않았습니다."
             matrixProjectionComparisonDiagnostics = "현재 heading과 일치하는 후보가 없어 projection matrix 비교를 계산하지 않았습니다."
             matrixProjectionDebugOverlay = nil
@@ -348,6 +370,8 @@ final class AppState: ObservableObject {
         updateSpatialAlignmentDiagnostics(for: candidate)
         updateBuildingPolygon(for: candidate.spot)
         refreshLocalCoordinateDiagnostics()
+        refreshBuildingFacadeAnchorDiagnostics()
+        refreshBuildingLabelHeightDiagnostics()
         refreshMatrixProjectionComparisonDiagnostics()
         refreshSceneSemanticsScoring()
 
@@ -365,6 +389,8 @@ final class AppState: ObservableObject {
             updateSpatialAlignmentDiagnostics(for: spot, polygon: polygon)
             refreshEdgeMarkerOverlays()
             refreshLocalCoordinateDiagnostics()
+            refreshBuildingFacadeAnchorDiagnostics()
+            refreshBuildingLabelHeightDiagnostics()
             refreshMatrixProjectionComparisonDiagnostics()
             refreshSceneSemanticsScoring()
             return
@@ -428,6 +454,8 @@ final class AppState: ObservableObject {
                         self.polygonValidationStatus = "\(spot.name) 브이월드 Polygon 확보 / 외곽 좌표 \(polygon.vertexCount)개 / 높이 \(resolvedHeight.displayText)"
                         self.updateSpatialAlignmentDiagnostics(for: spot, polygon: polygon)
                         self.refreshLocalCoordinateDiagnostics()
+                        self.refreshBuildingFacadeAnchorDiagnostics()
+                        self.refreshBuildingLabelHeightDiagnostics()
                         self.refreshMatrixProjectionComparisonDiagnostics()
                         self.refreshSceneSemanticsScoring()
                     } else {
@@ -486,12 +514,16 @@ final class AppState: ObservableObject {
         resolvedBuildingHeightsBySpotID = [:]
         sceneSemanticsEvidenceBySpotID = [:]
         sceneSemanticsScoringDiagnostics = "후보 초기화로 Scene Semantics 라벨 보정도 초기화했습니다."
+        lastRequestedTerrainAnchorSpotID = nil
         arLabelOverlay = nil
         arLabelOverlayDiagnostics = "후보 초기화로 AR 라벨도 초기화했습니다."
         matrixProjectionDebugOverlay = nil
         edgeMarkerOverlays = []
         onScreenCandidateMarkerOverlays = []
         localCoordinateDiagnostics = "후보 초기화로 local ENU 좌표 변환도 초기화했습니다."
+        buildingFacadeAnchorDiagnostics = "후보 초기화로 3D 외벽 후보점도 초기화했습니다."
+        buildingLabelHeightDiagnostics = "후보 초기화로 3D 라벨 높이 기준값도 초기화했습니다."
+        geospatialTerrainAnchorDiagnostics = "후보 초기화로 Geospatial Terrain Anchor 후보도 초기화했습니다."
         matrixProjectionComparisonDiagnostics = "후보 초기화로 projection matrix 비교도 초기화했습니다."
         cameraDirectionSpotID = nil
         selectedSpot = nil
@@ -853,6 +885,286 @@ final class AppState: ObservableObject {
         return spots.min {
             latestLocationSnapshot.coordinate.distance(to: $0.center) < latestLocationSnapshot.coordinate.distance(to: $1.center)
         }
+    }
+
+    private func refreshBuildingFacadeAnchorDiagnostics() {
+        guard let latestLocationSnapshot else {
+            buildingFacadeAnchorDiagnostics = "현재 위치가 없어 3D 외벽 후보점을 계산할 수 없습니다."
+            return
+        }
+
+        guard let spot = localCoordinateTargetSpot(from: latestLocationSnapshot) else {
+            buildingFacadeAnchorDiagnostics = "3D 외벽 후보점을 계산할 POI 후보가 없습니다."
+            return
+        }
+
+        guard let polygon = buildingPolygonsBySpotID[spot.id] else {
+            buildingFacadeAnchorDiagnostics = "\(spot.name) Polygon이 아직 없어 3D 외벽 후보점을 계산할 수 없습니다."
+            return
+        }
+
+        guard let facadeCandidate = closestFacadeCandidate(
+            for: polygon,
+            from: latestLocationSnapshot
+        ) else {
+            buildingFacadeAnchorDiagnostics = "\(spot.name) Polygon 외곽 선분이 없어 3D 외벽 후보점을 계산할 수 없습니다."
+            return
+        }
+
+        let midpointBearing = facadeCandidate.midpointENU.bearingDegrees
+        let startText = "시작 east \(Int(facadeCandidate.startENU.eastMeters))m north \(Int(facadeCandidate.startENU.northMeters))m"
+        let endText = "끝 east \(Int(facadeCandidate.endENU.eastMeters))m north \(Int(facadeCandidate.endENU.northMeters))m"
+        let midpointText = "중점 east \(Int(facadeCandidate.midpointENU.eastMeters))m north \(Int(facadeCandidate.midpointENU.northMeters))m"
+        let closestText = "내 위치와 외벽 최단거리 \(Int(facadeCandidate.distanceFromUserMeters))m"
+        let lengthText = "외벽 길이 \(Int(facadeCandidate.lengthMeters))m"
+        let bearingText = "중점 방향각 \(Int(midpointBearing))도"
+
+        buildingFacadeAnchorDiagnostics = "\(spot.name) 3D 외벽 후보 / \(startText) / \(endText) / \(midpointText) / \(closestText) / \(lengthText) / \(bearingText)"
+    }
+
+    private func refreshBuildingLabelHeightDiagnostics() {
+        guard let latestLocationSnapshot else {
+            buildingLabelHeightDiagnostics = "현재 위치가 없어 3D 라벨 높이 기준값을 계산할 수 없습니다."
+            return
+        }
+
+        guard let spot = localCoordinateTargetSpot(from: latestLocationSnapshot) else {
+            buildingLabelHeightDiagnostics = "3D 라벨 높이를 계산할 POI 후보가 없습니다."
+            return
+        }
+
+        guard let polygon = buildingPolygonsBySpotID[spot.id] else {
+            buildingLabelHeightDiagnostics = "\(spot.name) Polygon이 아직 없어 3D 라벨 높이 기준값을 계산할 수 없습니다."
+            return
+        }
+
+        let resolvedHeight = resolvedBuildingHeightsBySpotID[spot.id] ?? buildingHeightResolver.resolve(polygon: polygon)
+        resolvedBuildingHeightsBySpotID[spot.id] = resolvedHeight
+
+        let labelHeightMeters = labelHeightMeters(for: resolvedHeight)
+        let sourcePropertiesText = sourceHeightPropertiesText(for: polygon)
+        buildingLabelHeightDiagnostics = "\(spot.name) 3D 라벨 높이 기준 / 건물 높이 \(resolvedHeight.displayText) / 라벨 후보 높이 \(String(format: "%.1f", labelHeightMeters))m / \(resolvedHeight.explanation)\(sourcePropertiesText)"
+        requestGeospatialTerrainAnchorIfPossible(
+            spot: spot,
+            polygon: polygon,
+            labelHeightMeters: labelHeightMeters,
+            origin: latestLocationSnapshot
+        )
+    }
+
+    private func requestGeospatialTerrainAnchorIfPossible(
+        spot: TourismSpot,
+        polygon: BuildingPolygon,
+        labelHeightMeters: Double,
+        origin: LocationSnapshot
+    ) {
+        guard let facadeCandidate = closestFacadeCandidate(for: polygon, from: origin) else {
+            geospatialTerrainAnchorDiagnostics = "\(spot.name) Terrain Anchor 대기: 외벽 후보점이 없습니다."
+            return
+        }
+
+        if lastRequestedTerrainAnchorSpotID == spot.id {
+            return
+        }
+        lastRequestedTerrainAnchorSpotID = spot.id
+
+        let candidates = terrainAnchorCandidates(
+            from: facadeCandidate,
+            labelHeightMeters: labelHeightMeters,
+            origin: origin
+        )
+        let wgs84Fallback = wgs84AnchorFallbackCandidate(
+            from: facadeCandidate,
+            labelHeightMeters: labelHeightMeters,
+            origin: origin
+        )
+        let candidateSummary = candidates
+            .map { "\($0.label) \($0.coordinate.shortText)" }
+            .joined(separator: " / ")
+        let fallbackSummary = wgs84Fallback.map {
+            " / WGS84 fallback \($0.coordinate.shortText), 절대고도 \(String(format: "%.1f", $0.altitude))m"
+        } ?? ""
+
+        geospatialTerrainAnchorDiagnostics = "\(spot.name) Terrain Anchor 순차 테스트 후보 / \(candidateSummary)\(fallbackSummary) / ARCore Earth tracking 대기 또는 요청 중"
+        geospatialSessionManager.createTerrainAnchorIfPossible(
+            for: GeospatialTerrainAnchorRequest(
+                spotID: spot.id,
+                spotName: spot.name,
+                candidates: candidates,
+                wgs84Fallback: wgs84Fallback
+            )
+        )
+    }
+
+    private func terrainAnchorCandidates(
+        from facadeCandidate: BuildingFacadeCandidate,
+        labelHeightMeters: Double,
+        origin: LocationSnapshot
+    ) -> [GeospatialTerrainAnchorCandidate] {
+        var candidates = [
+            GeospatialTerrainAnchorCandidate(
+                label: "외벽 중점",
+                coordinate: facadeCandidate.midpointCoordinate,
+                altitudeAboveTerrain: labelHeightMeters
+            )
+        ]
+
+        let midpointEast = facadeCandidate.midpointENU.eastMeters
+        let midpointNorth = facadeCandidate.midpointENU.northMeters
+        let midpointDistance = max(hypot(midpointEast, midpointNorth), 0.001)
+        let unitEastTowardUser = -midpointEast / midpointDistance
+        let unitNorthTowardUser = -midpointNorth / midpointDistance
+
+        for offsetMeters in [2.0, 5.0] {
+            let east = midpointEast + unitEastTowardUser * offsetMeters
+            let north = midpointNorth + unitNorthTowardUser * offsetMeters
+            let coordinate = LocalENUProjector.coordinate(
+                eastMeters: east,
+                northMeters: north,
+                from: origin
+            )
+            candidates.append(
+                GeospatialTerrainAnchorCandidate(
+                    label: "사용자 방향 \(Int(offsetMeters))m 지면 후보",
+                    coordinate: coordinate,
+                    altitudeAboveTerrain: labelHeightMeters
+                )
+            )
+        }
+
+        candidates.append(
+            GeospatialTerrainAnchorCandidate(
+                label: "현재 위치 지면 지원 확인",
+                coordinate: origin.coordinate,
+                altitudeAboveTerrain: min(labelHeightMeters, 1.5)
+            )
+        )
+
+        return candidates
+    }
+
+    private func wgs84AnchorFallbackCandidate(
+        from facadeCandidate: BuildingFacadeCandidate,
+        labelHeightMeters: Double,
+        origin: LocationSnapshot
+    ) -> GeospatialWGS84AnchorCandidate? {
+        let deviceHeightAssumptionMeters = 1.5
+        let relativeLabelHeightFromCameraGround = labelHeightMeters - deviceHeightAssumptionMeters
+
+        if let geospatialAltitude = latestGeospatialLocationSnapshot?.altitude {
+            return GeospatialWGS84AnchorCandidate(
+                label: "외벽 중점 WGS84 fallback",
+                coordinate: facadeCandidate.midpointCoordinate,
+                altitude: geospatialAltitude + relativeLabelHeightFromCameraGround,
+                altitudeSource: "ARCore Geospatial altitude \(String(format: "%.1f", geospatialAltitude))m + 라벨높이 \(String(format: "%.1f", labelHeightMeters))m - 기기높이 \(String(format: "%.1f", deviceHeightAssumptionMeters))m"
+            )
+        }
+
+        guard let coreLocationAltitude = origin.altitude else {
+            return nil
+        }
+
+        return GeospatialWGS84AnchorCandidate(
+            label: "외벽 중점 WGS84 fallback",
+            coordinate: facadeCandidate.midpointCoordinate,
+            altitude: coreLocationAltitude + relativeLabelHeightFromCameraGround,
+            altitudeSource: "CoreLocation altitude \(String(format: "%.1f", coreLocationAltitude))m + 라벨높이 \(String(format: "%.1f", labelHeightMeters))m - 기기높이 \(String(format: "%.1f", deviceHeightAssumptionMeters))m"
+        )
+    }
+
+    private func labelHeightMeters(for resolvedHeight: ResolvedBuildingHeight) -> Double {
+        let middleHeight = resolvedHeight.valueMeters * 0.55
+        return middleHeight.clamped(to: 2.2...12.0)
+    }
+
+    private func sourceHeightPropertiesText(for polygon: BuildingPolygon) -> String {
+        let keys = ["HEIGHT", "height", "bld_height", "buld_hg", "gro_flo_co"]
+        let values = keys.compactMap { key -> String? in
+            guard let value = polygon.sourceProperties[key], !value.isEmpty else {
+                return nil
+            }
+            return "\(key)=\(value)"
+        }
+
+        guard !values.isEmpty else {
+            return " / 원본 높이 속성 없음"
+        }
+        return " / 원본 속성 \(values.joined(separator: ", "))"
+    }
+
+    private func closestFacadeCandidate(
+        for polygon: BuildingPolygon,
+        from origin: LocationSnapshot
+    ) -> BuildingFacadeCandidate? {
+        polygon.rings
+            .flatMap { facadeSegments(for: $0, from: origin) }
+            .min { $0.distanceFromUserMeters < $1.distanceFromUserMeters }
+    }
+
+    private func facadeSegments(
+        for ring: [CLLocationCoordinate2D],
+        from origin: LocationSnapshot
+    ) -> [BuildingFacadeCandidate] {
+        guard ring.count >= 2 else {
+            return []
+        }
+
+        let ringIsClosed = ring.first?.isApproximatelyEqual(to: ring.last) == true
+        let segmentCount = ringIsClosed ? ring.count - 1 : ring.count
+
+        return (0..<segmentCount).compactMap { index in
+            let startCoordinate = ring[index]
+            let endCoordinate = ring[(index + 1) % ring.count]
+            let startENU = LocalENUProjector.project(startCoordinate, from: origin)
+            let endENU = LocalENUProjector.project(endCoordinate, from: origin)
+            let deltaEast = endENU.eastMeters - startENU.eastMeters
+            let deltaNorth = endENU.northMeters - startENU.northMeters
+            let lengthMeters = hypot(deltaEast, deltaNorth)
+            guard lengthMeters > 0.5 else {
+                return nil
+            }
+
+            let midpointCoordinate = CLLocationCoordinate2D(
+                latitude: (startCoordinate.latitude + endCoordinate.latitude) / 2,
+                longitude: (startCoordinate.longitude + endCoordinate.longitude) / 2
+            )
+            let midpointENU = LocalENUProjector.project(midpointCoordinate, from: origin)
+            let distanceFromUser = distanceFromOriginToSegment(
+                startENU: startENU,
+                endENU: endENU
+            )
+
+            return BuildingFacadeCandidate(
+                startCoordinate: startCoordinate,
+                endCoordinate: endCoordinate,
+                midpointCoordinate: midpointCoordinate,
+                startENU: startENU,
+                endENU: endENU,
+                midpointENU: midpointENU,
+                lengthMeters: lengthMeters,
+                distanceFromUserMeters: distanceFromUser
+            )
+        }
+    }
+
+    private func distanceFromOriginToSegment(
+        startENU: LocalENUCoordinate,
+        endENU: LocalENUCoordinate
+    ) -> Double {
+        let segmentEast = endENU.eastMeters - startENU.eastMeters
+        let segmentNorth = endENU.northMeters - startENU.northMeters
+        let segmentLengthSquared = segmentEast * segmentEast + segmentNorth * segmentNorth
+        guard segmentLengthSquared > 0 else {
+            return startENU.groundDistanceMeters
+        }
+
+        let originToStartEast = -startENU.eastMeters
+        let originToStartNorth = -startENU.northMeters
+        let projectedRatio = ((originToStartEast * segmentEast) + (originToStartNorth * segmentNorth)) / segmentLengthSquared
+        let clampedRatio = projectedRatio.clamped(to: 0...1)
+        let closestEast = startENU.eastMeters + clampedRatio * segmentEast
+        let closestNorth = startENU.northMeters + clampedRatio * segmentNorth
+        return hypot(closestEast, closestNorth)
     }
 
     private func updateSpatialAlignmentDiagnostics(for candidate: CameraDirectionCandidate) {
@@ -1361,6 +1673,17 @@ private struct ProjectedPolygonPoint {
     let isInsideView: Bool
 }
 
+private struct BuildingFacadeCandidate {
+    let startCoordinate: CLLocationCoordinate2D
+    let endCoordinate: CLLocationCoordinate2D
+    let midpointCoordinate: CLLocationCoordinate2D
+    let startENU: LocalENUCoordinate
+    let endENU: LocalENUCoordinate
+    let midpointENU: LocalENUCoordinate
+    let lengthMeters: Double
+    let distanceFromUserMeters: Double
+}
+
 private extension RecognitionResult {
     var labelSpot: TourismSpot? {
         switch self {
@@ -1465,6 +1788,19 @@ private extension RecognitionConfidence {
 }
 
 private extension CLLocationCoordinate2D {
+    var shortText: String {
+        "\(latitude.formatted(.number.precision(.fractionLength(6)))), \(longitude.formatted(.number.precision(.fractionLength(6))))"
+    }
+
+    func isApproximatelyEqual(to other: CLLocationCoordinate2D?) -> Bool {
+        guard let other else {
+            return false
+        }
+
+        return abs(latitude - other.latitude) < 0.0000001
+            && abs(longitude - other.longitude) < 0.0000001
+    }
+
     func distance(to destination: CLLocationCoordinate2D) -> CLLocationDistance {
         CLLocation(latitude: latitude, longitude: longitude)
             .distance(from: CLLocation(latitude: destination.latitude, longitude: destination.longitude))

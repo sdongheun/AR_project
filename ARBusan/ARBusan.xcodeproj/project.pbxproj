@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 63;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -86,7 +86,7 @@
 		494635BC1A7B61CEA73DF29E /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
 		4BA5637E4EAC2D0F5721D0F6 /* Pods_ARBusan.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_ARBusan.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		576FC25B48053261FDE3B2E6 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
-		5964D7CE5BBC53E7B950D19C /* ARBusan.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ARBusan.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		5964D7CE5BBC53E7B950D19C /* ARBusan.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ARBusan.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		5B94377B0F6A4D737C1A4D39 /* PermissionStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionStatus.swift; sourceTree = "<group>"; };
 		5E2D591C0A78864DAE148580 /* CameraProjectionSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraProjectionSnapshot.swift; sourceTree = "<group>"; };
 		62E30F3355CD5092DCF7D66D /* AppStateHeadingDiagnosticsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStateHeadingDiagnosticsTests.swift; sourceTree = "<group>"; };
@@ -96,7 +96,7 @@
 		6900F8BE2E7DA41660DE44DD /* VisitRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisitRepository.swift; sourceTree = "<group>"; };
 		6B204D4D867B80E2A2A6AF5C /* VWorldClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VWorldClientTests.swift; sourceTree = "<group>"; };
 		720E65E6365B610695833BFD /* MockTourismSpots.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockTourismSpots.swift; sourceTree = "<group>"; };
-		7DCBF102F4329D2C8C8B3747 /* ARBusanTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = ARBusanTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		7DCBF102F4329D2C8C8B3747 /* ARBusanTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ARBusanTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		8305A11BDD8F08EA07A1F426 /* TourAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TourAPIClient.swift; sourceTree = "<group>"; };
 		86E1BEFF4915330160AE3E1A /* CameraHeadingCalculatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraHeadingCalculatorTests.swift; sourceTree = "<group>"; };
 		8989B3268BB30B85032504D3 /* TourismSpot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TourismSpot.swift; sourceTree = "<group>"; };
@@ -235,7 +235,6 @@
 				41F2D31FBC3BD4CD119F430F /* Pods-ARBusanTests.debug.xcconfig */,
 				0AFACDCC6BDFAB77AA30FF92 /* Pods-ARBusanTests.release.xcconfig */,
 			);
-			name = Pods;
 			path = Pods;
 			sourceTree = "<group>";
 		};
@@ -408,11 +407,6 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
-				TargetAttributes = {
-					D055590804B2AB709C7533E4 = {
-						DevelopmentTeam = 642X5R37S7;
-					};
-				};
 			};
 			buildConfigurationList = 1C14AC301C9D9CD958385387 /* Build configuration list for PBXProject "ARBusan" */;
 			compatibilityVersion = "Xcode 14.0";
@@ -424,7 +418,6 @@
 			);
 			mainGroup = A14CC79BAAED1E00CED7AFB3;
 			minimizedProjectReferenceProxies = 1;
-			preferredProjectObjectVersion = 77;
 			productRefGroup = 55F800E240A35202EB42C5A8 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -455,9 +448,13 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-ARBusanTests/Pods-ARBusanTests-resources-${CONFIGURATION}-input-files.xcfilelist",
 			);
+			inputPaths = (
+			);
 			name = "[CP] Copy Pods Resources";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-ARBusanTests/Pods-ARBusanTests-resources-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -472,9 +469,13 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-ARBusanTests/Pods-ARBusanTests-frameworks-${CONFIGURATION}-input-files.xcfilelist",
 			);
+			inputPaths = (
+			);
 			name = "[CP] Embed Pods Frameworks";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-ARBusanTests/Pods-ARBusanTests-frameworks-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -533,9 +534,13 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-ARBusan/Pods-ARBusan-frameworks-${CONFIGURATION}-input-files.xcfilelist",
 			);
+			inputPaths = (
+			);
 			name = "[CP] Embed Pods Frameworks";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-ARBusan/Pods-ARBusan-frameworks-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -550,9 +555,13 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-ARBusan/Pods-ARBusan-resources-${CONFIGURATION}-input-files.xcfilelist",
 			);
+			inputPaths = (
+			);
 			name = "[CP] Copy Pods Resources";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-ARBusan/Pods-ARBusan-resources-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;

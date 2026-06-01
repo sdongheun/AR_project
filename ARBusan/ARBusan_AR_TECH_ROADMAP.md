@@ -305,17 +305,25 @@ Scene Semantics:
 
 현재는 기능 완성을 우선한다. 카메라 상시 사용에 따른 발열/배터리 최적화는 추후 별도 단계에서 다룬다.
 
-진행 순서:
+현재 판단:
+
+- `6.4.6 projection 기반 라벨 안정화`는 2D overlay 기준 최소 동작까지 완료했다.
+- 세부 smoothing, 최종 edge marker UX, 다중 후보 탭 승격은 3D 라벨 기준이 잡힌 뒤 다시 조정한다.
+- 이유는 현재 라벨이 2D overlay라서, 3D anchor/외벽 라벨로 넘어가면 안정화 기준과 UX 규칙이 다시 바뀔 가능성이 높기 때문이다.
+- `ARBusan_EDGE_MARKER_RULES.md`는 이 문서의 6.4.6 자식 문서로 유지하며, 현재 2D 표시 기준선과 3D 전환 전 임시 규칙을 기록한다.
+
+최신 진행 순서:
 
 ```text
-1. 6.4.6 안정화
-   - smoothing 적용
-   - 화면 가장자리 마커 규칙 적용
-   - 거리 반응형 라벨/마커 적용
+1. 3D 라벨 배치 MVP
+   - 목업 POI + VWorld Polygon 기준으로 외벽 후보점을 계산
+   - ARKit/ARCore 좌표계에 3D 라벨 후보 위치를 만든다
+   - 2D overlay 라벨과 3D 라벨을 디버그 토글로 비교한다
 
-2. 디버그 UI 정리
-   - 사용자용 UI와 개발자용 로그 분리
-   - 디버그 패널 접기/펼치기
+2. 3D 라벨 기준 안정화
+   - 3D 라벨이 실제 건물 근처에 고정되는지 확인
+   - 근거리/중거리/원거리에서 라벨이 자연스러운지 확인
+   - 2D overlay fallback과 edge marker 전환 조건을 다시 정리
 
 3. TourAPI 다시 연결
    - 목업에서 검증한 POI -> VWorld Polygon -> projection 라벨 흐름을 TourAPI 후보에 적용
@@ -330,6 +338,12 @@ Scene Semantics:
    - 탭 상세
    - 거리/신뢰도/간단 설명 구성
    - 선택 상태와 다중 후보 표시 개선
+
+6. 6.4.6 세부 안정화 재개
+   - 3D 기준 smoothing 계수 확정
+   - edge marker 최종 UI 조정
+   - 화면 안 짧은 이름 마커 탭 승격
+   - 120m 방향 후보 제한 재검토
 ```
 
 ### 6.5 Streetscape Geometry 높이/mesh 보정
@@ -367,6 +381,39 @@ overlay가 충분히 동작한 뒤 진행한다.
 3. Scene Semantics building 영역으로 화면상 위치 보정
 4. 높이 결정 정책으로 대략 높이 선택
 5. Anchor 또는 overlay 라벨 생성
+```
+
+3D 라벨 MVP 진행 순서:
+
+```text
+1. 외벽 후보점 계산
+   - 선택 Polygon의 각 외곽 선분을 만든다.
+   - 현재 사용자 위치와 가장 마주보는 선분을 우선 후보로 고른다.
+   - 선분 중점 또는 POI에 가까운 외벽점을 라벨 기준점으로 둔다.
+
+2. 높이 기준값 결정
+   - 브이월드 HEIGHT가 있으면 사용한다.
+   - 없으면 Streetscape Geometry 높이 입력을 받을 수 있는 구조를 둔다.
+   - 없으면 층수 * 3.3m를 사용한다.
+   - 그래도 없으면 기본 높이를 사용한다.
+
+3. 3D 월드 좌표 생성
+   - 외벽 기준점 위도/경도를 현재 origin 기준 ENU 좌표로 변환한다.
+   - 라벨 높이는 건물 중간 높이 또는 사용자 눈높이보다 약간 위로 둔다.
+   - 초기 MVP에서는 anchor 생성 전, AR world 좌표에 임시 3D 노드를 표시해 좌표가 맞는지 본다.
+
+4. 2D overlay와 3D 후보 동시 표시
+   - 기존 2D 라벨은 유지한다.
+   - 3D 후보 라벨은 개발용 토글로 켜고 끈다.
+   - 두 위치가 실제 건물 기준으로 얼마나 차이 나는지 현장 테스트한다.
+
+5. Anchor 후보 적용
+   - WGS84/Terrain/Rooftop/Streetscape attached anchor 중 현재 테스트 환경에서 가능한 방식을 붙인다.
+   - VPS가 약한 지역에서는 CoreLocation 기반 fallback을 유지한다.
+
+6. 3D 기준 UX 재정리
+   - 3D 라벨이 안정되면 2D 라벨은 fallback 또는 원거리용으로 역할을 줄인다.
+   - edge marker, smoothing, 다중 후보 탭 승격은 이 단계에서 다시 확정한다.
 ```
 
 ## 7. 거리별 UX 원칙
