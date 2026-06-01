@@ -11,18 +11,6 @@ struct ARExploreView: View {
                     .frame(width: geometry.size.width, height: geometry.size.height)
                     .ignoresSafeArea()
 
-                if let overlayImage = appState.sceneSemanticsOverlayImage {
-                    Image(uiImage: overlayImage)
-                        .resizable()
-                        .interpolation(.none)
-                        .scaledToFill()
-                        .frame(width: geometry.size.width, height: geometry.size.height)
-                        .clipped()
-                        .opacity(0.55)
-                        .ignoresSafeArea()
-                        .allowsHitTesting(false)
-                }
-
                 if let label = appState.arLabelOverlay {
                     ARSpotLabelView(label: label)
                         .position(

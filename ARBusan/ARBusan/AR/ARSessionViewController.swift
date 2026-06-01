@@ -6,11 +6,14 @@ final class ARSessionViewController: UIViewController {
     private var arView: ARView!
     private let geospatialSessionManager: GeospatialSessionManager
     private var geospatialDebugAnchorEntity: AnchorEntity?
+    private var geospatialDebugMarkerEntity: ModelEntity?
+    private var geospatialDebugLabelEntity: Entity?
     private var shows3DGeospatialDebugMarker = true
     private let ocrRecognizer = OCRRecognizer()
     private var lastOCRTimestamp: TimeInterval = 0
     private var isRecognizingText = false
-    private let ocrInterval: TimeInterval = 2.0
+    private let shouldRunLiveOCR = false
+    private let ocrInterval: TimeInterval = 3.5
     private var lastHeadingTimestamp: TimeInterval = 0
     private let headingInterval: TimeInterval = 0.25
     private var lastProjectionTimestamp: TimeInterval = 0
@@ -59,10 +62,6 @@ final class ARSessionViewController: UIViewController {
         let configuration = ARWorldTrackingConfiguration()
         configuration.worldAlignment = .gravityAndHeading
 
-        if ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) {
-            configuration.sceneReconstruction = .mesh
-        }
-
         arView.session.run(configuration)
     }
 
@@ -81,12 +80,15 @@ final class ARSessionViewController: UIViewController {
                 arView.scene.removeAnchor(geospatialDebugAnchorEntity)
             }
             geospatialDebugAnchorEntity = nil
+            geospatialDebugMarkerEntity = nil
+            geospatialDebugLabelEntity = nil
             return
         }
 
         if let geospatialDebugAnchorEntity {
             geospatialDebugAnchorEntity.transform.matrix = snapshot.transform
             geospatialDebugAnchorEntity.isEnabled = true
+            updateGeospatialDebugVisualsForCamera()
             return
         }
 
@@ -96,11 +98,14 @@ final class ARSessionViewController: UIViewController {
         anchorEntity.addChild(marker)
         anchorEntity.addChild(label)
         geospatialDebugAnchorEntity = anchorEntity
+        geospatialDebugMarkerEntity = marker
+        geospatialDebugLabelEntity = label
         arView.scene.addAnchor(anchorEntity)
+        updateGeospatialDebugVisualsForCamera()
     }
 
     private func makeGeospatialDebugMarker(kind: String) -> ModelEntity {
-        let mesh = MeshResource.generateSphere(radius: 0.85)
+        let mesh = MeshResource.generateSphere(radius: 0.55)
         let color: UIColor = kind == "Terrain" ? .systemGreen : .systemPink
         let material = SimpleMaterial(color: color, roughness: 0.1, isMetallic: false)
         return ModelEntity(mesh: mesh, materials: [material])
@@ -108,7 +113,7 @@ final class ARSessionViewController: UIViewController {
 
     private func makeGeospatialDebugLabel(text: String) -> Entity {
         let root = Entity()
-        root.position = SIMD3<Float>(-0.9, 1.15, 0)
+        root.position = SIMD3<Float>(-0.9, 0.95, 0)
 
         let backgroundMesh = MeshResource.generatePlane(width: 2.2, height: 0.72)
         let backgroundMaterial = SimpleMaterial(
@@ -135,14 +140,33 @@ final class ARSessionViewController: UIViewController {
         root.addChild(textEntity)
         return root
     }
+
+    private func updateGeospatialDebugVisualsForCamera() {
+        guard let geospatialDebugAnchorEntity,
+              let geospatialDebugLabelEntity,
+              let cameraTransform = arView.session.currentFrame?.camera.transform else {
+            return
+        }
+
+        let cameraPosition = SIMD3<Float>(
+            cameraTransform.columns.3.x,
+            cameraTransform.columns.3.y,
+            cameraTransform.columns.3.z
+        )
+        geospatialDebugLabelEntity.look(at: cameraPosition, from: geospatialDebugLabelEntity.position(relativeTo: nil), relativeTo: nil)
+        geospatialDebugLabelEntity.orientation *= simd_quatf(angle: .pi, axis: SIMD3<Float>(0, 1, 0))
+    }
 }
 
 extension ARSessionViewController: ARSessionDelegate {
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
         geospatialSessionManager.update(with: frame)
+        updateGeospatialDebugVisualsForCamera()
         publishCameraHeadingIfNeeded(from: frame)
         publishCameraProjectionIfNeeded(from: frame)
-        recognizeTextIfNeeded(in: frame)
+        if shouldRunLiveOCR {
+            recognizeTextIfNeeded(in: frame)
+        }
     }
 
     private func publishCameraHeadingIfNeeded(from frame: ARFrame) {

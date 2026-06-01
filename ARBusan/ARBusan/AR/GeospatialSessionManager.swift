@@ -52,6 +52,7 @@ final class GeospatialSessionManager: NSObject, CLLocationManagerDelegate {
     private var latestEarthIsTracking = false
     private var isConfigured = false
     private var isSceneSemanticsEnabled = false
+    private let shouldEnableSceneSemantics = false
     private var lastSceneSemanticsTimestamp: TimeInterval = 0
     private let sceneSemanticsInterval: TimeInterval = 0.25
 
@@ -102,12 +103,12 @@ final class GeospatialSessionManager: NSObject, CLLocationManagerDelegate {
         let configuration = GARSessionConfiguration()
         configuration.geospatialMode = .enabled
         configuration.streetscapeGeometryMode = .disabled
-        if session.isSemanticModeSupported(.enabled) {
+        if shouldEnableSceneSemantics, session.isSemanticModeSupported(.enabled) {
             configuration.semanticMode = .enabled
             isSceneSemanticsEnabled = true
         } else {
             isSceneSemanticsEnabled = false
-            updateSceneSemanticsStatus("Scene Semantics 미지원 기기입니다.")
+            updateSceneSemanticsStatus("Scene Semantics는 발열 절감을 위해 비활성화했습니다.")
         }
 
         var configurationError: NSError?

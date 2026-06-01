@@ -903,23 +903,24 @@ final class AppState: ObservableObject {
             return
         }
 
-        guard let facadeCandidate = closestFacadeCandidate(
+        guard let facadeCandidate = cameraFacingFacadeCandidate(
             for: polygon,
-            from: latestLocationSnapshot
+            from: latestLocationSnapshot,
+            headingDegrees: cameraHeadingDegrees
         ) else {
             buildingFacadeAnchorDiagnostics = "\(spot.name) Polygon 외곽 선분이 없어 3D 외벽 후보점을 계산할 수 없습니다."
             return
         }
 
-        let midpointBearing = facadeCandidate.midpointENU.bearingDegrees
+        let anchorBearing = facadeCandidate.anchorENU.bearingDegrees
         let startText = "시작 east \(Int(facadeCandidate.startENU.eastMeters))m north \(Int(facadeCandidate.startENU.northMeters))m"
         let endText = "끝 east \(Int(facadeCandidate.endENU.eastMeters))m north \(Int(facadeCandidate.endENU.northMeters))m"
-        let midpointText = "중점 east \(Int(facadeCandidate.midpointENU.eastMeters))m north \(Int(facadeCandidate.midpointENU.northMeters))m"
+        let anchorText = "\(facadeCandidate.selectionReason) east \(Int(facadeCandidate.anchorENU.eastMeters))m north \(Int(facadeCandidate.anchorENU.northMeters))m"
         let closestText = "내 위치와 외벽 최단거리 \(Int(facadeCandidate.distanceFromUserMeters))m"
         let lengthText = "외벽 길이 \(Int(facadeCandidate.lengthMeters))m"
-        let bearingText = "중점 방향각 \(Int(midpointBearing))도"
+        let bearingText = "앵커 방향각 \(Int(anchorBearing))도"
 
-        buildingFacadeAnchorDiagnostics = "\(spot.name) 3D 외벽 후보 / \(startText) / \(endText) / \(midpointText) / \(closestText) / \(lengthText) / \(bearingText)"
+        buildingFacadeAnchorDiagnostics = "\(spot.name) 3D 외벽 후보 / \(startText) / \(endText) / \(anchorText) / \(closestText) / \(lengthText) / \(bearingText)"
     }
 
     private func refreshBuildingLabelHeightDiagnostics() {
@@ -958,7 +959,11 @@ final class AppState: ObservableObject {
         labelHeightMeters: Double,
         origin: LocationSnapshot
     ) {
-        guard let facadeCandidate = closestFacadeCandidate(for: polygon, from: origin) else {
+        guard let facadeCandidate = cameraFacingFacadeCandidate(
+            for: polygon,
+            from: origin,
+            headingDegrees: cameraHeadingDegrees
+        ) else {
             geospatialTerrainAnchorDiagnostics = "\(spot.name) Terrain Anchor 대기: 외벽 후보점이 없습니다."
             return
         }
@@ -1003,21 +1008,21 @@ final class AppState: ObservableObject {
     ) -> [GeospatialTerrainAnchorCandidate] {
         var candidates = [
             GeospatialTerrainAnchorCandidate(
-                label: "외벽 중점",
-                coordinate: facadeCandidate.midpointCoordinate,
+                label: facadeCandidate.selectionReason,
+                coordinate: facadeCandidate.anchorCoordinate,
                 altitudeAboveTerrain: labelHeightMeters
             )
         ]
 
-        let midpointEast = facadeCandidate.midpointENU.eastMeters
-        let midpointNorth = facadeCandidate.midpointENU.northMeters
-        let midpointDistance = max(hypot(midpointEast, midpointNorth), 0.001)
-        let unitEastTowardUser = -midpointEast / midpointDistance
-        let unitNorthTowardUser = -midpointNorth / midpointDistance
+        let anchorEast = facadeCandidate.anchorENU.eastMeters
+        let anchorNorth = facadeCandidate.anchorENU.northMeters
+        let anchorDistance = max(hypot(anchorEast, anchorNorth), 0.001)
+        let unitEastTowardUser = -anchorEast / anchorDistance
+        let unitNorthTowardUser = -anchorNorth / anchorDistance
 
         for offsetMeters in [2.0, 5.0] {
-            let east = midpointEast + unitEastTowardUser * offsetMeters
-            let north = midpointNorth + unitNorthTowardUser * offsetMeters
+            let east = anchorEast + unitEastTowardUser * offsetMeters
+            let north = anchorNorth + unitNorthTowardUser * offsetMeters
             let coordinate = LocalENUProjector.coordinate(
                 eastMeters: east,
                 northMeters: north,
@@ -1054,7 +1059,7 @@ final class AppState: ObservableObject {
         if let geospatialAltitude = latestGeospatialLocationSnapshot?.altitude {
             return GeospatialWGS84AnchorCandidate(
                 label: "외벽 중점 WGS84 fallback",
-                coordinate: facadeCandidate.midpointCoordinate,
+                coordinate: facadeCandidate.anchorCoordinate,
                 altitude: geospatialAltitude + relativeLabelHeightFromCameraGround,
                 altitudeSource: "ARCore Geospatial altitude \(String(format: "%.1f", geospatialAltitude))m + 라벨높이 \(String(format: "%.1f", labelHeightMeters))m - 기기높이 \(String(format: "%.1f", deviceHeightAssumptionMeters))m"
             )
@@ -1066,7 +1071,7 @@ final class AppState: ObservableObject {
 
         return GeospatialWGS84AnchorCandidate(
             label: "외벽 중점 WGS84 fallback",
-            coordinate: facadeCandidate.midpointCoordinate,
+            coordinate: facadeCandidate.anchorCoordinate,
             altitude: coreLocationAltitude + relativeLabelHeightFromCameraGround,
             altitudeSource: "CoreLocation altitude \(String(format: "%.1f", coreLocationAltitude))m + 라벨높이 \(String(format: "%.1f", labelHeightMeters))m - 기기높이 \(String(format: "%.1f", deviceHeightAssumptionMeters))m"
         )
@@ -1092,13 +1097,47 @@ final class AppState: ObservableObject {
         return " / 원본 속성 \(values.joined(separator: ", "))"
     }
 
-    private func closestFacadeCandidate(
+    private func cameraFacingFacadeCandidate(
         for polygon: BuildingPolygon,
-        from origin: LocationSnapshot
+        from origin: LocationSnapshot,
+        headingDegrees: Double?
     ) -> BuildingFacadeCandidate? {
-        polygon.rings
-            .flatMap { facadeSegments(for: $0, from: origin) }
-            .min { $0.distanceFromUserMeters < $1.distanceFromUserMeters }
+        let segments = polygon.rings.flatMap { facadeSegments(for: $0, from: origin) }
+        guard !segments.isEmpty else {
+            return nil
+        }
+
+        guard let headingDegrees else {
+            return segments.min { $0.distanceFromUserMeters < $1.distanceFromUserMeters }
+        }
+
+        let headingRadians = headingDegrees.degreesToRadians
+        let rayDirectionEast = sin(headingRadians)
+        let rayDirectionNorth = cos(headingRadians)
+
+        let candidates = segments.map {
+            facadeCandidateByCameraRay(
+                $0,
+                rayDirectionEast: rayDirectionEast,
+                rayDirectionNorth: rayDirectionNorth,
+                origin: origin
+            )
+        }
+
+        return candidates
+            .filter { $0.rayForwardDistanceMeters >= 0 }
+            .min {
+                if $0.rayDistanceMeters == $1.rayDistanceMeters {
+                    return $0.rayForwardDistanceMeters < $1.rayForwardDistanceMeters
+                }
+                return $0.rayDistanceMeters < $1.rayDistanceMeters
+            }
+            ?? candidates.min {
+                if $0.rayDistanceMeters == $1.rayDistanceMeters {
+                    return $0.distanceFromUserMeters < $1.distanceFromUserMeters
+                }
+                return $0.rayDistanceMeters < $1.rayDistanceMeters
+            }
     }
 
     private func facadeSegments(
@@ -1124,9 +1163,10 @@ final class AppState: ObservableObject {
                 return nil
             }
 
-            let midpointCoordinate = CLLocationCoordinate2D(
-                latitude: (startCoordinate.latitude + endCoordinate.latitude) / 2,
-                longitude: (startCoordinate.longitude + endCoordinate.longitude) / 2
+            let midpointCoordinate = interpolateCoordinate(
+                from: startCoordinate,
+                to: endCoordinate,
+                ratio: 0.5
             )
             let midpointENU = LocalENUProjector.project(midpointCoordinate, from: origin)
             let distanceFromUser = distanceFromOriginToSegment(
@@ -1138,13 +1178,144 @@ final class AppState: ObservableObject {
                 startCoordinate: startCoordinate,
                 endCoordinate: endCoordinate,
                 midpointCoordinate: midpointCoordinate,
+                anchorCoordinate: midpointCoordinate,
                 startENU: startENU,
                 endENU: endENU,
                 midpointENU: midpointENU,
+                anchorENU: midpointENU,
                 lengthMeters: lengthMeters,
-                distanceFromUserMeters: distanceFromUser
+                distanceFromUserMeters: distanceFromUser,
+                rayDistanceMeters: distanceFromUser,
+                rayForwardDistanceMeters: midpointENU.groundDistanceMeters,
+                selectionReason: "외벽 중점"
             )
         }
+    }
+
+    private func facadeCandidateByCameraRay(
+        _ candidate: BuildingFacadeCandidate,
+        rayDirectionEast: Double,
+        rayDirectionNorth: Double,
+        origin: LocationSnapshot
+    ) -> BuildingFacadeCandidate {
+        let segmentEast = candidate.endENU.eastMeters - candidate.startENU.eastMeters
+        let segmentNorth = candidate.endENU.northMeters - candidate.startENU.northMeters
+        let denominator = cross2D(
+            eastA: rayDirectionEast,
+            northA: rayDirectionNorth,
+            eastB: segmentEast,
+            northB: segmentNorth
+        )
+
+        if abs(denominator) > 0.000001 {
+            let t = cross2D(
+                eastA: candidate.startENU.eastMeters,
+                northA: candidate.startENU.northMeters,
+                eastB: segmentEast,
+                northB: segmentNorth
+            ) / denominator
+            let u = cross2D(
+                eastA: candidate.startENU.eastMeters,
+                northA: candidate.startENU.northMeters,
+                eastB: rayDirectionEast,
+                northB: rayDirectionNorth
+            ) / denominator
+
+            if t >= 0, u >= 0, u <= 1 {
+                let anchorENU = LocalENUCoordinate(
+                    eastMeters: rayDirectionEast * t,
+                    northMeters: rayDirectionNorth * t,
+                    upMeters: 0
+                )
+                let anchorCoordinate = LocalENUProjector.coordinate(
+                    eastMeters: anchorENU.eastMeters,
+                    northMeters: anchorENU.northMeters,
+                    from: origin
+                )
+                return candidate.withAnchor(
+                    coordinate: anchorCoordinate,
+                    enu: anchorENU,
+                    rayDistanceMeters: 0,
+                    rayForwardDistanceMeters: t,
+                    selectionReason: "카메라 ray 교차점"
+                )
+            }
+        }
+
+        let projected = closestPointOnSegmentToRay(
+            startENU: candidate.startENU,
+            endENU: candidate.endENU,
+            rayDirectionEast: rayDirectionEast,
+            rayDirectionNorth: rayDirectionNorth
+        )
+        let anchorCoordinate = interpolateCoordinate(
+            from: candidate.startCoordinate,
+            to: candidate.endCoordinate,
+            ratio: projected.segmentRatio
+        )
+        return candidate.withAnchor(
+            coordinate: anchorCoordinate,
+            enu: projected.anchorENU,
+            rayDistanceMeters: projected.rayDistanceMeters,
+            rayForwardDistanceMeters: projected.rayForwardDistanceMeters,
+            selectionReason: "카메라 ray 최단 외벽점"
+        )
+    }
+
+    private func closestPointOnSegmentToRay(
+        startENU: LocalENUCoordinate,
+        endENU: LocalENUCoordinate,
+        rayDirectionEast: Double,
+        rayDirectionNorth: Double
+    ) -> (anchorENU: LocalENUCoordinate, segmentRatio: Double, rayDistanceMeters: Double, rayForwardDistanceMeters: Double) {
+        let segmentEast = endENU.eastMeters - startENU.eastMeters
+        let segmentNorth = endENU.northMeters - startENU.northMeters
+        let segmentLengthSquared = max(segmentEast * segmentEast + segmentNorth * segmentNorth, 0.001)
+        let midpoint = LocalENUCoordinate(
+            eastMeters: (startENU.eastMeters + endENU.eastMeters) / 2,
+            northMeters: (startENU.northMeters + endENU.northMeters) / 2,
+            upMeters: 0
+        )
+        let midpointForward = max((midpoint.eastMeters * rayDirectionEast) + (midpoint.northMeters * rayDirectionNorth), 0)
+        let rayPointEast = rayDirectionEast * midpointForward
+        let rayPointNorth = rayDirectionNorth * midpointForward
+        let startToRayEast = rayPointEast - startENU.eastMeters
+        let startToRayNorth = rayPointNorth - startENU.northMeters
+        let segmentRatio = ((startToRayEast * segmentEast) + (startToRayNorth * segmentNorth)) / segmentLengthSquared
+        let clampedRatio = segmentRatio.clamped(to: 0...1)
+        let anchorENU = LocalENUCoordinate(
+            eastMeters: startENU.eastMeters + segmentEast * clampedRatio,
+            northMeters: startENU.northMeters + segmentNorth * clampedRatio,
+            upMeters: 0
+        )
+        let forward = (anchorENU.eastMeters * rayDirectionEast) + (anchorENU.northMeters * rayDirectionNorth)
+        let perpendicular = abs(cross2D(
+            eastA: rayDirectionEast,
+            northA: rayDirectionNorth,
+            eastB: anchorENU.eastMeters,
+            northB: anchorENU.northMeters
+        ))
+        return (
+            anchorENU: anchorENU,
+            segmentRatio: clampedRatio,
+            rayDistanceMeters: perpendicular,
+            rayForwardDistanceMeters: forward
+        )
+    }
+
+    private func interpolateCoordinate(
+        from start: CLLocationCoordinate2D,
+        to end: CLLocationCoordinate2D,
+        ratio: Double
+    ) -> CLLocationCoordinate2D {
+        CLLocationCoordinate2D(
+            latitude: start.latitude + (end.latitude - start.latitude) * ratio,
+            longitude: start.longitude + (end.longitude - start.longitude) * ratio
+        )
+    }
+
+    private func cross2D(eastA: Double, northA: Double, eastB: Double, northB: Double) -> Double {
+        eastA * northB - northA * eastB
     }
 
     private func distanceFromOriginToSegment(
@@ -1677,11 +1848,40 @@ private struct BuildingFacadeCandidate {
     let startCoordinate: CLLocationCoordinate2D
     let endCoordinate: CLLocationCoordinate2D
     let midpointCoordinate: CLLocationCoordinate2D
+    let anchorCoordinate: CLLocationCoordinate2D
     let startENU: LocalENUCoordinate
     let endENU: LocalENUCoordinate
     let midpointENU: LocalENUCoordinate
+    let anchorENU: LocalENUCoordinate
     let lengthMeters: Double
     let distanceFromUserMeters: Double
+    let rayDistanceMeters: Double
+    let rayForwardDistanceMeters: Double
+    let selectionReason: String
+
+    func withAnchor(
+        coordinate: CLLocationCoordinate2D,
+        enu: LocalENUCoordinate,
+        rayDistanceMeters: Double,
+        rayForwardDistanceMeters: Double,
+        selectionReason: String
+    ) -> BuildingFacadeCandidate {
+        BuildingFacadeCandidate(
+            startCoordinate: startCoordinate,
+            endCoordinate: endCoordinate,
+            midpointCoordinate: midpointCoordinate,
+            anchorCoordinate: coordinate,
+            startENU: startENU,
+            endENU: endENU,
+            midpointENU: midpointENU,
+            anchorENU: enu,
+            lengthMeters: lengthMeters,
+            distanceFromUserMeters: distanceFromUserMeters,
+            rayDistanceMeters: rayDistanceMeters,
+            rayForwardDistanceMeters: rayForwardDistanceMeters,
+            selectionReason: selectionReason
+        )
+    }
 }
 
 private extension RecognitionResult {
