@@ -89,7 +89,7 @@ final class AppState: ObservableObject {
     @Published var matrixProjectionComparisonDiagnostics = "projection matrix 비교 좌표를 아직 계산하지 않았습니다."
     @Published var buildingFacadeAnchorDiagnostics = "3D 외벽 후보점을 아직 계산하지 않았습니다."
     @Published var buildingLabelHeightDiagnostics = "3D 라벨 높이 기준값을 아직 계산하지 않았습니다."
-    @Published var geospatialTerrainAnchorDiagnostics = "Geospatial Terrain Anchor 후보를 아직 생성하지 않았습니다."
+    @Published var geospatialTerrainAnchorDiagnostics = "WGS84 Anchor 후보를 아직 생성하지 않았습니다."
     @Published var cameraDirectionSpotID: TourismSpot.ID?
     @Published var cameraDirectionStatus = "카메라 방향 후보를 아직 계산하지 않았습니다."
     @Published var polygonValidationStatus = "Polygon 자동 후보를 아직 계산하지 않았습니다."
@@ -527,7 +527,7 @@ final class AppState: ObservableObject {
         localCoordinateDiagnostics = "후보 초기화로 local ENU 좌표 변환도 초기화했습니다."
         buildingFacadeAnchorDiagnostics = "후보 초기화로 3D 외벽 후보점도 초기화했습니다."
         buildingLabelHeightDiagnostics = "후보 초기화로 3D 라벨 높이 기준값도 초기화했습니다."
-        geospatialTerrainAnchorDiagnostics = "후보 초기화로 Geospatial Terrain Anchor 후보도 초기화했습니다."
+        geospatialTerrainAnchorDiagnostics = "후보 초기화로 WGS84 Anchor 후보도 초기화했습니다."
         matrixProjectionComparisonDiagnostics = "후보 초기화로 projection matrix 비교도 초기화했습니다."
         cameraDirectionSpotID = nil
         selectedSpot = nil
@@ -983,7 +983,7 @@ final class AppState: ObservableObject {
             from: origin,
             headingDegrees: cameraHeadingDegrees
         ) else {
-            geospatialTerrainAnchorDiagnostics = "\(spot.name) Terrain Anchor 대기: 외벽 후보점이 없습니다."
+            geospatialTerrainAnchorDiagnostics = "\(spot.name) WGS84 Anchor 대기: 외벽 후보점이 없습니다."
             return
         }
 
@@ -1002,14 +1002,11 @@ final class AppState: ObservableObject {
             labelHeightMeters: labelHeightMeters,
             origin: origin
         )
-        let candidateSummary = candidates
-            .map { "\($0.label) \($0.coordinate.shortText)" }
-            .joined(separator: " / ")
         let fallbackSummary = wgs84Fallback.map {
-            " / WGS84 fallback \($0.coordinate.shortText), 절대고도 \(String(format: "%.1f", $0.altitude))m"
-        } ?? ""
+            "\($0.label) / 좌표 \($0.coordinate.shortText) / 절대고도 \(String(format: "%.1f", $0.altitude))m"
+        } ?? "절대고도 계산 불가"
 
-        geospatialTerrainAnchorDiagnostics = "\(spot.name) Terrain Anchor 순차 테스트 후보 / \(candidateSummary)\(fallbackSummary) / ARCore Earth tracking 대기 또는 요청 중"
+        geospatialTerrainAnchorDiagnostics = "\(spot.name) WGS84 Anchor 후보 / \(fallbackSummary) / Terrain Anchor는 현재 보류 / ARCore Earth tracking 대기 또는 요청 중"
         geospatialSessionManager.createTerrainAnchorIfPossible(
             for: GeospatialTerrainAnchorRequest(
                 spotID: spot.id,
@@ -1077,7 +1074,7 @@ final class AppState: ObservableObject {
 
         if let geospatialAltitude = latestGeospatialLocationSnapshot?.altitude {
             return GeospatialWGS84AnchorCandidate(
-                label: "외벽 중점 WGS84 fallback",
+                label: "\(facadeCandidate.selectionReason) WGS84 기준점",
                 coordinate: facadeCandidate.anchorCoordinate,
                 altitude: geospatialAltitude + relativeLabelHeightFromCameraGround,
                 altitudeSource: "ARCore Geospatial altitude \(String(format: "%.1f", geospatialAltitude))m + 라벨높이 \(String(format: "%.1f", labelHeightMeters))m - 기기높이 \(String(format: "%.1f", deviceHeightAssumptionMeters))m"
@@ -1089,7 +1086,7 @@ final class AppState: ObservableObject {
         }
 
         return GeospatialWGS84AnchorCandidate(
-            label: "외벽 중점 WGS84 fallback",
+            label: "\(facadeCandidate.selectionReason) WGS84 기준점",
             coordinate: facadeCandidate.anchorCoordinate,
             altitude: coreLocationAltitude + relativeLabelHeightFromCameraGround,
             altitudeSource: "CoreLocation altitude \(String(format: "%.1f", coreLocationAltitude))m + 라벨높이 \(String(format: "%.1f", labelHeightMeters))m - 기기높이 \(String(format: "%.1f", deviceHeightAssumptionMeters))m"

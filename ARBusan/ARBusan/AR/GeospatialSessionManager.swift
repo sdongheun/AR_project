@@ -48,7 +48,7 @@ final class GeospatialSessionManager: NSObject, CLLocationManagerDelegate {
     private var activeDebugAnchorID: UUID?
     private var activeDebugAnchorLabel: String?
     private var activeDebugAnchorKind: String?
-    private var latestTerrainAnchorStatusMessage = "Geospatial Terrain Anchor 후보를 아직 생성하지 않았습니다."
+    private var latestTerrainAnchorStatusMessage = "WGS84 Anchor 후보를 아직 생성하지 않았습니다."
     private var latestEarthIsTracking = false
     private var isConfigured = false
     private var isSceneSemanticsEnabled = false
@@ -174,25 +174,25 @@ final class GeospatialSessionManager: NSObject, CLLocationManagerDelegate {
     func createTerrainAnchorIfPossible(for request: GeospatialTerrainAnchorRequest) {
         configureIfPossible()
 
-        guard !request.candidates.isEmpty else {
-            updateTerrainAnchorStatus("\(request.spotName) Terrain Anchor 대기: 테스트 후보 좌표가 없습니다.")
+        guard let wgs84Candidate = request.wgs84Fallback else {
+            updateTerrainAnchorStatus("\(request.spotName) WGS84 Anchor 대기: 절대고도 기준값이 아직 없습니다.")
             return
         }
 
         guard let garSession else {
-            updateTerrainAnchorStatus("\(request.spotName) Terrain Anchor 대기: ARCore Geospatial 세션이 아직 없습니다.")
+            updateTerrainAnchorStatus("\(request.spotName) WGS84 Anchor 대기: ARCore Geospatial 세션이 아직 없습니다.")
             return
         }
 
         guard latestEarthIsTracking else {
-            updateTerrainAnchorStatus("\(request.spotName) Terrain Anchor 대기: Earth tracking이 아직 tracking 상태가 아닙니다.")
+            updateTerrainAnchorStatus("\(request.spotName) WGS84 Anchor 대기: Earth tracking이 아직 tracking 상태가 아닙니다.")
             return
         }
 
         let nextKey = terrainAnchorKey(for: request)
         if terrainAnchorKey == nextKey {
-            if let terrainAnchor {
-                updateTerrainAnchorStatus("\(latestTerrainAnchorStatusMessage) / anchor tracking \(terrainAnchor.trackingState.displayText)")
+            if let activeAnchor = wgs84Anchor ?? terrainAnchor {
+                updateTerrainAnchorStatus("\(latestTerrainAnchorStatusMessage) / anchor tracking \(activeAnchor.trackingState.displayText)")
             } else {
                 updateTerrainAnchorStatus(latestTerrainAnchorStatusMessage)
             }
@@ -208,7 +208,7 @@ final class GeospatialSessionManager: NSObject, CLLocationManagerDelegate {
         terrainAnchorFuture?.cancel()
         terrainAnchorFuture = nil
 
-        requestTerrainAnchorCandidate(0, for: request)
+        createWGS84Anchor(wgs84Candidate, spotName: request.spotName)
     }
 
     private func requestTerrainAnchorCandidate(_ index: Int, for request: GeospatialTerrainAnchorRequest) {
@@ -267,6 +267,7 @@ final class GeospatialSessionManager: NSObject, CLLocationManagerDelegate {
         }
 
         do {
+            updateTerrainAnchorStatus("\(spotName) WGS84 Anchor 생성 요청 / \(candidate.label) / 좌표 \(candidate.coordinate.shortText) / 절대고도 \(String(format: "%.1f", candidate.altitude))m / 기준 \(candidate.altitudeSource) / Terrain Anchor는 현재 보류")
             let anchor = try garSession.createAnchor(
                 coordinate: candidate.coordinate,
                 altitude: candidate.altitude,
