@@ -120,6 +120,7 @@ final class AppState: ObservableObject {
     private var loadedTourismSpots: [TourismSpot] = []
     private var polygonLookupTask: Task<Void, Never>?
     private var polygonLookupInFlightSpotID: TourismSpot.ID?
+    private var polygonPrefetchTasksBySpotID: [TourismSpot.ID: Task<Void, Never>] = [:]
     private var polygonLookupNotFoundSpotIDs: Set<TourismSpot.ID> = []
     private var latestSceneSemanticsSnapshot: SceneSemanticsSnapshot?
     private var sceneSemanticsEvidenceBySpotID: [TourismSpot.ID: SceneSemanticsSpotEvidence] = [:]
@@ -518,6 +519,8 @@ final class AppState: ObservableObject {
         polygonLookupFinishedAt = nil
         polygonLookupLogs = []
         polygonLookupInFlightSpotID = nil
+        polygonPrefetchTasksBySpotID.values.forEach { $0.cancel() }
+        polygonPrefetchTasksBySpotID = [:]
         polygonLookupNotFoundSpotIDs = []
         resolvedBuildingHeightsBySpotID = [:]
         sceneSemanticsEvidenceBySpotID = [:]
@@ -571,6 +574,7 @@ final class AppState: ObservableObject {
 
         spots = filteredSpots
         dropSelectionsOutsideVisibleSpots()
+        prefetchNearbyBuildingPolygonsFor3DAnchors(from: latestLocationSnapshot)
 
         let radiusText = "\(Int(nearbySpotRadiusMeters / 1_000))km"
         if let fallbackReason {
@@ -596,6 +600,61 @@ final class AppState: ObservableObject {
         }
         edgeMarkerOverlays.removeAll { !visibleSpotIDs.contains($0.id) }
         onScreenCandidateMarkerOverlays.removeAll { !visibleSpotIDs.contains($0.id) }
+    }
+
+    private func prefetchNearbyBuildingPolygonsFor3DAnchors(from origin: LocationSnapshot) {
+        let candidates = spots
+            .filter { spot in
+                guard buildingPolygonsBySpotID[spot.id] == nil,
+                      polygonPrefetchTasksBySpotID[spot.id] == nil,
+                      !polygonLookupNotFoundSpotIDs.contains(spot.id) else {
+                    return false
+                }
+
+                return origin.coordinate.distance(to: spot.center) <= geospatial3DCreateRadiusMeters
+            }
+            .prefix(maxActiveGeospatial3DAnchorCount)
+
+        for spot in candidates {
+            let task = Task { [weak self] in
+                guard let self else {
+                    return
+                }
+
+                do {
+                    let polygon = try await self.vworldClient.fetchBuildingPolygon(for: spot)
+                    guard !Task.isCancelled else {
+                        return
+                    }
+
+                    await MainActor.run {
+                        self.polygonPrefetchTasksBySpotID[spot.id] = nil
+                        guard let polygon else {
+                            self.polygonLookupNotFoundSpotIDs.insert(spot.id)
+                            self.refreshBuildingLabelHeightDiagnostics()
+                            return
+                        }
+
+                        let resolvedHeight = self.buildingHeightResolver.resolve(polygon: polygon)
+                        self.buildingPolygonsBySpotID[spot.id] = polygon
+                        self.resolvedBuildingHeightsBySpotID[spot.id] = resolvedHeight
+                        self.polygonLookupNotFoundSpotIDs.remove(spot.id)
+                        self.refreshEdgeMarkerOverlays()
+                        self.refreshOnScreenCandidateMarkerOverlays()
+                        self.refreshBuildingLabelHeightDiagnostics()
+                    }
+                } catch {
+                    guard !Task.isCancelled else {
+                        return
+                    }
+
+                    await MainActor.run {
+                        self.polygonPrefetchTasksBySpotID[spot.id] = nil
+                    }
+                }
+            }
+            polygonPrefetchTasksBySpotID[spot.id] = task
+        }
     }
 
     private func refreshEdgeMarkerOverlays() {
@@ -956,15 +1015,14 @@ final class AppState: ObservableObject {
         let resolvedHeight = resolvedBuildingHeightsBySpotID[spot.id] ?? buildingHeightResolver.resolve(polygon: polygon)
         resolvedBuildingHeightsBySpotID[spot.id] = resolvedHeight
 
-        let facadeDistanceMeters = cameraFacingFacadeCandidate(
+        let facadeDistanceMeters = nearestFacadeCandidate(
             spot: spot,
             polygon: polygon,
-            from: latestLocationSnapshot,
-            headingDegrees: cameraHeadingDegrees
+            from: latestLocationSnapshot
         )?.distanceFromUserMeters
         let distanceMeters = facadeDistanceMeters
             ?? latestLocationSnapshot.coordinate.distance(to: spot.center)
-        let distanceSource = facadeDistanceMeters == nil ? "POI 중심 거리" : "가장 가까운 외벽 거리"
+        let distanceSource = facadeDistanceMeters == nil ? "POI 중심 거리" : "기본 외벽점 거리"
         let labelHeight = labelHeightDecision(
             for: resolvedHeight,
             distanceMeters: distanceMeters
@@ -998,11 +1056,10 @@ final class AppState: ObservableObject {
 
             let resolvedHeight = resolvedBuildingHeightsBySpotID[spot.id] ?? buildingHeightResolver.resolve(polygon: polygon)
             resolvedBuildingHeightsBySpotID[spot.id] = resolvedHeight
-            let facadeCandidate = cameraFacingFacadeCandidate(
+            let facadeCandidate = nearestFacadeCandidate(
                 spot: spot,
                 polygon: polygon,
-                from: origin,
-                headingDegrees: cameraHeadingDegrees
+                from: origin
             )
             let distanceMeters = facadeCandidate?.distanceFromUserMeters
                 ?? origin.coordinate.distance(to: spot.center)
@@ -1066,7 +1123,7 @@ final class AppState: ObservableObject {
 
         activeGeospatial3DSpotIDs = requestedSpotIDs
         lastRequestedTerrainAnchorSpotIDs = Set(limitedRequests.map(\.spot.id))
-        geospatialWGS84CandidateDiagnostics = "WGS84 Anchor 후보 \(requestedSpotIDs.count)개 / " + summaries.joined(separator: " | ")
+        geospatialWGS84CandidateDiagnostics = "WGS84 Anchor 후보 \(requestedSpotIDs.count)개 / 기본 위치는 각 건물의 가장 가까운 외벽점으로 고정 / " + summaries.joined(separator: " | ")
     }
 
     private func requestGeospatialTerrainAnchorIfPossible(
@@ -1097,7 +1154,7 @@ final class AppState: ObservableObject {
                 wgs84Fallback: wgs84Fallback
             )
         )
-        return "\(spot.name) / \(fallbackSummary)"
+        return "\(spot.name) / \(facadeCandidate.selectionReason) / \(fallbackSummary)"
     }
 
     private func terrainAnchorCandidates(
@@ -1276,6 +1333,37 @@ final class AppState: ObservableObject {
             candidates: candidates,
             spotID: spot.id
         )
+    }
+
+    private func nearestFacadeCandidate(
+        spot: TourismSpot,
+        polygon: BuildingPolygon,
+        from origin: LocationSnapshot
+    ) -> BuildingFacadeCandidate? {
+        let segments = polygon.rings.flatMap { facadeSegments(for: $0, from: origin) }
+        guard let nearestSegment = segments.min(by: { $0.distanceFromUserMeters < $1.distanceFromUserMeters }) else {
+            return nil
+        }
+
+        let closestPoint = closestPointOnSegmentToOrigin(
+            startENU: nearestSegment.startENU,
+            endENU: nearestSegment.endENU
+        )
+        let anchorCoordinate = interpolateCoordinate(
+            from: nearestSegment.startCoordinate,
+            to: nearestSegment.endCoordinate,
+            ratio: closestPoint.segmentRatio
+        )
+
+        return nearestSegment
+            .withAnchor(
+                coordinate: anchorCoordinate,
+                enu: closestPoint.anchorENU,
+                rayDistanceMeters: closestPoint.distanceMeters,
+                rayForwardDistanceMeters: closestPoint.anchorENU.groundDistanceMeters,
+                selectionReason: "내 위치 기준 가장 가까운 외벽점"
+            )
+            .withStabilizationNote("카메라 방향과 무관한 선생성 기본점")
     }
 
     private func stabilizedFacadeCandidate(
@@ -1533,6 +1621,38 @@ final class AppState: ObservableObject {
             segmentRatio: clampedRatio,
             rayDistanceMeters: perpendicular,
             rayForwardDistanceMeters: forward
+        )
+    }
+
+    private func closestPointOnSegmentToOrigin(
+        startENU: LocalENUCoordinate,
+        endENU: LocalENUCoordinate
+    ) -> (anchorENU: LocalENUCoordinate, segmentRatio: Double, distanceMeters: Double) {
+        let segmentEast = endENU.eastMeters - startENU.eastMeters
+        let segmentNorth = endENU.northMeters - startENU.northMeters
+        let segmentLengthSquared = segmentEast * segmentEast + segmentNorth * segmentNorth
+        guard segmentLengthSquared > 0 else {
+            return (
+                anchorENU: startENU,
+                segmentRatio: 0,
+                distanceMeters: startENU.groundDistanceMeters
+            )
+        }
+
+        let originToStartEast = -startENU.eastMeters
+        let originToStartNorth = -startENU.northMeters
+        let projectedRatio = ((originToStartEast * segmentEast) + (originToStartNorth * segmentNorth)) / segmentLengthSquared
+        let clampedRatio = projectedRatio.clamped(to: 0...1)
+        let anchorENU = LocalENUCoordinate(
+            eastMeters: startENU.eastMeters + clampedRatio * segmentEast,
+            northMeters: startENU.northMeters + clampedRatio * segmentNorth,
+            upMeters: 0
+        )
+
+        return (
+            anchorENU: anchorENU,
+            segmentRatio: clampedRatio,
+            distanceMeters: anchorENU.groundDistanceMeters
         )
     }
 
