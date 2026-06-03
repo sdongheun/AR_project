@@ -91,7 +91,13 @@ struct MVPRecognitionControlView: View {
                         .lineLimit(nil)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    Text(appState.geospatialTerrainAnchorDiagnostics)
+                    Text("WGS84 후보: \(appState.geospatialWGS84CandidateDiagnostics)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text("WGS84 앵커 상태: \(appState.geospatialAnchorStateDiagnostics)")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(nil)

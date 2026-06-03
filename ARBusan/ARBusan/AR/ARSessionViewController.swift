@@ -3,13 +3,17 @@ import RealityKit
 import UIKit
 
 final class ARSessionViewController: UIViewController {
+    private struct GeospatialDebugRenderNode {
+        let anchorEntity: AnchorEntity
+        let contentEntity: Entity
+        let markerEntity: ModelEntity
+        let labelEntity: Entity
+    }
+
     private var arView: ARView!
     private let geospatialSessionManager: GeospatialSessionManager
-    private var geospatialDebugAnchorEntity: AnchorEntity?
-    private var geospatialDebugMarkerEntity: ModelEntity?
-    private var geospatialDebugLabelEntity: Entity?
-    private var currentGeospatialDebugAnchorID: UUID?
-    private var isGeospatialDebugMarkerSelected = false
+    private var geospatialDebugNodesByID: [UUID: GeospatialDebugRenderNode] = [:]
+    private var selectedGeospatialDebugAnchorID: UUID?
     private var shows3DGeospatialDebugMarker = true
     private let ocrRecognizer = OCRRecognizer()
     private var lastOCRTimestamp: TimeInterval = 0
@@ -39,8 +43,8 @@ final class ARSessionViewController: UIViewController {
     override func loadView() {
         arView = ARView(frame: .zero)
         arView.session.delegate = self
-        geospatialSessionManager.onDebugAnchorUpdated = { [weak self] snapshot in
-            self?.updateGeospatialDebugAnchor(snapshot)
+        geospatialSessionManager.onDebugAnchorsUpdated = { [weak self] snapshots in
+            self?.updateGeospatialDebugAnchors(snapshots)
         }
         let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleARViewTap(_:)))
         arView.addGestureRecognizer(tapGesture)
@@ -71,48 +75,62 @@ final class ARSessionViewController: UIViewController {
 
     func setShows3DGeospatialDebugMarker(_ isVisible: Bool) {
         shows3DGeospatialDebugMarker = isVisible
-        geospatialDebugAnchorEntity?.isEnabled = isVisible
+        geospatialDebugNodesByID.values.forEach {
+            $0.anchorEntity.isEnabled = isVisible
+        }
     }
 
-    private func updateGeospatialDebugAnchor(_ snapshot: GeospatialDebugAnchorSnapshot?) {
+    private func updateGeospatialDebugAnchors(_ snapshots: [GeospatialDebugAnchorSnapshot]) {
         guard shows3DGeospatialDebugMarker else {
             return
         }
 
-        guard let snapshot else {
-            if let geospatialDebugAnchorEntity {
-                arView.scene.removeAnchor(geospatialDebugAnchorEntity)
+        let incomingIDs = Set(snapshots.map(\.id))
+        for (id, node) in geospatialDebugNodesByID where !incomingIDs.contains(id) {
+            arView.scene.removeAnchor(node.anchorEntity)
+            geospatialDebugNodesByID[id] = nil
+            if selectedGeospatialDebugAnchorID == id {
+                selectedGeospatialDebugAnchorID = nil
             }
-            geospatialDebugAnchorEntity = nil
-            geospatialDebugMarkerEntity = nil
-            geospatialDebugLabelEntity = nil
-            currentGeospatialDebugAnchorID = nil
-            isGeospatialDebugMarkerSelected = false
+        }
+
+        guard !snapshots.isEmpty else {
+            selectedGeospatialDebugAnchorID = nil
             return
         }
 
-        if let geospatialDebugAnchorEntity {
-            if currentGeospatialDebugAnchorID != snapshot.id {
-                currentGeospatialDebugAnchorID = snapshot.id
-                isGeospatialDebugMarkerSelected = false
+        for snapshot in snapshots {
+            if let node = geospatialDebugNodesByID[snapshot.id] {
+                node.anchorEntity.transform.matrix = smoothedTransform(
+                    current: node.anchorEntity.transform.matrix,
+                    target: snapshot.transform
+                )
+                node.contentEntity.position = smoothedContentOffset(
+                    current: node.contentEntity.position,
+                    target: snapshot.contentOffset,
+                    anchorTransform: node.anchorEntity.transform.matrix
+                )
+                node.anchorEntity.isEnabled = true
+                continue
             }
-            geospatialDebugAnchorEntity.transform.matrix = snapshot.transform
-            geospatialDebugAnchorEntity.isEnabled = true
-            updateGeospatialDebugVisualsForCamera()
-            return
+
+            let anchorEntity = AnchorEntity(world: snapshot.transform)
+            let contentEntity = Entity()
+            contentEntity.position = snapshot.contentOffset
+            let marker = makeGeospatialDebugMarker(kind: snapshot.kind)
+            let label = makeGeospatialDebugLabel(text: snapshot.label)
+            contentEntity.addChild(marker)
+            contentEntity.addChild(label)
+            anchorEntity.addChild(contentEntity)
+            geospatialDebugNodesByID[snapshot.id] = GeospatialDebugRenderNode(
+                anchorEntity: anchorEntity,
+                contentEntity: contentEntity,
+                markerEntity: marker,
+                labelEntity: label
+            )
+            arView.scene.addAnchor(anchorEntity)
         }
 
-        let anchorEntity = AnchorEntity(world: snapshot.transform)
-        let marker = makeGeospatialDebugMarker(kind: snapshot.kind)
-        let label = makeGeospatialDebugLabel(text: snapshot.label)
-        anchorEntity.addChild(marker)
-        anchorEntity.addChild(label)
-        geospatialDebugAnchorEntity = anchorEntity
-        geospatialDebugMarkerEntity = marker
-        geospatialDebugLabelEntity = label
-        currentGeospatialDebugAnchorID = snapshot.id
-        isGeospatialDebugMarkerSelected = false
-        arView.scene.addAnchor(anchorEntity)
         updateGeospatialDebugVisualsForCamera()
     }
 
@@ -160,36 +178,33 @@ final class ARSessionViewController: UIViewController {
     @objc private func handleARViewTap(_ gesture: UITapGestureRecognizer) {
         let location = gesture.location(in: arView)
         guard let tappedEntity = arView.entity(at: location),
-              isPartOfGeospatialDebugMarker(tappedEntity) else {
-            isGeospatialDebugMarkerSelected = false
+              let anchorID = geospatialDebugAnchorID(containing: tappedEntity) else {
+            selectedGeospatialDebugAnchorID = nil
             updateGeospatialDebugVisualsForCamera()
             return
         }
 
-        isGeospatialDebugMarkerSelected.toggle()
+        selectedGeospatialDebugAnchorID = selectedGeospatialDebugAnchorID == anchorID ? nil : anchorID
         updateGeospatialDebugVisualsForCamera()
     }
 
-    private func isPartOfGeospatialDebugMarker(_ entity: Entity) -> Bool {
+    private func geospatialDebugAnchorID(containing entity: Entity) -> UUID? {
         var currentEntity: Entity? = entity
         while let entityToCheck = currentEntity {
-            if let markerEntity = geospatialDebugMarkerEntity,
-               entityToCheck === markerEntity {
-                return true
-            }
-            if let labelEntity = geospatialDebugLabelEntity,
-               entityToCheck === labelEntity {
-                return true
+            for (id, node) in geospatialDebugNodesByID {
+                if entityToCheck === node.markerEntity ||
+                    entityToCheck === node.labelEntity ||
+                    entityToCheck === node.contentEntity {
+                    return id
+                }
             }
             currentEntity = entityToCheck.parent
         }
-        return false
+        return nil
     }
 
     private func updateGeospatialDebugVisualsForCamera() {
-        guard let geospatialDebugAnchorEntity,
-              let geospatialDebugLabelEntity,
-              let cameraTransform = arView.session.currentFrame?.camera.transform else {
+        guard let cameraTransform = arView.session.currentFrame?.camera.transform else {
             return
         }
 
@@ -198,19 +213,90 @@ final class ARSessionViewController: UIViewController {
             cameraTransform.columns.3.y,
             cameraTransform.columns.3.z
         )
-        let anchorPosition = geospatialDebugAnchorEntity.position(relativeTo: nil)
-        let distance = simd_distance(cameraPosition, anchorPosition)
-        geospatialDebugMarkerEntity?.scale = SIMD3<Float>(
-            repeating: markerVisualScale(forDistance: distance)
-        )
-        geospatialDebugLabelEntity.scale = SIMD3<Float>(
-            repeating: labelVisualScale(forDistance: distance)
-        )
-        geospatialDebugLabelEntity.look(at: cameraPosition, from: geospatialDebugLabelEntity.position(relativeTo: nil), relativeTo: nil)
-        geospatialDebugLabelEntity.orientation *= simd_quatf(angle: .pi, axis: SIMD3<Float>(0, 1, 0))
+
+        for (id, node) in geospatialDebugNodesByID {
+            let contentPosition = node.contentEntity.position(relativeTo: nil)
+            let distance = simd_distance(cameraPosition, contentPosition)
+            let isSelected = selectedGeospatialDebugAnchorID == id
+            node.markerEntity.scale = SIMD3<Float>(
+                repeating: markerVisualScale(forDistance: distance, isSelected: isSelected)
+            )
+            node.labelEntity.scale = SIMD3<Float>(
+                repeating: labelVisualScale(forDistance: distance, isSelected: isSelected)
+            )
+            node.labelEntity.look(at: cameraPosition, from: node.labelEntity.position(relativeTo: nil), relativeTo: nil)
+            node.labelEntity.orientation *= simd_quatf(angle: .pi, axis: SIMD3<Float>(0, 1, 0))
+        }
     }
 
-    private func markerVisualScale(forDistance distance: Float) -> Float {
+    private func smoothedContentOffset(
+        current: SIMD3<Float>,
+        target: SIMD3<Float>,
+        anchorTransform: simd_float4x4
+    ) -> SIMD3<Float> {
+        let targetDelta = simd_distance(current, target)
+        let targetWorldPosition = worldPosition(anchorTransform: anchorTransform, localOffset: target)
+        let cameraDistance = distanceFromCamera(to: targetWorldPosition)
+        let alpha = transformSmoothingAlpha(cameraDistance: cameraDistance, targetDelta: targetDelta)
+        return simd_mix(current, target, SIMD3<Float>(repeating: alpha))
+    }
+
+    private func worldPosition(anchorTransform: simd_float4x4, localOffset: SIMD3<Float>) -> SIMD3<Float> {
+        let local = SIMD4<Float>(localOffset.x, localOffset.y, localOffset.z, 1)
+        let world = anchorTransform * local
+        return SIMD3<Float>(world.x, world.y, world.z)
+    }
+
+    private func smoothedTransform(current: simd_float4x4, target: simd_float4x4) -> simd_float4x4 {
+        let currentPosition = translation(from: current)
+        let targetPosition = translation(from: target)
+        let distance = simd_distance(currentPosition, targetPosition)
+        let cameraDistance = distanceFromCamera(to: targetPosition)
+        let alpha = transformSmoothingAlpha(cameraDistance: cameraDistance, targetDelta: distance)
+        let smoothedPosition = simd_mix(currentPosition, targetPosition, SIMD3<Float>(repeating: alpha))
+
+        var result = target
+        result.columns.3.x = smoothedPosition.x
+        result.columns.3.y = smoothedPosition.y
+        result.columns.3.z = smoothedPosition.z
+        return result
+    }
+
+    private func translation(from transform: simd_float4x4) -> SIMD3<Float> {
+        SIMD3<Float>(
+            transform.columns.3.x,
+            transform.columns.3.y,
+            transform.columns.3.z
+        )
+    }
+
+    private func distanceFromCamera(to position: SIMD3<Float>) -> Float {
+        guard let frame = arView.session.currentFrame else {
+            return simd_length(position)
+        }
+
+        let cameraPosition = translation(from: frame.camera.transform)
+        return simd_distance(cameraPosition, position)
+    }
+
+    private func transformSmoothingAlpha(cameraDistance: Float, targetDelta: Float) -> Float {
+        if targetDelta >= 12 {
+            return 0.55
+        }
+
+        switch cameraDistance {
+        case ..<5:
+            return 0.2
+        case ..<30:
+            return 0.3
+        case ..<120:
+            return 0.15
+        default:
+            return 0.25
+        }
+    }
+
+    private func markerVisualScale(forDistance distance: Float, isSelected: Bool) -> Float {
         let baseScale: Float = switch distance {
         case ..<5:
             0.65
@@ -221,11 +307,11 @@ final class ARSessionViewController: UIViewController {
         default:
             1.6
         }
-        let selectedScale: Float = isGeospatialDebugMarkerSelected ? 1.2 : 1.0
+        let selectedScale: Float = isSelected ? 1.2 : 1.0
         return min(baseScale * selectedScale, 2.0)
     }
 
-    private func labelVisualScale(forDistance distance: Float) -> Float {
+    private func labelVisualScale(forDistance distance: Float, isSelected: Bool) -> Float {
         let baseScale: Float = switch distance {
         case ..<5:
             0.9
@@ -236,7 +322,7 @@ final class ARSessionViewController: UIViewController {
         default:
             1.85
         }
-        let selectedScale: Float = isGeospatialDebugMarkerSelected ? 1.45 : 1.0
+        let selectedScale: Float = isSelected ? 1.45 : 1.0
         return min(baseScale * selectedScale, 2.6)
     }
 }

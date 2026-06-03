@@ -89,7 +89,8 @@ final class AppState: ObservableObject {
     @Published var matrixProjectionComparisonDiagnostics = "projection matrix 비교 좌표를 아직 계산하지 않았습니다."
     @Published var buildingFacadeAnchorDiagnostics = "3D 외벽 후보점을 아직 계산하지 않았습니다."
     @Published var buildingLabelHeightDiagnostics = "3D 라벨 높이 기준값을 아직 계산하지 않았습니다."
-    @Published var geospatialTerrainAnchorDiagnostics = "WGS84 Anchor 후보를 아직 생성하지 않았습니다."
+    @Published var geospatialWGS84CandidateDiagnostics = "WGS84 Anchor 후보를 아직 계산하지 않았습니다."
+    @Published var geospatialAnchorStateDiagnostics = "WGS84 Anchor 생성 상태를 아직 받지 못했습니다."
     @Published var cameraDirectionSpotID: TourismSpot.ID?
     @Published var cameraDirectionStatus = "카메라 방향 후보를 아직 계산하지 않았습니다."
     @Published var polygonValidationStatus = "Polygon 자동 후보를 아직 계산하지 않았습니다."
@@ -112,6 +113,9 @@ final class AppState: ObservableObject {
     private let maxEdgeMarkerCount = 3
     private let distantMarkerThresholdMeters: CLLocationDistance = 1_000
     private let distantMarkerScale = 0.78
+    private let geospatial3DCreateRadiusMeters: CLLocationDistance = 120
+    private let geospatial3DDeleteRadiusMeters: CLLocationDistance = 140
+    private let maxActiveGeospatial3DAnchorCount = 5
     private let buildingHeightResolver = BuildingHeightResolver()
     private var loadedTourismSpots: [TourismSpot] = []
     private var polygonLookupTask: Task<Void, Never>?
@@ -119,7 +123,8 @@ final class AppState: ObservableObject {
     private var polygonLookupNotFoundSpotIDs: Set<TourismSpot.ID> = []
     private var latestSceneSemanticsSnapshot: SceneSemanticsSnapshot?
     private var sceneSemanticsEvidenceBySpotID: [TourismSpot.ID: SceneSemanticsSpotEvidence] = [:]
-    private var lastRequestedTerrainAnchorSpotID: TourismSpot.ID?
+    private var lastRequestedTerrainAnchorSpotIDs: Set<TourismSpot.ID> = []
+    private var activeGeospatial3DSpotIDs: Set<TourismSpot.ID> = []
     private var stableFacadeSelectionsBySpotID: [TourismSpot.ID: StableBuildingFacadeSelection] = [:]
     private let facadeSwitchRayDistanceImprovementMeters: Double = 1.5
     private let facadeSwitchConfirmationInterval: TimeInterval = 0.5
@@ -185,7 +190,7 @@ final class AppState: ObservableObject {
         }
         self.geospatialSessionManager.onTerrainAnchorStatusChanged = { [weak self] status in
             Task { @MainActor in
-                self?.geospatialTerrainAnchorDiagnostics = status
+                self?.geospatialAnchorStateDiagnostics = status
             }
         }
 
@@ -517,7 +522,9 @@ final class AppState: ObservableObject {
         resolvedBuildingHeightsBySpotID = [:]
         sceneSemanticsEvidenceBySpotID = [:]
         sceneSemanticsScoringDiagnostics = "후보 초기화로 Scene Semantics 라벨 보정도 초기화했습니다."
-        lastRequestedTerrainAnchorSpotID = nil
+        lastRequestedTerrainAnchorSpotIDs = []
+        activeGeospatial3DSpotIDs = []
+        geospatialSessionManager.clearAllGeospatialDebugAnchors(reason: "후보 초기화로 WGS84 Anchor를 모두 제거했습니다.")
         stableFacadeSelectionsBySpotID = [:]
         arLabelOverlay = nil
         arLabelOverlayDiagnostics = "후보 초기화로 AR 라벨도 초기화했습니다."
@@ -527,7 +534,8 @@ final class AppState: ObservableObject {
         localCoordinateDiagnostics = "후보 초기화로 local ENU 좌표 변환도 초기화했습니다."
         buildingFacadeAnchorDiagnostics = "후보 초기화로 3D 외벽 후보점도 초기화했습니다."
         buildingLabelHeightDiagnostics = "후보 초기화로 3D 라벨 높이 기준값도 초기화했습니다."
-        geospatialTerrainAnchorDiagnostics = "후보 초기화로 WGS84 Anchor 후보도 초기화했습니다."
+        geospatialWGS84CandidateDiagnostics = "후보 초기화로 WGS84 Anchor 후보도 초기화했습니다."
+        geospatialAnchorStateDiagnostics = "후보 초기화로 WGS84 Anchor 생성 상태도 초기화했습니다."
         matrixProjectionComparisonDiagnostics = "후보 초기화로 projection matrix 비교도 초기화했습니다."
         cameraDirectionSpotID = nil
         selectedSpot = nil
@@ -963,35 +971,110 @@ final class AppState: ObservableObject {
         )
         let sourcePropertiesText = sourceHeightPropertiesText(for: polygon)
         buildingLabelHeightDiagnostics = "\(spot.name) 3D 라벨 높이 기준 / \(distanceSource) \(Int(distanceMeters))m / \(labelHeight.rangeLabel) / 건물 높이 \(resolvedHeight.displayText) / 라벨 후보 높이 \(String(format: "%.1f", labelHeight.valueMeters))m / \(labelHeight.reason) / \(resolvedHeight.explanation)\(sourcePropertiesText)"
-        requestGeospatialTerrainAnchorIfPossible(
-            spot: spot,
-            polygon: polygon,
-            labelHeightMeters: labelHeight.valueMeters,
-            origin: latestLocationSnapshot
-        )
+
+        refreshGeospatial3DAnchorRequests(origin: latestLocationSnapshot)
+    }
+
+    private func shouldKeepGeospatial3DAnchor(
+        spotID: TourismSpot.ID,
+        distanceMeters: CLLocationDistance
+    ) -> Bool {
+        if activeGeospatial3DSpotIDs.contains(spotID) {
+            return distanceMeters <= geospatial3DDeleteRadiusMeters
+        }
+
+        return distanceMeters <= geospatial3DCreateRadiusMeters
+    }
+
+    private func refreshGeospatial3DAnchorRequests(origin: LocationSnapshot) {
+        let previousActiveSpotIDs = activeGeospatial3DSpotIDs
+        var preparedRequests: [(spot: TourismSpot, labelHeight: BuildingLabelHeightDecision, facadeCandidate: BuildingFacadeCandidate, distanceMeters: CLLocationDistance)] = []
+        var keptWithoutNewFacade: [(spot: TourismSpot, distanceMeters: CLLocationDistance)] = []
+
+        for spot in spots {
+            guard let polygon = buildingPolygonsBySpotID[spot.id] else {
+                continue
+            }
+
+            let resolvedHeight = resolvedBuildingHeightsBySpotID[spot.id] ?? buildingHeightResolver.resolve(polygon: polygon)
+            resolvedBuildingHeightsBySpotID[spot.id] = resolvedHeight
+            let facadeCandidate = cameraFacingFacadeCandidate(
+                spot: spot,
+                polygon: polygon,
+                from: origin,
+                headingDegrees: cameraHeadingDegrees
+            )
+            let distanceMeters = facadeCandidate?.distanceFromUserMeters
+                ?? origin.coordinate.distance(to: spot.center)
+
+            guard shouldKeepGeospatial3DAnchor(
+                spotID: spot.id,
+                distanceMeters: distanceMeters
+            ) else {
+                continue
+            }
+
+            guard let facadeCandidate else {
+                if previousActiveSpotIDs.contains(spot.id) {
+                    keptWithoutNewFacade.append((spot, distanceMeters))
+                }
+                continue
+            }
+
+            let labelHeight = labelHeightDecision(
+                for: resolvedHeight,
+                distanceMeters: distanceMeters
+            )
+            preparedRequests.append((spot, labelHeight, facadeCandidate, distanceMeters))
+        }
+
+        preparedRequests.sort { lhs, rhs in
+            lhs.distanceMeters < rhs.distanceMeters
+        }
+        let limitedRequests = Array(preparedRequests.prefix(maxActiveGeospatial3DAnchorCount))
+        let keptSpotIDs = Set(keptWithoutNewFacade.map(\.spot.id))
+        let requestedSpotIDs = Set(limitedRequests.map(\.spot.id)).union(keptSpotIDs)
+
+        for spotID in previousActiveSpotIDs where !requestedSpotIDs.contains(spotID) {
+            geospatialSessionManager.clearGeospatialDebugAnchor(
+                for: spotID,
+                reason: "WGS84 Anchor 숨김 / 생성 \(Int(geospatial3DCreateRadiusMeters))m, 삭제 \(Int(geospatial3DDeleteRadiusMeters))m 기준 밖"
+            )
+        }
+
+        if requestedSpotIDs.isEmpty {
+            if !previousActiveSpotIDs.isEmpty || !lastRequestedTerrainAnchorSpotIDs.isEmpty {
+                geospatialSessionManager.clearAllGeospatialDebugAnchors(reason: "3D 표시 범위 안의 WGS84 Anchor 후보가 없습니다.")
+            }
+            activeGeospatial3DSpotIDs = []
+            lastRequestedTerrainAnchorSpotIDs = []
+            geospatialWGS84CandidateDiagnostics = "3D 숨김 / \(Int(geospatial3DCreateRadiusMeters))m 안에 Polygon+외벽 후보가 있는 건물이 없습니다."
+            return
+        }
+
+        var summaries = limitedRequests.map { request in
+            requestGeospatialTerrainAnchorIfPossible(
+                spot: request.spot,
+                facadeCandidate: request.facadeCandidate,
+                labelHeightMeters: request.labelHeight.valueMeters,
+                origin: origin
+            )
+        }
+        summaries.append(contentsOf: keptWithoutNewFacade.map {
+            "\($0.spot.name) 유지 / 외벽 후보점 없음 / \(Int($0.distanceMeters))m"
+        })
+
+        activeGeospatial3DSpotIDs = requestedSpotIDs
+        lastRequestedTerrainAnchorSpotIDs = Set(limitedRequests.map(\.spot.id))
+        geospatialWGS84CandidateDiagnostics = "WGS84 Anchor 후보 \(requestedSpotIDs.count)개 / " + summaries.joined(separator: " | ")
     }
 
     private func requestGeospatialTerrainAnchorIfPossible(
         spot: TourismSpot,
-        polygon: BuildingPolygon,
+        facadeCandidate: BuildingFacadeCandidate,
         labelHeightMeters: Double,
         origin: LocationSnapshot
-    ) {
-        guard let facadeCandidate = cameraFacingFacadeCandidate(
-            spot: spot,
-            polygon: polygon,
-            from: origin,
-            headingDegrees: cameraHeadingDegrees
-        ) else {
-            geospatialTerrainAnchorDiagnostics = "\(spot.name) WGS84 Anchor 대기: 외벽 후보점이 없습니다."
-            return
-        }
-
-        if lastRequestedTerrainAnchorSpotID == spot.id {
-            return
-        }
-        lastRequestedTerrainAnchorSpotID = spot.id
-
+    ) -> String {
         let candidates = terrainAnchorCandidates(
             from: facadeCandidate,
             labelHeightMeters: labelHeightMeters,
@@ -1006,7 +1089,6 @@ final class AppState: ObservableObject {
             "\($0.label) / 좌표 \($0.coordinate.shortText) / 절대고도 \(String(format: "%.1f", $0.altitude))m"
         } ?? "절대고도 계산 불가"
 
-        geospatialTerrainAnchorDiagnostics = "\(spot.name) WGS84 Anchor 후보 / \(fallbackSummary) / Terrain Anchor는 현재 보류 / ARCore Earth tracking 대기 또는 요청 중"
         geospatialSessionManager.createTerrainAnchorIfPossible(
             for: GeospatialTerrainAnchorRequest(
                 spotID: spot.id,
@@ -1015,6 +1097,7 @@ final class AppState: ObservableObject {
                 wgs84Fallback: wgs84Fallback
             )
         )
+        return "\(spot.name) / \(fallbackSummary)"
     }
 
     private func terrainAnchorCandidates(
@@ -1106,11 +1189,14 @@ final class AppState: ObservableObject {
             rangeLabel = "근거리 0~5m"
         case ..<30:
             let progress = ((distanceMeters - 5) / 25).clamped(to: 0...1)
-            baseHeight = 3.0 + progress * 2.0
+            baseHeight = 3.0 + progress * 1.0
             rangeLabel = "중거리 5~30m"
+        case ..<120:
+            baseHeight = 5.0
+            rangeLabel = "장거리 시야 30~120m"
         default:
             baseHeight = 5.0
-            rangeLabel = "원거리 30m 이상"
+            rangeLabel = "원거리 120m~1km"
         }
 
         let buildingHeightLimit = max(resolvedHeight.valueMeters * 0.6, 1.7)

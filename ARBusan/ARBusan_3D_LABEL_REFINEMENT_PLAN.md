@@ -13,6 +13,9 @@
 - RealityKit Entity에 collision shape를 붙이고 `ARView.entity(at:)` hit-test로 구체/라벨 탭 처리를 한다.
 - 구체/라벨 탭 시 선택 상태가 토글되고, 선택된 마커는 최대 크기 제한 안에서 확대된다.
 - 구체/라벨은 거리감을 유지하되, 가까울 때 너무 크고 20~30m에서 너무 작아지는 문제를 줄이기 위해 거리 구간별 scale 보정을 적용한다.
+- 같은 건물 안에서 외벽 후보점이 바뀌면 RealityKit anchor transform을 즉시 이동하지 않고 거리별 smoothing으로 따라가게 한다.
+- 같은 건물의 외벽 후보점 이동은 WGS84 anchor를 재생성하지 않고, 기준 WGS84 anchor 아래 RealityKit child content offset을 이동시킨다.
+- 현재 위치 기준 3D 표시 범위 안에 여러 건물이 있으면 건물별 WGS84 anchor를 동시에 유지한다.
 - Scene Semantics와 OCR은 발열 감소를 위해 비활성화했다.
 
 ## 2. 확정 규칙
@@ -29,14 +32,16 @@
 
 ```text
 0~5m: 눈높이, 약 1.5~1.8m
-5~30m: 중거리, 1층 중앙~1층 끝, 약 3~5m
-30m 이상: 원거리, 2D 방향/거리 overlay 또는 낮은 우선순위 3D
+5~30m: 중거리, 약 3~4m
+30~120m: 장거리 시야, 약 5m
+120m~1km: 원거리, 3D 숨김 + 2D 방향/거리 overlay
 ```
 
 - 건물 높이가 있으면 위 값을 건물 높이의 약 60% 이내로 제한한다.
 - 건물 높이가 없으면 거리별 fallback 높이를 사용한다.
 - 건물형은 `내 위치 -> 가장 가까운 외벽 지점` 거리를 기준으로 한다.
 - 비건물형은 Polygon이 없으므로 `내 위치 -> TourAPI POI 좌표점` 거리를 기준으로 한다.
+- 3D 생성/삭제는 깜빡임 방지를 위해 hysteresis를 적용한다. 새 3D는 `120m 이내`에서 생성하고, 이미 생성된 3D는 `140m 밖`으로 벗어나기 전까지 유지한다.
 
 ### 2.3 크기 정책
 
@@ -57,6 +62,11 @@
 - 보류: Terrain Anchor, Rooftop Anchor, Streetscape attached anchor
 - Terrain Anchor는 안정화 이후 시간이 남으면 부산 현장 테스트에서 다시 검토한다.
 - WGS84는 절대고도 오차가 있으므로 현장에서 실제 높이 차이를 계속 기록한다.
+- 같은 건물의 WGS84 anchor가 갱신되어도 3D Entity는 유지하고 transform 위치만 부드럽게 보간한다.
+- 거리별 transform smoothing: `0~5m 20%`, `5~30m 30%`, `30~120m 15%`, 큰 점프 12m 이상은 `55%`로 빠르게 따라간다.
+- 현재 구조는 `건물별 WGS84 기준 anchor + 구체/라벨 child Entity offset 이동`이다.
+- 같은 건물에서 외벽 후보점이 바뀌면 anchor를 새로 생성하지 않고 child position만 보간한다.
+- 120m 생성/140m 삭제 hysteresis 범위 안에 여러 건물이 있으면 최대 5개까지 WGS84 anchor와 RealityKit 노드를 동시에 유지한다.
 
 ### 2.5 거리별 UX
 
@@ -69,12 +79,18 @@
     3D 외벽 라벨 메인
     2D overlay와 edge marker는 보조
 
-30m~1km:
+30~120m:
+    사람이 대상을 볼 수는 있지만 식별이 어려운 구간
+    3D 외벽 라벨은 유지하되 약 5m 높이로 고정
+    2D 방향/거리 overlay와 edge marker를 보조로 사용
+
+120m~1km:
+    3D 구체/라벨 숨김
     2D 방향/거리 overlay와 edge marker 메인
-    3D 라벨은 테스트 후 유지 여부 결정
+    단, 이미 생성된 3D는 140m 밖으로 벗어나기 전까지 유지
 
 1km 이상:
-    방향 안내와 거리 정보 중심
+    후보 표시 대상에서 제외하거나 방향 안내만 제한적으로 제공
 ```
 
 ### 2.6 건물형/비건물형
@@ -94,10 +110,15 @@
 - [x] RealityKit Entity 직접 탭 hit-test 적용
 - [x] 탭 시 3D 마커 확대와 최대 크기 제한
 - [x] WGS84 중심 anchor 로그 정리
+- [x] 근거리/중거리/원거리 UX 분기 적용
+- [x] 3D 구체/라벨 이동 smoothing 적용
+- [x] 3D 생성/삭제 거리 hysteresis 적용
+- [x] WGS84 기준 anchor와 RealityKit child offset 이동 구조 적용
+- [x] 거리 안의 여러 건물 WGS84 anchor 동시 유지
 
 ### 3.2 다음 작업
 
-- [ ] 근거리/중거리/원거리 UX 분기 적용
+- [ ] 여러 3D 라벨이 동시에 보일 때 겹침/우선순위 현장 검증
 - [ ] 2D overlay와 3D 라벨 역할 정리
 - [ ] TourAPI 재연결 후 실제 후보 검증
 - [ ] 비건물형 POI의 좌표점 3D 표시 검증
@@ -114,4 +135,6 @@
 - 5~30m에서 라벨이 1층 중앙~끝 지점에 자연스럽게 보이는가?
 - 20~30m에서 구체와 텍스트가 너무 작지 않은가?
 - WGS84 Anchor가 안정적으로 생성되는가?
+- 한 화면 또는 같은 반경 안의 여러 건물에서 WGS84 Anchor가 여러 개 유지되는가?
+- WGS84 후보 로그와 앵커 상태 로그의 활성 개수가 실제 표시되는 구체/라벨 개수와 맞는가?
 - 비건물형 POI도 좌표점 기준 3D 구체로 표현 가능한가?

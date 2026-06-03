@@ -32,10 +32,21 @@ struct GeospatialDebugAnchorSnapshot {
     let label: String
     let kind: String
     let transform: simd_float4x4
+    let contentOffset: SIMD3<Float>
     let trackingState: String
 }
 
 final class GeospatialSessionManager: NSObject, CLLocationManagerDelegate {
+    private struct WGS84DebugAnchorRecord {
+        let spotID: TourismSpot.ID
+        let spotName: String
+        var anchor: GARAnchor
+        let baseCoordinate: CLLocationCoordinate2D
+        let baseAltitude: CLLocationDistance
+        var contentOffset: SIMD3<Float>
+        var summary: String
+    }
+
     private let locationManager = CLLocationManager()
     private let apiKeysProvider: () -> APIKeys
     private var garSession: GARSession?
@@ -48,6 +59,11 @@ final class GeospatialSessionManager: NSObject, CLLocationManagerDelegate {
     private var activeDebugAnchorID: UUID?
     private var activeDebugAnchorLabel: String?
     private var activeDebugAnchorKind: String?
+    private var activeAnchorSummariesByID: [UUID: String] = [:]
+    private var activeWGS84AnchorCoordinate: CLLocationCoordinate2D?
+    private var activeWGS84AnchorAltitude: CLLocationDistance?
+    private var activeWGS84ContentOffset = SIMD3<Float>(repeating: 0)
+    private var wgs84AnchorRecordsBySpotID: [TourismSpot.ID: WGS84DebugAnchorRecord] = [:]
     private var latestTerrainAnchorStatusMessage = "WGS84 Anchor 후보를 아직 생성하지 않았습니다."
     private var latestEarthIsTracking = false
     private var isConfigured = false
@@ -65,6 +81,7 @@ final class GeospatialSessionManager: NSObject, CLLocationManagerDelegate {
     var onSceneSemanticsStatusChanged: ((String) -> Void)?
     var onTerrainAnchorStatusChanged: ((String) -> Void)?
     var onDebugAnchorUpdated: ((GeospatialDebugAnchorSnapshot?) -> Void)?
+    var onDebugAnchorsUpdated: (([GeospatialDebugAnchorSnapshot]) -> Void)?
 
     init(apiKeysProvider: @escaping () -> APIKeys = { APIKeyProvider.load() }) {
         self.apiKeysProvider = apiKeysProvider
@@ -189,26 +206,68 @@ final class GeospatialSessionManager: NSObject, CLLocationManagerDelegate {
             return
         }
 
-        let nextKey = terrainAnchorKey(for: request)
-        if terrainAnchorKey == nextKey {
-            if let activeAnchor = wgs84Anchor ?? terrainAnchor {
-                updateTerrainAnchorStatus("\(latestTerrainAnchorStatusMessage) / anchor tracking \(activeAnchor.trackingState.displayText)")
-            } else {
-                updateTerrainAnchorStatus(latestTerrainAnchorStatusMessage)
-            }
+        if var record = wgs84AnchorRecordsBySpotID[request.spotID] {
+            updateWGS84ContentTarget(
+                wgs84Candidate,
+                request: request,
+                record: &record
+            )
+            wgs84AnchorRecordsBySpotID[request.spotID] = record
+            activeAnchorSummariesByID[record.anchor.identifier] = record.summary
+            publishDebugAnchors()
             return
         }
 
-        removeCurrentGeospatialAnchors(from: garSession)
-        terrainAnchor = nil
-        wgs84Anchor = nil
-        terrainAnchorKey = nextKey
+        terrainAnchorKey = terrainAnchorKey(for: request)
         terrainAnchorRequest = request
         terrainAnchorCandidateIndex = 0
         terrainAnchorFuture?.cancel()
         terrainAnchorFuture = nil
 
-        createWGS84Anchor(wgs84Candidate, spotName: request.spotName)
+        createWGS84Anchor(wgs84Candidate, request: request)
+    }
+
+    func clearGeospatialDebugAnchor(reason: String) {
+        clearAllGeospatialDebugAnchors(reason: reason)
+    }
+
+    func clearGeospatialDebugAnchor(for spotID: TourismSpot.ID, reason: String) {
+        guard let record = wgs84AnchorRecordsBySpotID.removeValue(forKey: spotID) else {
+            return
+        }
+
+        garSession?.remove(record.anchor)
+        activeAnchorSummariesByID.removeValue(forKey: record.anchor.identifier)
+        publishDebugAnchors()
+        updateTerrainAnchorStatus("\(reason) / \(activeAnchorDiagnosticsText)")
+    }
+
+    func clearAllGeospatialDebugAnchors(reason: String) {
+        terrainAnchorFuture?.cancel()
+        terrainAnchorFuture = nil
+        terrainAnchorKey = nil
+        terrainAnchorRequest = nil
+        terrainAnchorCandidateIndex = 0
+
+        if let garSession {
+            removeCurrentGeospatialAnchors(from: garSession)
+        } else {
+            terrainAnchor = nil
+            wgs84Anchor = nil
+            activeDebugAnchorID = nil
+            activeDebugAnchorLabel = nil
+            activeDebugAnchorKind = nil
+            wgs84AnchorRecordsBySpotID = [:]
+            activeAnchorSummariesByID = [:]
+            DispatchQueue.main.async { [onDebugAnchorUpdated] in
+                onDebugAnchorUpdated?(nil)
+            }
+            DispatchQueue.main.async { [onDebugAnchorsUpdated] in
+                onDebugAnchorsUpdated?([])
+            }
+        }
+
+        updateTerrainAnchorStatus("\(reason) / \(activeAnchorDiagnosticsText)")
     }
 
     private func requestTerrainAnchorCandidate(_ index: Int, for request: GeospatialTerrainAnchorRequest) {
@@ -244,7 +303,7 @@ final class GeospatialSessionManager: NSObject, CLLocationManagerDelegate {
                                   let fallback = request.wgs84Fallback,
                                   terrainState == GARTerrainAnchorState.errorUnsupportedLocation {
                             self.updateTerrainAnchorStatus("\(failureMessage) / WGS84 fallback 생성 시도")
-                            self.createWGS84Anchor(fallback, spotName: request.spotName)
+                            self.createWGS84Anchor(fallback, request: request)
                         } else {
                             self?.updateTerrainAnchorStatus(failureMessage)
                         }
@@ -260,25 +319,41 @@ final class GeospatialSessionManager: NSObject, CLLocationManagerDelegate {
         }
     }
 
-    private func createWGS84Anchor(_ candidate: GeospatialWGS84AnchorCandidate, spotName: String) {
+    private func createWGS84Anchor(_ candidate: GeospatialWGS84AnchorCandidate, request: GeospatialTerrainAnchorRequest) {
         guard let garSession else {
-            updateTerrainAnchorStatus("\(spotName) WGS84 Anchor 대기: ARCore Geospatial 세션이 아직 없습니다.")
+            updateTerrainAnchorStatus("\(request.spotName) WGS84 Anchor 대기: ARCore Geospatial 세션이 아직 없습니다.")
             return
         }
 
         do {
-            updateTerrainAnchorStatus("\(spotName) WGS84 Anchor 생성 요청 / \(candidate.label) / 좌표 \(candidate.coordinate.shortText) / 절대고도 \(String(format: "%.1f", candidate.altitude))m / 기준 \(candidate.altitudeSource) / Terrain Anchor는 현재 보류")
+            updateTerrainAnchorStatus("\(request.spotName) WGS84 Anchor 생성 요청 / \(candidate.label) / 좌표 \(candidate.coordinate.shortText) / 절대고도 \(String(format: "%.1f", candidate.altitude))m / 기준 \(candidate.altitudeSource) / Terrain Anchor는 현재 보류")
             let anchor = try garSession.createAnchor(
                 coordinate: candidate.coordinate,
                 altitude: candidate.altitude,
                 eastUpSouthQAnchor: simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
             )
             wgs84Anchor = anchor
-            setActiveDebugAnchor(anchor, label: spotName, kind: "WGS84")
-            updateTerrainAnchorStatus("\(spotName) WGS84 Anchor 생성 완료 / \(candidate.label) / tracking \(anchor.trackingState.displayText) / 좌표 \(candidate.coordinate.shortText) / 절대고도 \(String(format: "%.1f", candidate.altitude))m / 기준 \(candidate.altitudeSource)")
+            activeWGS84AnchorCoordinate = candidate.coordinate
+            activeWGS84AnchorAltitude = candidate.altitude
+            activeWGS84ContentOffset = SIMD3<Float>(repeating: 0)
+            let anchorSummary = "\(request.spotName) WGS84 / \(candidate.label) / 좌표 \(candidate.coordinate.shortText) / 절대고도 \(String(format: "%.1f", candidate.altitude))m"
+            let record = WGS84DebugAnchorRecord(
+                spotID: request.spotID,
+                spotName: request.spotName,
+                anchor: anchor,
+                baseCoordinate: candidate.coordinate,
+                baseAltitude: candidate.altitude,
+                contentOffset: .zero,
+                summary: anchorSummary
+            )
+            wgs84AnchorRecordsBySpotID[request.spotID] = record
+            activeAnchorSummariesByID[anchor.identifier] = anchorSummary
+            setActiveDebugAnchor(anchor, label: request.spotName, kind: "WGS84", summary: anchorSummary)
+            publishDebugAnchors()
+            updateTerrainAnchorStatus("\(request.spotName) WGS84 Anchor 생성 완료 / \(candidate.label) / tracking \(anchor.trackingState.displayText) / 좌표 \(candidate.coordinate.shortText) / 절대고도 \(String(format: "%.1f", candidate.altitude))m / 기준 \(candidate.altitudeSource) / \(activeAnchorDiagnosticsText)")
         } catch {
             wgs84Anchor = nil
-            updateTerrainAnchorStatus("\(spotName) WGS84 Anchor 생성 실패 / \(candidate.label) / 좌표 \(candidate.coordinate.shortText) / 절대고도 \(String(format: "%.1f", candidate.altitude))m / \(error.localizedDescription)")
+            updateTerrainAnchorStatus("\(request.spotName) WGS84 Anchor 생성 실패 / \(candidate.label) / 좌표 \(candidate.coordinate.shortText) / 절대고도 \(String(format: "%.1f", candidate.altitude))m / \(error.localizedDescription)")
         }
     }
 
@@ -292,17 +367,80 @@ final class GeospatialSessionManager: NSObject, CLLocationManagerDelegate {
         activeDebugAnchorID = nil
         activeDebugAnchorLabel = nil
         activeDebugAnchorKind = nil
+        activeAnchorSummariesByID = [:]
+        activeWGS84AnchorCoordinate = nil
+        activeWGS84AnchorAltitude = nil
+        activeWGS84ContentOffset = SIMD3<Float>(repeating: 0)
+        for record in wgs84AnchorRecordsBySpotID.values {
+            garSession.remove(record.anchor)
+        }
+        wgs84AnchorRecordsBySpotID = [:]
         onDebugAnchorUpdated?(nil)
+        onDebugAnchorsUpdated?([])
     }
 
-    private func setActiveDebugAnchor(_ anchor: GARAnchor, label: String, kind: String) {
+    private func setActiveDebugAnchor(_ anchor: GARAnchor, label: String, kind: String, summary: String? = nil) {
         activeDebugAnchorID = anchor.identifier
         activeDebugAnchorLabel = label
         activeDebugAnchorKind = kind
+        activeAnchorSummariesByID[anchor.identifier] = summary ?? "\(label) \(kind)"
         publishDebugAnchor(anchor)
     }
 
+    private func updateWGS84ContentTarget(
+        _ candidate: GeospatialWGS84AnchorCandidate,
+        request: GeospatialTerrainAnchorRequest,
+        record: inout WGS84DebugAnchorRecord
+    ) {
+        let origin = LocationSnapshot(
+            latitude: record.baseCoordinate.latitude,
+            longitude: record.baseCoordinate.longitude,
+            altitude: record.baseAltitude,
+            horizontalAccuracy: 0,
+            verticalAccuracy: 0,
+            heading: nil,
+            headingAccuracy: nil,
+            source: .arCoreGeospatial,
+            capturedAt: Date()
+        )
+        let enu = LocalENUProjector.project(
+            candidate.coordinate,
+            altitude: candidate.altitude,
+            from: origin
+        )
+        record.contentOffset = SIMD3<Float>(
+            Float(enu.eastMeters),
+            Float(enu.upMeters),
+            Float(-enu.northMeters)
+        )
+        record.summary = "\(request.spotName) WGS84 기준 anchor / child 이동 \(candidate.label) / offset east \(Int(enu.eastMeters))m up \(String(format: "%.1f", enu.upMeters))m north \(Int(enu.northMeters))m"
+    }
+
+    private var activeAnchorDiagnosticsText: String {
+        guard !activeAnchorSummariesByID.isEmpty else {
+            return "현재 활성 지리 앵커 0개"
+        }
+
+        let summaries = activeAnchorSummariesByID.values
+            .sorted()
+            .joined(separator: " | ")
+        return "현재 활성 지리 앵커 \(activeAnchorSummariesByID.count)개: \(summaries)"
+    }
+
     private func publishDebugAnchorIfNeeded(from frame: GARFrame) {
+        if !wgs84AnchorRecordsBySpotID.isEmpty {
+            for (spotID, record) in wgs84AnchorRecordsBySpotID {
+                guard let anchor = frame.anchors.first(where: { $0.identifier == record.anchor.identifier }) else {
+                    continue
+                }
+                var updatedRecord = record
+                updatedRecord.anchor = anchor
+                wgs84AnchorRecordsBySpotID[spotID] = updatedRecord
+            }
+            publishDebugAnchors()
+            return
+        }
+
         guard let activeDebugAnchorID else {
             return
         }
@@ -326,10 +464,32 @@ final class GeospatialSessionManager: NSObject, CLLocationManagerDelegate {
             label: activeDebugAnchorLabel ?? "Geospatial Debug Anchor",
             kind: activeDebugAnchorKind ?? "Geospatial",
             transform: anchor.transform,
+            contentOffset: activeWGS84ContentOffset,
             trackingState: anchor.trackingState.displayText
         )
         DispatchQueue.main.async { [onDebugAnchorUpdated] in
             onDebugAnchorUpdated?(snapshot)
+        }
+    }
+
+    private func publishDebugAnchors() {
+        let snapshots = wgs84AnchorRecordsBySpotID.values.compactMap { record -> GeospatialDebugAnchorSnapshot? in
+            guard record.anchor.hasValidTransform else {
+                return nil
+            }
+
+            return GeospatialDebugAnchorSnapshot(
+                id: record.anchor.identifier,
+                label: record.spotName,
+                kind: "WGS84",
+                transform: record.anchor.transform,
+                contentOffset: record.contentOffset,
+                trackingState: record.anchor.trackingState.displayText
+            )
+        }
+
+        DispatchQueue.main.async { [onDebugAnchorsUpdated] in
+            onDebugAnchorsUpdated?(snapshots)
         }
     }
 
@@ -414,24 +574,14 @@ final class GeospatialSessionManager: NSObject, CLLocationManagerDelegate {
     }
 
     private func terrainAnchorKey(for request: GeospatialTerrainAnchorRequest) -> String {
-        let candidateKey = request.candidates
-            .map { candidate -> String in
-                let latitude = (candidate.coordinate.latitude * 1_000_000).rounded()
-                let longitude = (candidate.coordinate.longitude * 1_000_000).rounded()
-                let height = (candidate.altitudeAboveTerrain * 10).rounded()
-                return "\(latitude)-\(longitude)-\(height)"
-            }
-            .joined(separator: "|")
-        let fallbackKey: String
-        if let fallback = request.wgs84Fallback {
-            let latitude = (fallback.coordinate.latitude * 1_000_000).rounded()
-            let longitude = (fallback.coordinate.longitude * 1_000_000).rounded()
-            let altitude = (fallback.altitude * 10).rounded()
-            fallbackKey = "\(latitude)-\(longitude)-\(altitude)"
-        } else {
-            fallbackKey = "none"
+        guard let wgs84Candidate = request.wgs84Fallback else {
+            return "\(request.spotID)-wgs84-none"
         }
-        return "\(request.spotID)-\(candidateKey)-wgs84-\(fallbackKey)"
+
+        let latitude = (wgs84Candidate.coordinate.latitude * 100_000).rounded()
+        let longitude = (wgs84Candidate.coordinate.longitude * 100_000).rounded()
+        let altitude = (wgs84Candidate.altitude * 2).rounded()
+        return "\(request.spotID)-wgs84-\(latitude)-\(longitude)-\(altitude)-\(wgs84Candidate.label)"
     }
 }
 
