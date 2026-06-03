@@ -175,9 +175,9 @@ POI 유형: 건물형 / 비건물형 / 애매함
 
 ## 9. 구현 순서
 
-- [ ] 해운대구 TourAPI POI 로딩을 디버그 샘플 세트로 분리한다.
-- [ ] 실내 디버그용 `debugOrigin`, `debugHeading` 입력 구조를 만든다.
-- [ ] 목업/해운대 TourAPI 샘플을 같은 후보 파이프라인에 태운다.
+- [x] 해운대구 TourAPI POI 로딩을 디버그 샘플 세트로 분리한다.
+- [x] 실내 디버그용 `debugOrigin`, `debugHeading` 입력 구조를 만든다.
+- [x] 목업/해운대 TourAPI 샘플을 같은 후보 파이프라인에 태운다.
 - [ ] 건물형/비건물형/애매함 분류 로그를 추가한다.
 - [ ] 건물형 정면/근거리/모서리 케이스를 로그로 검증한다.
 - [ ] 비건물형 point POI fallback을 검증한다.
@@ -190,4 +190,3 @@ POI 유형: 건물형 / 비건물형 / 애매함
 - Terrain Anchor 재검토
 - Streetscape Geometry/Depth/Occlusion 적용
 - 라벨 UI 최종 디자인
-

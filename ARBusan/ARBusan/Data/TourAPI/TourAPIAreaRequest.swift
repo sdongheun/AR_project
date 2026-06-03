@@ -21,6 +21,14 @@ enum TourAPIAreaRequests {
         signguName: "김해시"
     )
 
+    static let busanHaeundae = TourAPIAreaRequest(
+        baseYearMonth: "202504",
+        areaCode: "26",
+        areaName: "부산광역시",
+        signguCode: "26350",
+        signguName: "해운대구"
+    )
+
     static let busan: [TourAPIAreaRequest] = [
         TourAPIAreaRequest(baseYearMonth: "202504", areaCode: "26", areaName: "부산광역시", signguCode: "26110", signguName: "중구"),
         TourAPIAreaRequest(baseYearMonth: "202504", areaCode: "26", areaName: "부산광역시", signguCode: "26140", signguName: "서구"),
@@ -30,7 +38,7 @@ enum TourAPIAreaRequests {
         TourAPIAreaRequest(baseYearMonth: "202504", areaCode: "26", areaName: "부산광역시", signguCode: "26260", signguName: "동래구"),
         TourAPIAreaRequest(baseYearMonth: "202504", areaCode: "26", areaName: "부산광역시", signguCode: "26290", signguName: "남구"),
         TourAPIAreaRequest(baseYearMonth: "202504", areaCode: "26", areaName: "부산광역시", signguCode: "26320", signguName: "북구"),
-        TourAPIAreaRequest(baseYearMonth: "202504", areaCode: "26", areaName: "부산광역시", signguCode: "26350", signguName: "해운대구"),
+        busanHaeundae,
         TourAPIAreaRequest(baseYearMonth: "202504", areaCode: "26", areaName: "부산광역시", signguCode: "26380", signguName: "사하구"),
         TourAPIAreaRequest(baseYearMonth: "202504", areaCode: "26", areaName: "부산광역시", signguCode: "26410", signguName: "금정구"),
         TourAPIAreaRequest(baseYearMonth: "202504", areaCode: "26", areaName: "부산광역시", signguCode: "26440", signguName: "강서구"),

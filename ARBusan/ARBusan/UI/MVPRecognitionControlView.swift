@@ -9,6 +9,60 @@ struct MVPRecognitionControlView: View {
                 .font(.subheadline.weight(.semibold))
 
             RecognitionSignalSection(
+                title: "해운대 TourAPI 실내 디버그",
+                caption: "실제 GPS/VPS 대신 해운대 TourAPI POI 주변의 가상 위치와 heading을 주입해 계산 로직을 검증합니다."
+            ) {
+                Toggle(
+                    "실내 디버그 모드",
+                    isOn: Binding(
+                        get: { appState.isIndoorDebugModeEnabled },
+                        set: { appState.setIndoorDebugModeEnabled($0) }
+                    )
+                )
+                .font(.caption)
+
+                Button("해운대 TourAPI 후보 불러오기") {
+                    Task {
+                        await appState.loadHaeundaeTourAPIDebugSpots()
+                    }
+                }
+                .buttonStyle(.bordered)
+
+                if !appState.spots.isEmpty {
+                    Picker(
+                        "대상 POI",
+                        selection: Binding(
+                            get: { appState.indoorDebugSelectedSpotID ?? appState.spots.first?.id ?? "" },
+                            set: { appState.selectIndoorDebugSpot(id: $0) }
+                        )
+                    ) {
+                        ForEach(appState.spots.prefix(80)) { spot in
+                            Text(spot.name)
+                                .tag(spot.id)
+                        }
+                    }
+                    .font(.caption)
+                }
+
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 8)], spacing: 8) {
+                    ForEach(IndoorDebugScenario.allCases) { scenario in
+                        Button(scenario.title) {
+                            appState.applyIndoorDebugScenario(scenario)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(appState.indoorDebugScenario == scenario ? .blue : .secondary)
+                        .font(.caption)
+                    }
+                }
+
+                Text(appState.indoorDebugStatus)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(nil)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            RecognitionSignalSection(
                 title: "디버그 표시",
                 caption: "기본 화면은 현장 테스트용으로 축약합니다. 필요할 때만 상세 로그를 켭니다."
             ) {

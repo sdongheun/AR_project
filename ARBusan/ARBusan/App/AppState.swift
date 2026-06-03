@@ -47,6 +47,65 @@ struct OnScreenCandidateMarkerOverlay: Identifiable, Equatable {
     let role: Role
 }
 
+enum IndoorDebugScenario: String, CaseIterable, Identifiable {
+    case front30m
+    case near5m
+    case corner10m
+    case opposite30m
+    case far120m
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .front30m:
+            return "정면 30m"
+        case .near5m:
+            return "근거리 5m"
+        case .corner10m:
+            return "모서리 10m"
+        case .opposite30m:
+            return "반대 방향"
+        case .far120m:
+            return "장거리 120m"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .front30m:
+            return "POI 남쪽 30m에서 관광지를 바라봅니다."
+        case .near5m:
+            return "POI 남쪽 5m에서 근거리 라벨을 검증합니다."
+        case .corner10m:
+            return "POI 남동쪽 10m에서 대각선/모서리 후보를 검증합니다."
+        case .opposite30m:
+            return "POI 남쪽 30m에 있지만 반대 방향을 바라봅니다."
+        case .far120m:
+            return "POI 남쪽 120m에서 장거리 표시를 검증합니다."
+        }
+    }
+
+    var offsetMeters: (east: Double, north: Double) {
+        switch self {
+        case .front30m:
+            return (0, -30)
+        case .near5m:
+            return (0, -5)
+        case .corner10m:
+            return (10, -10)
+        case .opposite30m:
+            return (0, -30)
+        case .far120m:
+            return (0, -120)
+        }
+    }
+
+    var reversesHeading: Bool {
+        self == .opposite30m
+    }
+}
+
 @MainActor
 final class AppState: ObservableObject {
     @Published var spots: [TourismSpot]
@@ -101,6 +160,10 @@ final class AppState: ObservableObject {
     @Published var buildingPolygonsBySpotID: [TourismSpot.ID: BuildingPolygon] = [:]
     @Published var resolvedBuildingHeightsBySpotID: [TourismSpot.ID: ResolvedBuildingHeight] = [:]
     @Published var tourismDataStatus = "TourAPI는 비활성화되어 있고 테스트 목업 건물 후보를 사용 중입니다."
+    @Published var isIndoorDebugModeEnabled = false
+    @Published var indoorDebugStatus = "실내 디버그 모드는 꺼져 있습니다."
+    @Published var indoorDebugSelectedSpotID: TourismSpot.ID?
+    @Published var indoorDebugScenario: IndoorDebugScenario = .front30m
 
     private let recognitionPipeline: RecognitionPipeline
     private let cameraDirectionCandidateProvider: CameraDirectionCandidateProvider
@@ -161,6 +224,9 @@ final class AppState: ObservableObject {
         self.polygonValidatedSpotID = nil
         self.geospatialSessionManager.onSnapshotUpdated = { [weak self] snapshot in
             Task { @MainActor in
+                guard self?.isIndoorDebugModeEnabled != true else {
+                    return
+                }
                 self?.latestLocationSnapshot = snapshot
                 switch snapshot.source {
                 case .coreLocation:
@@ -237,12 +303,188 @@ final class AppState: ObservableObject {
         }
     }
 
+    func loadHaeundaeTourAPIDebugSpots() async {
+        tourismDataStatus = "TourAPI 부산 해운대구 실내 디버그 후보를 불러오는 중입니다."
+        indoorDebugStatus = "해운대구 TourAPI 후보 로딩 중..."
+
+        do {
+            let client = LocalGovernmentHubTourAPIClient(
+                apiKey: apiKeys.tourAPI,
+                requests: [TourAPIAreaRequests.busanHaeundae]
+            )
+            let fetchedSpots = try await client.fetchTourismSpots()
+            guard !fetchedSpots.isEmpty else {
+                indoorDebugStatus = "해운대구 TourAPI 응답에서 좌표가 있는 후보를 찾지 못했습니다."
+                tourismDataStatus = indoorDebugStatus
+                return
+            }
+
+            loadedTourismSpots = fetchedSpots
+            clearManualSpatialSelections()
+            spots = fetchedSpots
+            indoorDebugSelectedSpotID = fetchedSpots.first?.id
+            selectedSpot = fetchedSpots.first
+            tourismDataStatus = "TourAPI 부산 해운대구 실내 디버그 후보 \(fetchedSpots.count)개를 불러왔습니다."
+            indoorDebugStatus = "해운대구 후보 \(fetchedSpots.count)개 로딩 완료. 시나리오를 선택해 debug origin을 주입하세요."
+
+            if isIndoorDebugModeEnabled {
+                applyIndoorDebugScenario(indoorDebugScenario)
+            } else {
+                runRecognition()
+            }
+        } catch {
+            indoorDebugStatus = "해운대구 TourAPI 로딩 실패: \(error.localizedDescription)"
+            tourismDataStatus = indoorDebugStatus
+        }
+    }
+
+    func setIndoorDebugModeEnabled(_ isEnabled: Bool) {
+        isIndoorDebugModeEnabled = isEnabled
+        if isEnabled {
+            applyIndoorDebugScenario(indoorDebugScenario)
+        } else {
+            indoorDebugStatus = "실내 디버그 모드를 종료했습니다. 실제 CoreLocation/ARCore snapshot을 다시 사용합니다."
+            stableGeospatial3DOrigin = nil
+            pendingStableGeospatial3DOrigin = nil
+            pendingStableOriginFirstSeenAt = nil
+            stableOriginLastAcceptedAt = nil
+            stableOriginIsUsableFor3DAnchors = false
+            stableOriginDiagnostics = "실내 디버그 종료로 3D stable origin을 초기화했습니다."
+            geospatialSessionManager.clearAllGeospatialDebugAnchors(reason: "실내 디버그 종료로 WGS84 Anchor를 모두 제거했습니다.")
+            activeGeospatial3DSpotIDs = []
+            lastRequestedTerrainAnchorSpotIDs = []
+            refreshSpatialTrackingConfidence()
+        }
+    }
+
+    func selectIndoorDebugSpot(id: TourismSpot.ID) {
+        indoorDebugSelectedSpotID = id
+        selectedSpot = spots.first(where: { $0.id == id })
+        applyIndoorDebugScenario(indoorDebugScenario)
+    }
+
+    func applyIndoorDebugScenario(_ scenario: IndoorDebugScenario) {
+        indoorDebugScenario = scenario
+        guard isIndoorDebugModeEnabled else {
+            indoorDebugStatus = "실내 디버그 모드는 꺼져 있습니다."
+            return
+        }
+
+        guard let targetSpot = indoorDebugTargetSpot else {
+            indoorDebugStatus = "실내 디버그 대상 POI가 없습니다. 해운대구 TourAPI 후보를 먼저 불러오세요."
+            return
+        }
+
+        let targetOrigin = LocationSnapshot(
+            latitude: targetSpot.center.latitude,
+            longitude: targetSpot.center.longitude,
+            altitude: latestGeospatialLocationSnapshot?.altitude ?? latestCoreLocationSnapshot?.altitude,
+            horizontalAccuracy: 1,
+            verticalAccuracy: latestGeospatialLocationSnapshot?.verticalAccuracy ?? latestCoreLocationSnapshot?.verticalAccuracy,
+            heading: nil,
+            headingAccuracy: nil,
+            source: .arCoreGeospatial,
+            capturedAt: Date()
+        )
+        let offset = scenario.offsetMeters
+        let debugCoordinate = LocalENUProjector.coordinate(
+            eastMeters: offset.east,
+            northMeters: offset.north,
+            from: targetOrigin
+        )
+        let rawHeading = debugCoordinate.bearing(to: targetSpot.center)
+        let debugHeading = scenario.reversesHeading
+            ? (rawHeading + 180).normalizedDegrees
+            : rawHeading.normalizedDegrees
+        let snapshot = LocationSnapshot(
+            latitude: debugCoordinate.latitude,
+            longitude: debugCoordinate.longitude,
+            altitude: targetOrigin.altitude,
+            horizontalAccuracy: 1,
+            verticalAccuracy: targetOrigin.verticalAccuracy,
+            heading: debugHeading,
+            headingAccuracy: 1,
+            source: .arCoreGeospatial,
+            capturedAt: Date()
+        )
+
+        injectIndoorDebugSnapshot(snapshot, headingDegrees: debugHeading, targetSpot: targetSpot, scenario: scenario)
+    }
+
+    var indoorDebugTargetSpot: TourismSpot? {
+        if let indoorDebugSelectedSpotID,
+           let spot = spots.first(where: { $0.id == indoorDebugSelectedSpotID }) {
+            return spot
+        }
+
+        return spots.first
+    }
+
     func updateCameraTextFromLiveOCR(_ text: String) {
         cameraTextInput = text
         runRecognition()
     }
 
+    private func injectIndoorDebugSnapshot(
+        _ snapshot: LocationSnapshot,
+        headingDegrees: Double,
+        targetSpot: TourismSpot,
+        scenario: IndoorDebugScenario
+    ) {
+        latestLocationSnapshot = snapshot
+        latestGeospatialLocationSnapshot = snapshot
+        locationConfidence = .high
+        effectiveSpatialConfidence = .high
+        cameraHeadingDegrees = headingDegrees
+        cameraHeadingSampleCount += 1
+        cameraHeadingLastUpdatedAt = Date()
+        cameraHeadingDeltaDegrees = 0
+        cameraHeadingDiagnostics = "실내 디버그 heading 사용 / \(Int(headingDegrees))도 / \(scenario.title)"
+
+        if cameraPoseSnapshot == nil {
+            cameraPoseSnapshot = CameraPoseSnapshot(
+                headingDegrees: headingDegrees,
+                pitchDegrees: 0,
+                yawDegrees: headingDegrees,
+                rollDegrees: 0,
+                positionX: 0,
+                positionY: 0,
+                positionZ: 0,
+                timestamp: Date().timeIntervalSince1970
+            )
+            cameraPoseDiagnostics = "실내 디버그 pose fallback / pitch 0도 / heading \(Int(headingDegrees))도"
+        }
+
+        stableGeospatial3DOrigin = snapshot
+        pendingStableGeospatial3DOrigin = nil
+        pendingStableOriginFirstSeenAt = nil
+        stableOriginLastAcceptedAt = Date()
+        stableOriginIsUsableFor3DAnchors = true
+        stableOriginDiagnostics = "3D stable origin 확정(실내 디버그) / 정확도 1m / \(scenario.title)"
+        geospatialStatus = "실내 디버그 모드: 실제 VPS 대신 debug origin을 사용합니다."
+        indoorDebugStatus = "\(targetSpot.name) / \(scenario.title) / debugOrigin \(snapshot.latitude.formatted(.number.precision(.fractionLength(6)))), \(snapshot.longitude.formatted(.number.precision(.fractionLength(6)))) / heading \(Int(headingDegrees))도"
+
+        selectedSpot = targetSpot
+        cameraTextInput = targetSpot.name
+        applyNearbySpotFilter()
+        updateBuildingPolygon(for: targetSpot)
+        updateCameraDirectionCandidate()
+        refreshSpatialTrackingConfidence()
+        refreshLocalCoordinateDiagnostics()
+        refreshBuildingFacadeAnchorDiagnostics()
+        refreshBuildingLabelHeightDiagnostics()
+        refreshMatrixProjectionComparisonDiagnostics()
+        refreshEdgeMarkerOverlays()
+        refreshOnScreenCandidateMarkerOverlays()
+        refreshARLabelOverlay()
+        runRecognition()
+    }
+
     func updateCameraHeading(_ headingDegrees: Double) {
+        guard !isIndoorDebugModeEnabled else {
+            return
+        }
+
         let previousHeading = cameraHeadingDegrees
         cameraHeadingDegrees = headingDegrees
         cameraHeadingSampleCount += 1
