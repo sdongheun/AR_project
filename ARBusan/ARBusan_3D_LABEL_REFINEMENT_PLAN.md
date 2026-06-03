@@ -115,6 +115,7 @@
 - [x] 3D 생성/삭제 거리 hysteresis 적용
 - [x] WGS84 기준 anchor와 RealityKit child offset 이동 구조 적용
 - [x] 거리 안의 여러 건물 WGS84 anchor 동시 유지
+- [x] 5m 이내 근거리에서 구체가 외벽 앞쪽으로 과하게 돌출되지 않도록 표시 좌표를 POI 내부 방향으로 소폭 보정
 
 ### 3.2 다음 작업
 

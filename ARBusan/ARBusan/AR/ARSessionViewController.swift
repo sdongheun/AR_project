@@ -299,9 +299,9 @@ final class ARSessionViewController: UIViewController {
     private func markerVisualScale(forDistance distance: Float, isSelected: Bool) -> Float {
         let baseScale: Float = switch distance {
         case ..<5:
-            0.65
+            0.42
         case ..<15:
-            1.0
+            0.85
         case ..<30:
             1.35
         default:

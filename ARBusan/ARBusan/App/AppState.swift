@@ -83,6 +83,7 @@ final class AppState: ObservableObject {
     @Published var cameraProjectionDiagnostics = "ARFrame camera matrix 샘플을 아직 받지 못했습니다."
     @Published var effectiveSpatialConfidence: RecognitionConfidence = .high
     @Published var spatialTrackingDiagnostics = "위치/heading 안정도 샘플을 아직 받지 못했습니다."
+    @Published var stableOriginDiagnostics = "3D stable origin을 아직 확정하지 않았습니다."
     @Published var spatialAlignmentDiagnostics = "선택 Polygon과 카메라 heading 정렬을 아직 계산하지 않았습니다."
     @Published var localCoordinateDiagnostics = "local ENU 좌표 변환을 아직 계산하지 않았습니다."
     @Published var polygonProjectionDiagnostics = "선택 Polygon 화면 투영을 아직 계산하지 않았습니다."
@@ -116,6 +117,10 @@ final class AppState: ObservableObject {
     private let geospatial3DCreateRadiusMeters: CLLocationDistance = 120
     private let geospatial3DDeleteRadiusMeters: CLLocationDistance = 140
     private let maxActiveGeospatial3DAnchorCount = 5
+    private let stableOriginMaxAccuracyMeters: CLLocationAccuracy = 10
+    private let stableOriginMaxJumpMeters: CLLocationDistance = 12
+    private let stableOriginConfirmationInterval: TimeInterval = 1.2
+    private let stableOriginDegradedTimeout: TimeInterval = 3.0
     private let buildingHeightResolver = BuildingHeightResolver()
     private var loadedTourismSpots: [TourismSpot] = []
     private var polygonLookupTask: Task<Void, Never>?
@@ -124,6 +129,11 @@ final class AppState: ObservableObject {
     private var polygonLookupNotFoundSpotIDs: Set<TourismSpot.ID> = []
     private var latestSceneSemanticsSnapshot: SceneSemanticsSnapshot?
     private var sceneSemanticsEvidenceBySpotID: [TourismSpot.ID: SceneSemanticsSpotEvidence] = [:]
+    private var stableGeospatial3DOrigin: LocationSnapshot?
+    private var pendingStableGeospatial3DOrigin: LocationSnapshot?
+    private var pendingStableOriginFirstSeenAt: Date?
+    private var stableOriginLastAcceptedAt: Date?
+    private var stableOriginIsUsableFor3DAnchors = false
     private var lastRequestedTerrainAnchorSpotIDs: Set<TourismSpot.ID> = []
     private var activeGeospatial3DSpotIDs: Set<TourismSpot.ID> = []
     private var stableFacadeSelectionsBySpotID: [TourismSpot.ID: StableBuildingFacadeSelection] = [:]
@@ -159,12 +169,16 @@ final class AppState: ObservableObject {
                     self?.latestGeospatialLocationSnapshot = snapshot
                 }
                 self?.locationConfidence = Self.locationConfidence(for: snapshot.horizontalAccuracy)
+                let stableOriginDidChange = self?.updateStableGeospatial3DOrigin(with: snapshot) ?? false
                 self?.refreshSpatialTrackingConfidence()
                 self?.applyNearbySpotFilter()
                 self?.updateCameraDirectionCandidate()
                 self?.refreshLocalCoordinateDiagnostics()
                 self?.refreshBuildingFacadeAnchorDiagnostics()
                 self?.refreshBuildingLabelHeightDiagnostics()
+                if stableOriginDidChange {
+                    self?.refreshGeospatial3DAnchorRequestsIfPossible()
+                }
                 self?.refreshMatrixProjectionComparisonDiagnostics()
                 self?.refreshEdgeMarkerOverlays()
                 self?.refreshOnScreenCandidateMarkerOverlays()
@@ -525,6 +539,12 @@ final class AppState: ObservableObject {
         resolvedBuildingHeightsBySpotID = [:]
         sceneSemanticsEvidenceBySpotID = [:]
         sceneSemanticsScoringDiagnostics = "후보 초기화로 Scene Semantics 라벨 보정도 초기화했습니다."
+        stableGeospatial3DOrigin = nil
+        pendingStableGeospatial3DOrigin = nil
+        pendingStableOriginFirstSeenAt = nil
+        stableOriginLastAcceptedAt = nil
+        stableOriginIsUsableFor3DAnchors = false
+        stableOriginDiagnostics = "후보 초기화로 3D stable origin도 초기화했습니다."
         lastRequestedTerrainAnchorSpotIDs = []
         activeGeospatial3DSpotIDs = []
         geospatialSessionManager.clearAllGeospatialDebugAnchors(reason: "후보 초기화로 WGS84 Anchor를 모두 제거했습니다.")
@@ -574,7 +594,9 @@ final class AppState: ObservableObject {
 
         spots = filteredSpots
         dropSelectionsOutsideVisibleSpots()
-        prefetchNearbyBuildingPolygonsFor3DAnchors(from: latestLocationSnapshot)
+        if let stableGeospatial3DOrigin, stableOriginReadyFor3DAnchors {
+            prefetchNearbyBuildingPolygonsFor3DAnchors(from: stableGeospatial3DOrigin)
+        }
 
         let radiusText = "\(Int(nearbySpotRadiusMeters / 1_000))km"
         if let fallbackReason {
@@ -906,7 +928,97 @@ final class AppState: ObservableObject {
         let headingText = headingIsStable
             ? "heading 안정"
             : "heading 불안정: 변화량 \(Int(cameraHeadingDeltaDegrees ?? 0))도"
-        spatialTrackingDiagnostics = "공간 신뢰도 \(effectiveSpatialConfidence.displayName) / 위치 \(locationConfidence.displayName) / \(headingText)"
+        spatialTrackingDiagnostics = "공간 신뢰도 \(effectiveSpatialConfidence.displayName) / 위치 \(locationConfidence.displayName) / \(headingText) / \(stableOriginDiagnostics)"
+    }
+
+    private func updateStableGeospatial3DOrigin(with snapshot: LocationSnapshot) -> Bool {
+        guard snapshot.source == .arCoreGeospatial else {
+            markStableOriginDegraded("3D stable origin 대기 / CoreLocation은 목록 필터링에만 사용하고 3D WGS84 기준 위치로는 사용하지 않습니다.")
+            return false
+        }
+
+        guard snapshot.horizontalAccuracy > 0,
+              snapshot.horizontalAccuracy <= stableOriginMaxAccuracyMeters else {
+            markStableOriginDegraded("3D stable origin 대기 / \(snapshot.source.rawValue) 정확도 \(Int(snapshot.horizontalAccuracy))m가 기준 \(Int(stableOriginMaxAccuracyMeters))m 초과")
+            return false
+        }
+
+        if let stableGeospatial3DOrigin {
+            let distanceFromStable = stableGeospatial3DOrigin.coordinate.distance(to: snapshot.coordinate)
+            if distanceFromStable > stableOriginMaxJumpMeters {
+                stableOriginIsUsableFor3DAnchors = false
+                return updatePendingStableOrigin(with: snapshot, reason: "기존 stable origin에서 \(Int(distanceFromStable))m 점프")
+            }
+
+            self.stableGeospatial3DOrigin = snapshot
+            pendingStableGeospatial3DOrigin = nil
+            pendingStableOriginFirstSeenAt = nil
+            stableOriginLastAcceptedAt = Date()
+            stableOriginIsUsableFor3DAnchors = true
+            stableOriginDiagnostics = "3D stable origin 유지(위치 기준) / \(snapshot.source.rawValue) 정확도 \(Int(snapshot.horizontalAccuracy))m / 기존 기준과 차이 \(Int(distanceFromStable))m"
+            return false
+        }
+
+        return updatePendingStableOrigin(with: snapshot, reason: "초기 stable origin 후보")
+    }
+
+    private var stableOriginReadyFor3DAnchors: Bool {
+        guard stableGeospatial3DOrigin != nil,
+              stableOriginIsUsableFor3DAnchors,
+              let stableOriginLastAcceptedAt else {
+            return false
+        }
+
+        return Date().timeIntervalSince(stableOriginLastAcceptedAt) <= stableOriginDegradedTimeout
+    }
+
+    private func markStableOriginDegraded(_ message: String) {
+        let now = Date()
+        if let stableOriginLastAcceptedAt,
+           now.timeIntervalSince(stableOriginLastAcceptedAt) <= stableOriginDegradedTimeout {
+            let age = now.timeIntervalSince(stableOriginLastAcceptedAt)
+            stableOriginDiagnostics = "\(message) / 마지막 안정 위치 \(String(format: "%.1f", age))초 유지"
+            return
+        }
+
+        stableOriginIsUsableFor3DAnchors = false
+        pendingStableGeospatial3DOrigin = nil
+        pendingStableOriginFirstSeenAt = nil
+        if !activeGeospatial3DSpotIDs.isEmpty || !lastRequestedTerrainAnchorSpotIDs.isEmpty {
+            geospatialSessionManager.clearAllGeospatialDebugAnchors(reason: "3D stable origin 불안정으로 WGS84 Anchor를 일시 제거했습니다.")
+            activeGeospatial3DSpotIDs = []
+            lastRequestedTerrainAnchorSpotIDs = []
+            geospatialWGS84CandidateDiagnostics = "WGS84 Anchor 후보 일시정지 / \(message)"
+        }
+        stableOriginDiagnostics = "\(message) / 3D anchor 갱신 일시정지"
+    }
+
+    private func updatePendingStableOrigin(with snapshot: LocationSnapshot, reason: String) -> Bool {
+        let now = Date()
+        if let pendingStableGeospatial3DOrigin,
+           let pendingStableOriginFirstSeenAt {
+            let distanceFromPending = pendingStableGeospatial3DOrigin.coordinate.distance(to: snapshot.coordinate)
+            if distanceFromPending <= stableOriginMaxJumpMeters {
+                let pendingDuration = now.timeIntervalSince(pendingStableOriginFirstSeenAt)
+                if pendingDuration >= stableOriginConfirmationInterval {
+                    stableGeospatial3DOrigin = snapshot
+                    self.pendingStableGeospatial3DOrigin = nil
+                    self.pendingStableOriginFirstSeenAt = nil
+                    stableOriginLastAcceptedAt = now
+                    stableOriginIsUsableFor3DAnchors = true
+                    stableOriginDiagnostics = "3D stable origin 확정(위치 기준) / \(snapshot.source.rawValue) 정확도 \(Int(snapshot.horizontalAccuracy))m / 후보 유지 \(String(format: "%.1f", pendingDuration))초"
+                    return true
+                }
+
+                stableOriginDiagnostics = "3D stable origin 후보 확인 중 / \(reason) / 후보 차이 \(Int(distanceFromPending))m / \(String(format: "%.1f", pendingDuration))초"
+                return false
+            }
+        }
+
+        pendingStableGeospatial3DOrigin = snapshot
+        pendingStableOriginFirstSeenAt = now
+        stableOriginDiagnostics = "3D stable origin 후보 시작 / \(reason) / \(snapshot.source.rawValue) 정확도 \(Int(snapshot.horizontalAccuracy))m"
+        return false
     }
 
     private func refreshLocalCoordinateDiagnostics() {
@@ -1002,7 +1114,14 @@ final class AppState: ObservableObject {
             return
         }
 
-        guard let spot = localCoordinateTargetSpot(from: latestLocationSnapshot) else {
+        guard let stableOrigin = stableGeospatial3DOrigin,
+              stableOriginReadyFor3DAnchors else {
+            buildingLabelHeightDiagnostics = "3D stable origin이 현재 사용 가능하지 않아 라벨 높이 기준값을 확정하지 않았습니다. / \(stableOriginDiagnostics)"
+            geospatialWGS84CandidateDiagnostics = "WGS84 Anchor 후보 대기 / \(stableOriginDiagnostics)"
+            return
+        }
+
+        guard let spot = localCoordinateTargetSpot(from: stableOrigin) else {
             buildingLabelHeightDiagnostics = "3D 라벨 높이를 계산할 POI 후보가 없습니다."
             return
         }
@@ -1018,10 +1137,10 @@ final class AppState: ObservableObject {
         let facadeDistanceMeters = nearestFacadeCandidate(
             spot: spot,
             polygon: polygon,
-            from: latestLocationSnapshot
+            from: stableOrigin
         )?.distanceFromUserMeters
         let distanceMeters = facadeDistanceMeters
-            ?? latestLocationSnapshot.coordinate.distance(to: spot.center)
+            ?? stableOrigin.coordinate.distance(to: spot.center)
         let distanceSource = facadeDistanceMeters == nil ? "POI 중심 거리" : "기본 외벽점 거리"
         let labelHeight = labelHeightDecision(
             for: resolvedHeight,
@@ -1030,7 +1149,18 @@ final class AppState: ObservableObject {
         let sourcePropertiesText = sourceHeightPropertiesText(for: polygon)
         buildingLabelHeightDiagnostics = "\(spot.name) 3D 라벨 높이 기준 / \(distanceSource) \(Int(distanceMeters))m / \(labelHeight.rangeLabel) / 건물 높이 \(resolvedHeight.displayText) / 라벨 후보 높이 \(String(format: "%.1f", labelHeight.valueMeters))m / \(labelHeight.reason) / \(resolvedHeight.explanation)\(sourcePropertiesText)"
 
-        refreshGeospatial3DAnchorRequests(origin: latestLocationSnapshot)
+        refreshGeospatial3DAnchorRequests(origin: stableOrigin)
+    }
+
+    private func refreshGeospatial3DAnchorRequestsIfPossible() {
+        guard let stableGeospatial3DOrigin,
+              stableOriginReadyFor3DAnchors else {
+            geospatialWGS84CandidateDiagnostics = "WGS84 Anchor 후보 대기 / \(stableOriginDiagnostics)"
+            return
+        }
+
+        prefetchNearbyBuildingPolygonsFor3DAnchors(from: stableGeospatial3DOrigin)
+        refreshGeospatial3DAnchorRequests(origin: stableGeospatial3DOrigin)
     }
 
     private func shouldKeepGeospatial3DAnchor(
@@ -1138,6 +1268,7 @@ final class AppState: ObservableObject {
             origin: origin
         )
         let wgs84Fallback = wgs84AnchorFallbackCandidate(
+            spot: spot,
             from: facadeCandidate,
             labelHeightMeters: labelHeightMeters,
             origin: origin
@@ -1205,17 +1336,26 @@ final class AppState: ObservableObject {
     }
 
     private func wgs84AnchorFallbackCandidate(
+        spot: TourismSpot,
         from facadeCandidate: BuildingFacadeCandidate,
         labelHeightMeters: Double,
         origin: LocationSnapshot
     ) -> GeospatialWGS84AnchorCandidate? {
         let deviceHeightAssumptionMeters = 1.5
         let relativeLabelHeightFromCameraGround = labelHeightMeters - deviceHeightAssumptionMeters
+        let displayAnchorCoordinate = closeRangeDisplayAnchorCoordinate(
+            spot: spot,
+            facadeCandidate: facadeCandidate,
+            origin: origin
+        )
+        let displayAnchorLabel = displayAnchorCoordinate.isApproximatelyEqual(to: facadeCandidate.anchorCoordinate)
+            ? "\(facadeCandidate.selectionReason) WGS84 기준점"
+            : "\(facadeCandidate.selectionReason) WGS84 기준점 / 근거리 외벽 안쪽 보정"
 
         if let geospatialAltitude = latestGeospatialLocationSnapshot?.altitude {
             return GeospatialWGS84AnchorCandidate(
-                label: "\(facadeCandidate.selectionReason) WGS84 기준점",
-                coordinate: facadeCandidate.anchorCoordinate,
+                label: displayAnchorLabel,
+                coordinate: displayAnchorCoordinate,
                 altitude: geospatialAltitude + relativeLabelHeightFromCameraGround,
                 altitudeSource: "ARCore Geospatial altitude \(String(format: "%.1f", geospatialAltitude))m + 라벨높이 \(String(format: "%.1f", labelHeightMeters))m - 기기높이 \(String(format: "%.1f", deviceHeightAssumptionMeters))m"
             )
@@ -1226,10 +1366,36 @@ final class AppState: ObservableObject {
         }
 
         return GeospatialWGS84AnchorCandidate(
-            label: "\(facadeCandidate.selectionReason) WGS84 기준점",
-            coordinate: facadeCandidate.anchorCoordinate,
+            label: displayAnchorLabel,
+            coordinate: displayAnchorCoordinate,
             altitude: coreLocationAltitude + relativeLabelHeightFromCameraGround,
             altitudeSource: "CoreLocation altitude \(String(format: "%.1f", coreLocationAltitude))m + 라벨높이 \(String(format: "%.1f", labelHeightMeters))m - 기기높이 \(String(format: "%.1f", deviceHeightAssumptionMeters))m"
+        )
+    }
+
+    private func closeRangeDisplayAnchorCoordinate(
+        spot: TourismSpot,
+        facadeCandidate: BuildingFacadeCandidate,
+        origin: LocationSnapshot
+    ) -> CLLocationCoordinate2D {
+        guard facadeCandidate.distanceFromUserMeters < 5 else {
+            return facadeCandidate.anchorCoordinate
+        }
+
+        let anchorENU = facadeCandidate.anchorENU
+        let interiorTargetENU = LocalENUProjector.project(spot.center, from: origin)
+        let directionEast = interiorTargetENU.eastMeters - anchorENU.eastMeters
+        let directionNorth = interiorTargetENU.northMeters - anchorENU.northMeters
+        let directionLength = hypot(directionEast, directionNorth)
+        guard directionLength > 0.001 else {
+            return facadeCandidate.anchorCoordinate
+        }
+
+        let inwardOffsetMeters = min(0.45, facadeCandidate.distanceFromUserMeters * 0.18)
+        return LocalENUProjector.coordinate(
+            eastMeters: anchorENU.eastMeters + (directionEast / directionLength) * inwardOffsetMeters,
+            northMeters: anchorENU.northMeters + (directionNorth / directionLength) * inwardOffsetMeters,
+            from: origin
         )
     }
 

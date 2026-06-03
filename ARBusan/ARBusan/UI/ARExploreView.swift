@@ -67,7 +67,10 @@ struct ARExploreView: View {
                             CompactGeospatialStatusView(
                                 geospatialSnapshot: appState.latestGeospatialLocationSnapshot,
                                 coreLocationSnapshot: appState.latestCoreLocationSnapshot,
-                                locationConfidence: appState.locationConfidence
+                                locationConfidence: appState.locationConfidence,
+                                stableOriginDiagnostics: appState.stableOriginDiagnostics,
+                                wgs84CandidateDiagnostics: appState.geospatialWGS84CandidateDiagnostics,
+                                geospatialAnchorStateDiagnostics: appState.geospatialAnchorStateDiagnostics
                             )
                         }
                         TourismDataStatusView(status: appState.tourismDataStatus)
@@ -365,6 +368,9 @@ private struct CompactGeospatialStatusView: View {
     let geospatialSnapshot: LocationSnapshot?
     let coreLocationSnapshot: LocationSnapshot?
     let locationConfidence: RecognitionConfidence
+    let stableOriginDiagnostics: String
+    let wgs84CandidateDiagnostics: String
+    let geospatialAnchorStateDiagnostics: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -384,6 +390,24 @@ private struct CompactGeospatialStatusView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
+
+            Text("3D 기준 위치: \(stableOriginDiagnostics)")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text("WGS84 후보: \(wgs84CandidateDiagnostics)")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text("WGS84 앵커: \(geospatialAnchorStateDiagnostics)")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

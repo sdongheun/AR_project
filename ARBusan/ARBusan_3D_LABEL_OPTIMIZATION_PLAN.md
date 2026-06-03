@@ -118,16 +118,24 @@
 - 카메라를 돌리지 않아도 건물 근처의 합리적인 위치에 구체가 생기는가?
 - WGS84 후보 로그에 `내 위치 기준 가장 가까운 외벽점`이 표시되는가?
 
-### 4.3 [] stable origin 기반 위치 안정화
+### 4.3 [x] stable origin 기반 위치 안정화
 
 - raw location을 바로 3D 계산에 사용하지 않는다.
 - 위치 샘플이 일정 시간 안정될 때 stable origin을 갱신한다.
 - 갑자기 튄 위치는 후보로만 저장하고 즉시 반영하지 않는다.
 - stable origin이 없거나 낮은 신뢰도이면 3D 위치 갱신을 보류하고 2D edge marker 중심으로 안내한다.
+- 구현: 3D anchor 기준 위치는 CoreLocation이 아니라 ARCore Geospatial 샘플만 사용한다.
+- 구현: ARCore Geospatial 정확도 10m 이내 위치 샘플이 1.2초 이상 유지될 때 `3D stable origin`을 확정한다.
+- 구현: heading/AR camera tracking은 stable origin 확정 조건에서 제외하고, 외벽점 이동/화면 표시 안정화 단계에서만 사용한다.
+- 구현: 기존 stable origin에서 12m 이상 튄 위치는 바로 반영하지 않고 후보 상태로 대기한다.
+- 구현: 3D Polygon prefetch, 라벨 높이 계산, WGS84 anchor 요청은 현재 사용 가능한 stable origin 기준으로만 실행한다.
+- 구현: stable origin이 없거나 3초 이상 안정 샘플을 받지 못하면 새 WGS84 anchor 후보 생성을 보류하고 기존 anchor를 일시 제거한다.
+- 구현: 로그의 `유지`는 방향까지 안정됐다는 뜻이 아니라 `위치 기준 stable origin 유지`라는 뜻으로 명시한다.
 
 테스트:
 - 앱 시작 직후 위치가 잡히는 동안 구체가 여기저기 튀지 않는가?
 - 실내에서 켜고 밖으로 나갔을 때 위치가 안정된 뒤 3D anchor가 자연스럽게 갱신되는가?
+- 위치/VPS 상태 로그에 `3D stable origin 후보 시작`, `후보 확인 중`, `확정(위치 기준)`, `유지(위치 기준)`, `3D anchor 갱신 일시정지` 중 하나가 표시되는가?
 
 ### 4.4 [] heading 기반 외벽 보정 조건 추가
 
