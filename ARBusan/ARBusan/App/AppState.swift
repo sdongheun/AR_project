@@ -120,6 +120,9 @@ final class AppState: ObservableObject {
     private var latestSceneSemanticsSnapshot: SceneSemanticsSnapshot?
     private var sceneSemanticsEvidenceBySpotID: [TourismSpot.ID: SceneSemanticsSpotEvidence] = [:]
     private var lastRequestedTerrainAnchorSpotID: TourismSpot.ID?
+    private var stableFacadeSelectionsBySpotID: [TourismSpot.ID: StableBuildingFacadeSelection] = [:]
+    private let facadeSwitchRayDistanceImprovementMeters: Double = 1.5
+    private let facadeSwitchConfirmationInterval: TimeInterval = 0.5
     let geospatialSessionManager: GeospatialSessionManager
 
     init(
@@ -515,6 +518,7 @@ final class AppState: ObservableObject {
         sceneSemanticsEvidenceBySpotID = [:]
         sceneSemanticsScoringDiagnostics = "후보 초기화로 Scene Semantics 라벨 보정도 초기화했습니다."
         lastRequestedTerrainAnchorSpotID = nil
+        stableFacadeSelectionsBySpotID = [:]
         arLabelOverlay = nil
         arLabelOverlayDiagnostics = "후보 초기화로 AR 라벨도 초기화했습니다."
         matrixProjectionDebugOverlay = nil
@@ -904,7 +908,8 @@ final class AppState: ObservableObject {
         }
 
         guard let facadeCandidate = cameraFacingFacadeCandidate(
-            for: polygon,
+            spot: spot,
+            polygon: polygon,
             from: latestLocationSnapshot,
             headingDegrees: cameraHeadingDegrees
         ) else {
@@ -919,8 +924,9 @@ final class AppState: ObservableObject {
         let closestText = "내 위치와 외벽 최단거리 \(Int(facadeCandidate.distanceFromUserMeters))m"
         let lengthText = "외벽 길이 \(Int(facadeCandidate.lengthMeters))m"
         let bearingText = "앵커 방향각 \(Int(anchorBearing))도"
+        let stabilityText = facadeCandidate.stabilizationNote.map { "안정화 \($0)" } ?? "안정화 정보 없음"
 
-        buildingFacadeAnchorDiagnostics = "\(spot.name) 3D 외벽 후보 / \(startText) / \(endText) / \(anchorText) / \(closestText) / \(lengthText) / \(bearingText)"
+        buildingFacadeAnchorDiagnostics = "\(spot.name) 3D 외벽 후보 / \(startText) / \(endText) / \(anchorText) / \(closestText) / \(lengthText) / \(bearingText) / \(stabilityText)"
     }
 
     private func refreshBuildingLabelHeightDiagnostics() {
@@ -942,13 +948,25 @@ final class AppState: ObservableObject {
         let resolvedHeight = resolvedBuildingHeightsBySpotID[spot.id] ?? buildingHeightResolver.resolve(polygon: polygon)
         resolvedBuildingHeightsBySpotID[spot.id] = resolvedHeight
 
-        let labelHeightMeters = labelHeightMeters(for: resolvedHeight)
+        let facadeDistanceMeters = cameraFacingFacadeCandidate(
+            spot: spot,
+            polygon: polygon,
+            from: latestLocationSnapshot,
+            headingDegrees: cameraHeadingDegrees
+        )?.distanceFromUserMeters
+        let distanceMeters = facadeDistanceMeters
+            ?? latestLocationSnapshot.coordinate.distance(to: spot.center)
+        let distanceSource = facadeDistanceMeters == nil ? "POI 중심 거리" : "가장 가까운 외벽 거리"
+        let labelHeight = labelHeightDecision(
+            for: resolvedHeight,
+            distanceMeters: distanceMeters
+        )
         let sourcePropertiesText = sourceHeightPropertiesText(for: polygon)
-        buildingLabelHeightDiagnostics = "\(spot.name) 3D 라벨 높이 기준 / 건물 높이 \(resolvedHeight.displayText) / 라벨 후보 높이 \(String(format: "%.1f", labelHeightMeters))m / \(resolvedHeight.explanation)\(sourcePropertiesText)"
+        buildingLabelHeightDiagnostics = "\(spot.name) 3D 라벨 높이 기준 / \(distanceSource) \(Int(distanceMeters))m / \(labelHeight.rangeLabel) / 건물 높이 \(resolvedHeight.displayText) / 라벨 후보 높이 \(String(format: "%.1f", labelHeight.valueMeters))m / \(labelHeight.reason) / \(resolvedHeight.explanation)\(sourcePropertiesText)"
         requestGeospatialTerrainAnchorIfPossible(
             spot: spot,
             polygon: polygon,
-            labelHeightMeters: labelHeightMeters,
+            labelHeightMeters: labelHeight.valueMeters,
             origin: latestLocationSnapshot
         )
     }
@@ -960,7 +978,8 @@ final class AppState: ObservableObject {
         origin: LocationSnapshot
     ) {
         guard let facadeCandidate = cameraFacingFacadeCandidate(
-            for: polygon,
+            spot: spot,
+            polygon: polygon,
             from: origin,
             headingDegrees: cameraHeadingDegrees
         ) else {
@@ -1077,9 +1096,34 @@ final class AppState: ObservableObject {
         )
     }
 
-    private func labelHeightMeters(for resolvedHeight: ResolvedBuildingHeight) -> Double {
-        let middleHeight = resolvedHeight.valueMeters * 0.55
-        return middleHeight.clamped(to: 2.2...12.0)
+    private func labelHeightDecision(
+        for resolvedHeight: ResolvedBuildingHeight,
+        distanceMeters: CLLocationDistance
+    ) -> BuildingLabelHeightDecision {
+        let baseHeight: Double
+        let rangeLabel: String
+
+        switch distanceMeters {
+        case ..<5:
+            baseHeight = 1.7
+            rangeLabel = "근거리 0~5m"
+        case ..<30:
+            let progress = ((distanceMeters - 5) / 25).clamped(to: 0...1)
+            baseHeight = 3.0 + progress * 2.0
+            rangeLabel = "중거리 5~30m"
+        default:
+            baseHeight = 5.0
+            rangeLabel = "원거리 30m 이상"
+        }
+
+        let buildingHeightLimit = max(resolvedHeight.valueMeters * 0.6, 1.7)
+        let resolvedHeightValue = min(baseHeight, buildingHeightLimit)
+        let reason = "거리 기반 \(String(format: "%.1f", baseHeight))m, 건물 높이 60% 상한 \(String(format: "%.1f", buildingHeightLimit))m 적용"
+        return BuildingLabelHeightDecision(
+            valueMeters: resolvedHeightValue,
+            rangeLabel: rangeLabel,
+            reason: reason
+        )
     }
 
     private func sourceHeightPropertiesText(for polygon: BuildingPolygon) -> String {
@@ -1098,7 +1142,8 @@ final class AppState: ObservableObject {
     }
 
     private func cameraFacingFacadeCandidate(
-        for polygon: BuildingPolygon,
+        spot: TourismSpot,
+        polygon: BuildingPolygon,
         from origin: LocationSnapshot,
         headingDegrees: Double?
     ) -> BuildingFacadeCandidate? {
@@ -1124,7 +1169,7 @@ final class AppState: ObservableObject {
             )
         }
 
-        return candidates
+        let rawBest = candidates
             .filter { $0.rayForwardDistanceMeters >= 0 }
             .min {
                 if $0.rayDistanceMeters == $1.rayDistanceMeters {
@@ -1138,6 +1183,96 @@ final class AppState: ObservableObject {
                 }
                 return $0.rayDistanceMeters < $1.rayDistanceMeters
             }
+
+        guard let rawBest else {
+            return nil
+        }
+
+        return stabilizedFacadeCandidate(
+            rawBest: rawBest,
+            candidates: candidates,
+            spotID: spot.id
+        )
+    }
+
+    private func stabilizedFacadeCandidate(
+        rawBest: BuildingFacadeCandidate,
+        candidates: [BuildingFacadeCandidate],
+        spotID: TourismSpot.ID
+    ) -> BuildingFacadeCandidate {
+        let now = Date()
+        guard let previous = stableFacadeSelectionsBySpotID[spotID],
+              let previousCandidate = candidates.first(where: { $0.segmentKey == previous.segmentKey }) else {
+            stableFacadeSelectionsBySpotID[spotID] = StableBuildingFacadeSelection(
+                segmentKey: rawBest.segmentKey,
+                candidate: rawBest,
+                pendingSegmentKey: nil,
+                pendingFirstSeenAt: nil,
+                switchedAt: now,
+                decisionNote: "초기 외벽 선택"
+            )
+            return rawBest.withStabilizationNote("초기 외벽 선택")
+        }
+
+        if rawBest.segmentKey == previous.segmentKey {
+            stableFacadeSelectionsBySpotID[spotID] = StableBuildingFacadeSelection(
+                segmentKey: rawBest.segmentKey,
+                candidate: rawBest,
+                pendingSegmentKey: nil,
+                pendingFirstSeenAt: nil,
+                switchedAt: previous.switchedAt,
+                decisionNote: "같은 외벽 유지"
+            )
+            return rawBest.withStabilizationNote("같은 외벽 유지")
+        }
+
+        let rayDistanceImprovement = previousCandidate.rayDistanceMeters - rawBest.rayDistanceMeters
+        let directlyIntersects = rawBest.rayDistanceMeters == 0
+        let previousDirectlyIntersects = previousCandidate.rayDistanceMeters == 0
+        let previousIsBehindCamera = previousCandidate.rayForwardDistanceMeters < 0
+        let isClearlyBetter = rayDistanceImprovement >= facadeSwitchRayDistanceImprovementMeters
+            || (directlyIntersects && !previousDirectlyIntersects)
+            || previousIsBehindCamera
+
+        let pendingFirstSeenAt: Date
+        if previous.pendingSegmentKey == rawBest.segmentKey,
+           let firstSeen = previous.pendingFirstSeenAt {
+            pendingFirstSeenAt = firstSeen
+        } else {
+            pendingFirstSeenAt = now
+        }
+
+        let pendingDuration = now.timeIntervalSince(pendingFirstSeenAt)
+        let isConfirmed = pendingDuration >= facadeSwitchConfirmationInterval
+
+        if isClearlyBetter && isConfirmed {
+            let note = "외벽 전환: 개선 \(String(format: "%.1f", rayDistanceImprovement))m / 대기 \(String(format: "%.1f", pendingDuration))초"
+            stableFacadeSelectionsBySpotID[spotID] = StableBuildingFacadeSelection(
+                segmentKey: rawBest.segmentKey,
+                candidate: rawBest,
+                pendingSegmentKey: nil,
+                pendingFirstSeenAt: nil,
+                switchedAt: now,
+                decisionNote: note
+            )
+            return rawBest.withStabilizationNote(note)
+        }
+
+        let note: String
+        if isClearlyBetter {
+            note = "이전 외벽 유지: 새 후보 확인 중 \(String(format: "%.1f", pendingDuration))초"
+        } else {
+            note = "이전 외벽 유지: 개선폭 \(String(format: "%.1f", rayDistanceImprovement))m 부족"
+        }
+        stableFacadeSelectionsBySpotID[spotID] = StableBuildingFacadeSelection(
+            segmentKey: previous.segmentKey,
+            candidate: previousCandidate,
+            pendingSegmentKey: rawBest.segmentKey,
+            pendingFirstSeenAt: pendingFirstSeenAt,
+            switchedAt: previous.switchedAt,
+            decisionNote: note
+        )
+        return previousCandidate.withStabilizationNote(note)
     }
 
     private func facadeSegments(
@@ -1175,6 +1310,7 @@ final class AppState: ObservableObject {
             )
 
             return BuildingFacadeCandidate(
+                segmentKey: facadeSegmentKey(startCoordinate: startCoordinate, endCoordinate: endCoordinate),
                 startCoordinate: startCoordinate,
                 endCoordinate: endCoordinate,
                 midpointCoordinate: midpointCoordinate,
@@ -1187,9 +1323,23 @@ final class AppState: ObservableObject {
                 distanceFromUserMeters: distanceFromUser,
                 rayDistanceMeters: distanceFromUser,
                 rayForwardDistanceMeters: midpointENU.groundDistanceMeters,
-                selectionReason: "외벽 중점"
+                selectionReason: "외벽 중점",
+                stabilizationNote: nil
             )
         }
+    }
+
+    private func facadeSegmentKey(
+        startCoordinate: CLLocationCoordinate2D,
+        endCoordinate: CLLocationCoordinate2D
+    ) -> String {
+        let startKey = coordinateKey(startCoordinate)
+        let endKey = coordinateKey(endCoordinate)
+        return [startKey, endKey].sorted().joined(separator: "|")
+    }
+
+    private func coordinateKey(_ coordinate: CLLocationCoordinate2D) -> String {
+        "\(Int((coordinate.latitude * 1_000_000).rounded())):\(Int((coordinate.longitude * 1_000_000).rounded()))"
     }
 
     private func facadeCandidateByCameraRay(
@@ -1845,6 +1995,7 @@ private struct ProjectedPolygonPoint {
 }
 
 private struct BuildingFacadeCandidate {
+    let segmentKey: String
     let startCoordinate: CLLocationCoordinate2D
     let endCoordinate: CLLocationCoordinate2D
     let midpointCoordinate: CLLocationCoordinate2D
@@ -1858,6 +2009,7 @@ private struct BuildingFacadeCandidate {
     let rayDistanceMeters: Double
     let rayForwardDistanceMeters: Double
     let selectionReason: String
+    let stabilizationNote: String?
 
     func withAnchor(
         coordinate: CLLocationCoordinate2D,
@@ -1867,6 +2019,7 @@ private struct BuildingFacadeCandidate {
         selectionReason: String
     ) -> BuildingFacadeCandidate {
         BuildingFacadeCandidate(
+            segmentKey: segmentKey,
             startCoordinate: startCoordinate,
             endCoordinate: endCoordinate,
             midpointCoordinate: midpointCoordinate,
@@ -1879,9 +2032,45 @@ private struct BuildingFacadeCandidate {
             distanceFromUserMeters: distanceFromUserMeters,
             rayDistanceMeters: rayDistanceMeters,
             rayForwardDistanceMeters: rayForwardDistanceMeters,
-            selectionReason: selectionReason
+            selectionReason: selectionReason,
+            stabilizationNote: stabilizationNote
         )
     }
+
+    func withStabilizationNote(_ note: String) -> BuildingFacadeCandidate {
+        BuildingFacadeCandidate(
+            segmentKey: segmentKey,
+            startCoordinate: startCoordinate,
+            endCoordinate: endCoordinate,
+            midpointCoordinate: midpointCoordinate,
+            anchorCoordinate: anchorCoordinate,
+            startENU: startENU,
+            endENU: endENU,
+            midpointENU: midpointENU,
+            anchorENU: anchorENU,
+            lengthMeters: lengthMeters,
+            distanceFromUserMeters: distanceFromUserMeters,
+            rayDistanceMeters: rayDistanceMeters,
+            rayForwardDistanceMeters: rayForwardDistanceMeters,
+            selectionReason: selectionReason,
+            stabilizationNote: note
+        )
+    }
+}
+
+private struct StableBuildingFacadeSelection {
+    let segmentKey: String
+    let candidate: BuildingFacadeCandidate
+    let pendingSegmentKey: String?
+    let pendingFirstSeenAt: Date?
+    let switchedAt: Date
+    let decisionNote: String
+}
+
+private struct BuildingLabelHeightDecision {
+    let valueMeters: Double
+    let rangeLabel: String
+    let reason: String
 }
 
 private extension RecognitionResult {

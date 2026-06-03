@@ -8,6 +8,8 @@ final class ARSessionViewController: UIViewController {
     private var geospatialDebugAnchorEntity: AnchorEntity?
     private var geospatialDebugMarkerEntity: ModelEntity?
     private var geospatialDebugLabelEntity: Entity?
+    private var currentGeospatialDebugAnchorID: UUID?
+    private var isGeospatialDebugMarkerSelected = false
     private var shows3DGeospatialDebugMarker = true
     private let ocrRecognizer = OCRRecognizer()
     private var lastOCRTimestamp: TimeInterval = 0
@@ -40,6 +42,8 @@ final class ARSessionViewController: UIViewController {
         geospatialSessionManager.onDebugAnchorUpdated = { [weak self] snapshot in
             self?.updateGeospatialDebugAnchor(snapshot)
         }
+        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleARViewTap(_:)))
+        arView.addGestureRecognizer(tapGesture)
         view = arView
     }
 
@@ -82,10 +86,16 @@ final class ARSessionViewController: UIViewController {
             geospatialDebugAnchorEntity = nil
             geospatialDebugMarkerEntity = nil
             geospatialDebugLabelEntity = nil
+            currentGeospatialDebugAnchorID = nil
+            isGeospatialDebugMarkerSelected = false
             return
         }
 
         if let geospatialDebugAnchorEntity {
+            if currentGeospatialDebugAnchorID != snapshot.id {
+                currentGeospatialDebugAnchorID = snapshot.id
+                isGeospatialDebugMarkerSelected = false
+            }
             geospatialDebugAnchorEntity.transform.matrix = snapshot.transform
             geospatialDebugAnchorEntity.isEnabled = true
             updateGeospatialDebugVisualsForCamera()
@@ -100,6 +110,8 @@ final class ARSessionViewController: UIViewController {
         geospatialDebugAnchorEntity = anchorEntity
         geospatialDebugMarkerEntity = marker
         geospatialDebugLabelEntity = label
+        currentGeospatialDebugAnchorID = snapshot.id
+        isGeospatialDebugMarkerSelected = false
         arView.scene.addAnchor(anchorEntity)
         updateGeospatialDebugVisualsForCamera()
     }
@@ -108,37 +120,70 @@ final class ARSessionViewController: UIViewController {
         let mesh = MeshResource.generateSphere(radius: 0.55)
         let color: UIColor = kind == "Terrain" ? .systemGreen : .systemPink
         let material = SimpleMaterial(color: color, roughness: 0.1, isMetallic: false)
-        return ModelEntity(mesh: mesh, materials: [material])
+        let marker = ModelEntity(mesh: mesh, materials: [material])
+        marker.generateCollisionShapes(recursive: false)
+        return marker
     }
 
     private func makeGeospatialDebugLabel(text: String) -> Entity {
         let root = Entity()
-        root.position = SIMD3<Float>(-0.9, 0.95, 0)
+        root.position = SIMD3<Float>(-1.15, 1.1, 0)
 
-        let backgroundMesh = MeshResource.generatePlane(width: 2.2, height: 0.72)
+        let backgroundMesh = MeshResource.generatePlane(width: 2.9, height: 0.92)
         let backgroundMaterial = SimpleMaterial(
             color: UIColor.black.withAlphaComponent(0.78),
             roughness: 0.2,
             isMetallic: false
         )
         let background = ModelEntity(mesh: backgroundMesh, materials: [backgroundMaterial])
-        background.position = SIMD3<Float>(0.78, 0.22, -0.02)
+        background.position = SIMD3<Float>(1.03, 0.28, -0.02)
+        background.generateCollisionShapes(recursive: false)
 
         let textMesh = MeshResource.generateText(
             text,
             extrusionDepth: 0.018,
-            font: .boldSystemFont(ofSize: 0.36),
-            containerFrame: CGRect(x: 0, y: 0, width: 2.0, height: 0.5),
+            font: .boldSystemFont(ofSize: 0.48),
+            containerFrame: CGRect(x: 0, y: 0, width: 2.65, height: 0.68),
             alignment: .center,
             lineBreakMode: .byTruncatingTail
         )
         let textMaterial = SimpleMaterial(color: .white, roughness: 0.1, isMetallic: false)
         let textEntity = ModelEntity(mesh: textMesh, materials: [textMaterial])
         textEntity.position = SIMD3<Float>(0, 0, 0.02)
+        textEntity.generateCollisionShapes(recursive: false)
 
         root.addChild(background)
         root.addChild(textEntity)
         return root
+    }
+
+    @objc private func handleARViewTap(_ gesture: UITapGestureRecognizer) {
+        let location = gesture.location(in: arView)
+        guard let tappedEntity = arView.entity(at: location),
+              isPartOfGeospatialDebugMarker(tappedEntity) else {
+            isGeospatialDebugMarkerSelected = false
+            updateGeospatialDebugVisualsForCamera()
+            return
+        }
+
+        isGeospatialDebugMarkerSelected.toggle()
+        updateGeospatialDebugVisualsForCamera()
+    }
+
+    private func isPartOfGeospatialDebugMarker(_ entity: Entity) -> Bool {
+        var currentEntity: Entity? = entity
+        while let entityToCheck = currentEntity {
+            if let markerEntity = geospatialDebugMarkerEntity,
+               entityToCheck === markerEntity {
+                return true
+            }
+            if let labelEntity = geospatialDebugLabelEntity,
+               entityToCheck === labelEntity {
+                return true
+            }
+            currentEntity = entityToCheck.parent
+        }
+        return false
     }
 
     private func updateGeospatialDebugVisualsForCamera() {
@@ -153,8 +198,46 @@ final class ARSessionViewController: UIViewController {
             cameraTransform.columns.3.y,
             cameraTransform.columns.3.z
         )
+        let anchorPosition = geospatialDebugAnchorEntity.position(relativeTo: nil)
+        let distance = simd_distance(cameraPosition, anchorPosition)
+        geospatialDebugMarkerEntity?.scale = SIMD3<Float>(
+            repeating: markerVisualScale(forDistance: distance)
+        )
+        geospatialDebugLabelEntity.scale = SIMD3<Float>(
+            repeating: labelVisualScale(forDistance: distance)
+        )
         geospatialDebugLabelEntity.look(at: cameraPosition, from: geospatialDebugLabelEntity.position(relativeTo: nil), relativeTo: nil)
         geospatialDebugLabelEntity.orientation *= simd_quatf(angle: .pi, axis: SIMD3<Float>(0, 1, 0))
+    }
+
+    private func markerVisualScale(forDistance distance: Float) -> Float {
+        let baseScale: Float = switch distance {
+        case ..<5:
+            0.65
+        case ..<15:
+            1.0
+        case ..<30:
+            1.35
+        default:
+            1.6
+        }
+        let selectedScale: Float = isGeospatialDebugMarkerSelected ? 1.2 : 1.0
+        return min(baseScale * selectedScale, 2.0)
+    }
+
+    private func labelVisualScale(forDistance distance: Float) -> Float {
+        let baseScale: Float = switch distance {
+        case ..<5:
+            0.9
+        case ..<15:
+            1.1
+        case ..<30:
+            1.5
+        default:
+            1.85
+        }
+        let selectedScale: Float = isGeospatialDebugMarkerSelected ? 1.45 : 1.0
+        return min(baseScale * selectedScale, 2.6)
     }
 }
 
