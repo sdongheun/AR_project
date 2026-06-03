@@ -1291,8 +1291,8 @@ final class AppState: ObservableObject {
 
     private func appendPolygonLookupLogs(_ messages: [String]) {
         polygonLookupLogs.append(contentsOf: messages)
-        if polygonLookupLogs.count > 40 {
-            polygonLookupLogs = Array(polygonLookupLogs.suffix(40))
+        if polygonLookupLogs.count > 90 {
+            polygonLookupLogs = Array(polygonLookupLogs.suffix(90))
         }
     }
 

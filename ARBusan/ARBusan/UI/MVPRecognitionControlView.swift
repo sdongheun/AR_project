@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MVPRecognitionControlView: View {
     @EnvironmentObject private var appState: AppState
+    @State private var showsIndoorDebugSpotList = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -29,19 +30,13 @@ struct MVPRecognitionControlView: View {
                 .buttonStyle(.bordered)
 
                 if !appState.spots.isEmpty {
-                    Picker(
-                        "대상 POI",
-                        selection: Binding(
-                            get: { appState.indoorDebugSelectedSpotID ?? appState.spots.first?.id ?? "" },
-                            set: { appState.selectIndoorDebugSpot(id: $0) }
-                        )
-                    ) {
-                        ForEach(appState.spots.prefix(80)) { spot in
-                            Text(spot.name)
-                                .tag(spot.id)
-                        }
+                    IndoorDebugSpotSelector(
+                        spots: Array(appState.spots.prefix(120)),
+                        selectedSpotID: appState.indoorDebugSelectedSpotID ?? appState.spots.first?.id,
+                        isExpanded: $showsIndoorDebugSpotList
+                    ) { spot in
+                        appState.selectIndoorDebugSpot(id: spot.id)
                     }
-                    .font(.caption)
                 }
 
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 8)], spacing: 8) {
@@ -147,10 +142,7 @@ struct MVPRecognitionControlView: View {
                             Text("브이월드 응답 로그")
                                 .font(.caption2.weight(.semibold))
                             ForEach(Array(appState.polygonLookupLogs.enumerated()), id: \.offset) { _, log in
-                                Text(log)
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                    .textSelection(.enabled)
+                                PolygonLogLineView(log: log)
                             }
                         }
                     }
@@ -223,6 +215,103 @@ private struct RecognitionSignalSection<Content: View>: View {
     }
 }
 
+private struct IndoorDebugSpotSelector: View {
+    let spots: [TourismSpot]
+    let selectedSpotID: TourismSpot.ID?
+    @Binding var isExpanded: Bool
+    let onSelect: (TourismSpot) -> Void
+
+    private var selectedSpot: TourismSpot? {
+        guard let selectedSpotID else {
+            return nil
+        }
+
+        return spots.first(where: { $0.id == selectedSpotID })
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.16)) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("대상 POI")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text(selectedSpot?.name ?? "선택 없음")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                    }
+                    Spacer()
+                    Text("\(spots.count)개")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 4) {
+                        ForEach(spots) { spot in
+                            Button {
+                                onSelect(spot)
+                                withAnimation(.easeInOut(duration: 0.16)) {
+                                    isExpanded = false
+                                }
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: spot.id == selectedSpotID ? "checkmark.circle.fill" : "circle")
+                                        .font(.caption)
+                                        .foregroundStyle(spot.id == selectedSpotID ? .blue : .secondary)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(spot.name)
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(.primary)
+                                            .lineLimit(1)
+                                        Text(spot.address)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 7)
+                                .background(
+                                    spot.id == selectedSpotID
+                                        ? Color.blue.opacity(0.12)
+                                        : Color.clear,
+                                    in: RoundedRectangle(cornerRadius: 7)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(6)
+                }
+                .frame(maxHeight: 230)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(.white.opacity(0.12), lineWidth: 1)
+                )
+            }
+        }
+    }
+}
+
 private struct DebugRowsBlock: View {
     let rows: [DebugStatusRow]
 
@@ -262,5 +351,27 @@ private struct DetailedLogText: View {
                 .textSelection(.enabled)
         }
         .padding(.top, 2)
+    }
+}
+
+private struct PolygonLogLineView: View {
+    let log: String
+
+    var body: some View {
+        if log.isEmpty {
+            Divider()
+                .padding(.vertical, 2)
+        } else if log.hasPrefix("────") {
+            Text(log)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.primary)
+                .padding(.top, 4)
+                .textSelection(.enabled)
+        } else {
+            Text(log)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+        }
     }
 }

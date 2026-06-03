@@ -206,6 +206,12 @@ struct VWorldDataAPIClient: VWorldDiagnosticClient {
             $0.contains(spot.center)
         }
         logs.append("브이월드 POI 포함 Polygon 개수: \(containingPolygons.count)")
+        if !containingPolygons.isEmpty {
+            let containingIndexes = containingPolygons.compactMap { containingPolygon in
+                parseResult.polygons.firstIndex(of: containingPolygon).map { "#\($0 + 1)" }
+            }
+            logs.append("브이월드 POI 포함 후보: \(containingIndexes.joined(separator: ", "))")
+        }
 
         let polygon: BuildingPolygon?
         if let containingPolygon = containingPolygons.min(by: {
@@ -242,7 +248,8 @@ struct VWorldDataAPIClient: VWorldDiagnosticClient {
             }
         }
         if let polygon {
-            logs.append("브이월드 선택 Polygon: 외곽 좌표 \(polygon.vertexCount)개 / centroid \(polygon.centroid?.latitude ?? 0), \(polygon.centroid?.longitude ?? 0)")
+            let selectedIndex = parseResult.polygons.firstIndex(of: polygon).map { "#\($0 + 1)" } ?? "#?"
+            logs.append("브이월드 선택 Polygon \(selectedIndex): 외곽 좌표 \(polygon.vertexCount)개 / centroid \(polygon.centroid?.latitude ?? 0), \(polygon.centroid?.longitude ?? 0)")
             logs.append("브이월드 선택 Polygon 속성: \(polygon.attributeSummary)")
             let resolvedHeight = BuildingHeightResolver().resolve(polygon: polygon)
             logs.append("건물 높이 결정: \(resolvedHeight.displayText)")
@@ -354,10 +361,17 @@ struct VWorldDataAPIClient: VWorldDiagnosticClient {
         }
         logs.append("브이월드 파싱된 Polygon 개수: \(polygons.count)")
         for (index, polygon) in polygons.enumerated() {
-            logs.append("브이월드 후보 Polygon #\(index + 1): 외곽 좌표 \(polygon.vertexCount)개 / centroid \(polygon.centroidDescription) / POI 포함 \(polygon.contains(spotCenter) ? "예" : "아니오")")
-            logs.append("브이월드 후보 Polygon #\(index + 1) 속성: \(polygon.attributeSummary)")
-            logs.append("브이월드 후보 Polygon #\(index + 1) properties: \(polygon.propertiesDescription)")
-            logs.append("브이월드 후보 Polygon #\(index + 1) 좌표: \(polygon.coordinateListDescription)")
+            let candidateNumber = index + 1
+            let containsPOI = polygon.contains(spotCenter)
+            let centroidDistance = polygon.distanceFromCentroid(to: spotCenter)
+            let boundaryDistance = polygon.distanceFromBoundary(to: spotCenter)
+            logs.append("")
+            logs.append("──── 브이월드 후보 Polygon #\(candidateNumber)/\(polygons.count) ────")
+            logs.append("요약: POI 포함 \(containsPOI ? "예" : "아니오") / 외곽 좌표 \(polygon.vertexCount)개 / centroid \(polygon.centroidDescription)")
+            logs.append("거리: centroid \(String(format: "%.1f", centroidDistance))m / 외곽 최단 \(String(format: "%.1f", boundaryDistance))m")
+            logs.append("속성: \(polygon.attributeSummary)")
+            logs.append("properties: \(polygon.propertiesDescription)")
+            logs.append("좌표: \(polygon.coordinateListDescription)")
         }
         return VWorldPolygonParseResult(polygons: polygons, logs: logs)
     }
