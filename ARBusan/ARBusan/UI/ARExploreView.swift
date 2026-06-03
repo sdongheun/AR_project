@@ -56,13 +56,19 @@ struct ARExploreView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         APIKeyStatusView(statuses: appState.apiKeys.statuses)
+                        DebugDashboardView(
+                            overviewRows: appState.debugOverviewRows,
+                            locationRows: appState.locationDebugRows,
+                            dataRows: appState.dataDebugRows,
+                            displayRows: appState.displayDebugRows,
+                            anchorRows: appState.anchorDebugRows
+                        )
                         if appState.showsFullDebugLogs {
                             GeospatialStatusView(
                                 status: appState.geospatialStatus,
                                 coreLocationSnapshot: appState.latestCoreLocationSnapshot,
                                 geospatialSnapshot: appState.latestGeospatialLocationSnapshot
                             )
-                            SceneSemanticsStatusView(status: appState.sceneSemanticsStatus)
                         } else {
                             CompactGeospatialStatusView(
                                 geospatialSnapshot: appState.latestGeospatialLocationSnapshot,
@@ -73,7 +79,6 @@ struct ARExploreView: View {
                                 geospatialAnchorStateDiagnostics: appState.geospatialAnchorStateDiagnostics
                             )
                         }
-                        TourismDataStatusView(status: appState.tourismDataStatus)
 
                         VStack(alignment: .leading, spacing: 6) {
                             Text(appState.recognitionResult.title)
@@ -120,6 +125,72 @@ struct ARExploreView: View {
         }
         .sheet(isPresented: $showsCollection) {
             CollectionBookView(spots: appState.spots, selectedSpot: appState.selectedSpot)
+        }
+    }
+}
+
+private struct DebugDashboardView: View {
+    let overviewRows: [DebugStatusRow]
+    let locationRows: [DebugStatusRow]
+    let dataRows: [DebugStatusRow]
+    let displayRows: [DebugStatusRow]
+    let anchorRows: [DebugStatusRow]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("테스트 로그 요약")
+                .font(.caption.weight(.semibold))
+
+            DebugStatusRowsView(rows: overviewRows)
+
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 150), alignment: .topLeading)],
+                alignment: .leading,
+                spacing: 10
+            ) {
+                DebugStatusGroupView(title: "위치", rows: locationRows)
+                DebugStatusGroupView(title: "데이터", rows: dataRows)
+                DebugStatusGroupView(title: "표시", rows: displayRows)
+                DebugStatusGroupView(title: "3D", rows: anchorRows)
+            }
+        }
+        .padding(10)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+private struct DebugStatusGroupView: View {
+    let title: String
+    let rows: [DebugStatusRow]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.primary)
+            DebugStatusRowsView(rows: rows)
+        }
+    }
+}
+
+private struct DebugStatusRowsView: View {
+    let rows: [DebugStatusRow]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(rows) { row in
+                HStack(alignment: .top, spacing: 6) {
+                    Text(row.title)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(minWidth: 48, alignment: .leading)
+                    Text(row.value)
+                        .font(.caption2)
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
     }
 }
@@ -238,11 +309,6 @@ private struct ARSpotLabelView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
 
-            if label.isSceneSemanticsAdjusted {
-                Text("building 영역 보정")
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(.blue)
-            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
@@ -290,49 +356,6 @@ private struct ARViewContainer: UIViewControllerRepresentable {
 
     func updateUIViewController(_ uiViewController: ARSessionViewController, context: Context) {
         uiViewController.setShows3DGeospatialDebugMarker(appState.shows3DGeospatialDebugMarker)
-    }
-}
-
-private struct SceneSemanticsStatusView: View {
-    let status: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Scene Semantics 디버그")
-                .font(.caption.weight(.semibold))
-            Text(status)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .lineLimit(nil)
-                .fixedSize(horizontal: false, vertical: true)
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 82), alignment: .leading)],
-                alignment: .leading,
-                spacing: 6
-            ) {
-                SemanticLegendItem(color: .blue, title: "building")
-                SemanticLegendItem(color: .red, title: "sky")
-                SemanticLegendItem(color: .yellow, title: "tree")
-                SemanticLegendItem(color: .gray, title: "road")
-                SemanticLegendItem(color: .cyan, title: "water")
-            }
-        }
-    }
-}
-
-private struct SemanticLegendItem: View {
-    let color: Color
-    let title: String
-
-    var body: some View {
-        HStack(spacing: 3) {
-            Rectangle()
-                .fill(color.opacity(0.8))
-                .frame(width: 9, height: 9)
-            Text(title)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
     }
 }
 

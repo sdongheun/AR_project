@@ -47,6 +47,13 @@ struct OnScreenCandidateMarkerOverlay: Identifiable, Equatable {
     let role: Role
 }
 
+struct DebugStatusRow: Identifiable, Equatable {
+    let title: String
+    let value: String
+
+    var id: String { title }
+}
+
 enum IndoorDebugScenario: String, CaseIterable, Identifiable {
     case front30m
     case near5m
@@ -418,6 +425,132 @@ final class AppState: ObservableObject {
         }
 
         return spots.first
+    }
+
+    var debugOverviewRows: [DebugStatusRow] {
+        let mode = isIndoorDebugModeEnabled ? "실내 디버그" : "실제 위치"
+        let targetName = selectedSpot?.name ?? cameraDirectionSpotName ?? "선택 없음"
+        let scenarioText = isIndoorDebugModeEnabled ? indoorDebugScenario.title : "해당 없음"
+        let distanceText = selectedSpotDistanceText ?? "거리 미계산"
+
+        return [
+            DebugStatusRow(title: "모드", value: mode),
+            DebugStatusRow(title: "대상", value: targetName),
+            DebugStatusRow(title: "시나리오", value: scenarioText),
+            DebugStatusRow(title: "거리", value: distanceText),
+            DebugStatusRow(title: "인식", value: recognitionSummaryText)
+        ]
+    }
+
+    var locationDebugRows: [DebugStatusRow] {
+        var rows: [DebugStatusRow] = []
+        let locationMode = isIndoorDebugModeEnabled ? "실내 디버그 origin" : "실제 위치 수신"
+        rows.append(DebugStatusRow(title: "기준", value: locationMode))
+
+        if let latestLocationSnapshot {
+            rows.append(
+                DebugStatusRow(
+                    title: "origin",
+                    value: "\(latestLocationSnapshot.source.rawValue) \(latestLocationSnapshot.coordinate.shortText) / 정확도 \(Int(latestLocationSnapshot.horizontalAccuracy))m"
+                )
+            )
+        } else {
+            rows.append(DebugStatusRow(title: "origin", value: "위치 수신 대기"))
+        }
+
+        if let cameraHeadingDegrees {
+            rows.append(DebugStatusRow(title: "heading", value: "\(Int(cameraHeadingDegrees))도"))
+        } else {
+            rows.append(DebugStatusRow(title: "heading", value: "수신 대기"))
+        }
+
+        rows.append(DebugStatusRow(title: "3D 기준", value: compactDiagnosticText(stableOriginDiagnostics)))
+        return rows
+    }
+
+    var dataDebugRows: [DebugStatusRow] {
+        [
+            DebugStatusRow(title: "TourAPI", value: compactDiagnosticText(tourismDataStatus)),
+            DebugStatusRow(title: "표시 후보", value: "\(spots.count)개"),
+            DebugStatusRow(title: "VWorld", value: compactDiagnosticText(polygonValidationStatus)),
+            DebugStatusRow(title: "Polygon 로그", value: polygonLookupLogs.isEmpty ? "없음" : "\(polygonLookupLogs.count)줄")
+        ]
+    }
+
+    var displayDebugRows: [DebugStatusRow] {
+        let labelText: String
+        if let arLabelOverlay {
+            labelText = "화면 안 / x \(Int(arLabelOverlay.normalizedX * 100))% y \(Int(arLabelOverlay.normalizedY * 100))%"
+        } else {
+            labelText = "숨김"
+        }
+
+        let matrixText: String
+        if let matrixProjectionDebugOverlay {
+            matrixText = "\(matrixProjectionDebugOverlay.isInsideView ? "화면 안" : "화면 밖") / \(matrixProjectionDebugOverlay.insidePointCount)/\(matrixProjectionDebugOverlay.totalPointCount)개"
+        } else {
+            matrixText = "없음"
+        }
+
+        return [
+            DebugStatusRow(title: "2D 라벨", value: labelText),
+            DebugStatusRow(title: "edge marker", value: "\(edgeMarkerOverlays.count)개"),
+            DebugStatusRow(title: "화면 후보", value: "\(onScreenCandidateMarkerOverlays.count)개"),
+            DebugStatusRow(title: "matrix", value: matrixText)
+        ]
+    }
+
+    var anchorDebugRows: [DebugStatusRow] {
+        [
+            DebugStatusRow(title: "활성 앵커", value: "\(activeGeospatial3DSpotIDs.count)개"),
+            DebugStatusRow(title: "WGS84 후보", value: compactDiagnosticText(geospatialWGS84CandidateDiagnostics)),
+            DebugStatusRow(title: "WGS84 앵커", value: compactDiagnosticText(geospatialAnchorStateDiagnostics)),
+            DebugStatusRow(title: "3D 위치", value: compactDiagnosticText(buildingFacadeAnchorDiagnostics)),
+            DebugStatusRow(title: "높이", value: compactDiagnosticText(buildingLabelHeightDiagnostics))
+        ]
+    }
+
+    private var cameraDirectionSpotName: String? {
+        guard let cameraDirectionSpotID else {
+            return nil
+        }
+
+        return spots.first(where: { $0.id == cameraDirectionSpotID })?.name
+    }
+
+    private var selectedSpotDistanceText: String? {
+        guard let latestLocationSnapshot,
+              let spot = selectedSpot ?? indoorDebugTargetSpot else {
+            return nil
+        }
+
+        let distanceMeters = latestLocationSnapshot.coordinate.distance(to: spot.center)
+        return "\(Int(distanceMeters))m"
+    }
+
+    private var recognitionSummaryText: String {
+        switch recognitionResult {
+        case let .recognized(spot, confidence, _):
+            return "\(spot.name) / \(confidence.displayName)"
+        case let .nearby(spot, _):
+            return "\(spot.name) / 근처 후보"
+        case let .ambiguous(candidates, _):
+            return "후보 \(candidates.count)개"
+        case .none:
+            return "없음"
+        }
+    }
+
+    private func compactDiagnosticText(_ text: String, maxLength: Int = 72) -> String {
+        let normalized = text
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "  ", with: " ")
+
+        guard normalized.count > maxLength else {
+            return normalized
+        }
+
+        return String(normalized.prefix(maxLength)) + "..."
     }
 
     func updateCameraTextFromLiveOCR(_ text: String) {
