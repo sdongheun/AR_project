@@ -1,6 +1,6 @@
 # ARBusan 3D Label Refinement Plan
 
-`ARBusan_EDGE_MARKER_RULES.md`의 하위 계획 문서다. 여기에는 3D 구체/라벨을 계속 개선하기 위해 다음 작업자가 꼭 알아야 할 결정과 순서만 남긴다.
+`EDGE_MARKER_RULES.md`의 하위 계획 문서다. 여기에는 3D 구체/라벨을 계속 개선하기 위해 다음 작업자가 꼭 알아야 할 결정과 순서만 남긴다.
 
 ## 1. 현재 상태
 
@@ -127,7 +127,7 @@
 
 각 단계는 한 번에 모두 구현하지 않는다. 한 단계 구현 후 실기 테스트 결과를 확인하고, 기대와 다르면 다음 단계로 넘어가기 전에 수정한다.
 
-`ARBusan_3D_LABEL_REFINEMENT_PLAN.md` 완료 후의 장기 안정화 테스트는 `ARBusan_3D_LABEL_STABILITY_TESTS.md`에서 관리한다.
+`3D_LABEL_REFINEMENT_PLAN.md` 완료 후의 장기 안정화 테스트는 `../testing/3D_LABEL_STABILITY_TESTS.md`에서 관리한다.
 
 ## 4. 다음 테스트에서 볼 것
 

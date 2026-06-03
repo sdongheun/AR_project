@@ -1,6 +1,6 @@
 # ARBusan 3D Label Optimization Plan
 
-이 문서는 3D 구체/라벨이 흔들리거나 건물 밖으로 벗어나는 문제를 줄이기 위한 구조 개선 계획이다. `ARBusan_3D_LABEL_REFINEMENT_PLAN.md`의 후속 최적화 문서로 사용한다.
+이 문서는 3D 구체/라벨이 흔들리거나 건물 밖으로 벗어나는 문제를 줄이기 위한 구조 개선 계획이다. `3D_LABEL_REFINEMENT_PLAN.md`의 후속 최적화 문서로 사용한다.
 
 ## 1. 현재 문제
 

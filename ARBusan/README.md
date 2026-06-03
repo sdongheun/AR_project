@@ -19,8 +19,15 @@
 ```sh
 cd ARBusan
 xcodegen generate
-open ARBusan.xcodeproj
+pod install
+open ARBusan.xcworkspace
 ```
+
+## 문서 구조
+
+- 현재 상태 요약: `ARBusan_PROJECT_STATUS.md`
+- 전체 문서 목차: `docs/00_INDEX.md`
+- AR 기술 로드맵: `docs/planning/AR_TECH_ROADMAP.md`
 
 ## API 키 설정
 

@@ -1,6 +1,6 @@
 # ARBusan AR 기술 로드맵
 
-이 문서는 `ARBusan_PROJECT_STATUS.md`의 자식 문서다. 상태 파일에는 현재 프로젝트 상태를 짧게 두고, 여기에는 AR 건물 인식과 라벨 표시를 완성하기 위한 기술 판단만 정리한다.
+이 문서는 `../../ARBusan_PROJECT_STATUS.md`의 자식 문서다. 상태 파일에는 현재 프로젝트 상태를 짧게 두고, 여기에는 AR 건물 인식과 라벨 표시를 완성하기 위한 기술 판단만 정리한다.
 
 ## 1. 목표 시나리오
 
@@ -294,7 +294,7 @@ Scene Semantics:
         - 완료: matrix가 화면 밖일 때 FOV fallback은 대상 방향각 차이 75도 이내에서만 허용
         - 완료: 180도 반대 방향에서 FOV fallback + Scene Semantics로 라벨이 재생성되는 현상 방지
         - smoothing 계수 조정
-        - 화면 밖/가장자리 처리: 세부 규칙은 `ARBusan_EDGE_MARKER_RULES.md`에 별도 정리
+        - 화면 밖/가장자리 처리: 세부 규칙은 `../ar-label/EDGE_MARKER_RULES.md`에 별도 정리
         - 근거리/중거리/원거리별 라벨 위치와 크기 조정
     사용자 테스트 확인:
         - 걷거나 손을 조금 흔들어도 라벨이 과하게 튀지 않는가?
@@ -310,7 +310,7 @@ Scene Semantics:
 - `6.4.6 projection 기반 라벨 안정화`는 2D overlay 기준 최소 동작까지 완료했다.
 - 세부 smoothing, 최종 edge marker UX, 다중 후보 탭 승격은 3D 라벨 기준이 잡힌 뒤 다시 조정한다.
 - 이유는 현재 라벨이 2D overlay라서, 3D anchor/외벽 라벨로 넘어가면 안정화 기준과 UX 규칙이 다시 바뀔 가능성이 높기 때문이다.
-- `ARBusan_EDGE_MARKER_RULES.md`는 이 문서의 6.4.6 자식 문서로 유지하며, 현재 2D 표시 기준선과 3D 전환 전 임시 규칙을 기록한다.
+- `../ar-label/EDGE_MARKER_RULES.md`는 이 문서의 6.4.6 자식 문서로 유지하며, 현재 2D 표시 기준선과 3D 전환 전 임시 규칙을 기록한다.
 
 최신 진행 순서:
 
@@ -325,21 +325,25 @@ Scene Semantics:
    - 근거리/중거리/원거리에서 라벨이 자연스러운지 확인
    - 2D overlay fallback과 edge marker 전환 조건을 다시 정리
 
-3. TourAPI 다시 연결
+3. 해운대구 TourAPI 실내 디버그
+   - 실제 VPS 정합 검증이 아니라 TourAPI POI -> VWorld Polygon -> 건물형/비건물형 분기 -> 라벨 계산을 검증한다
+   - 세부 테스트 구조는 `../testing/HAEUNDAE_TOURAPI_INDOOR_DEBUG_PLAN.md`에서 관리한다
+
+4. TourAPI 다시 연결
    - 목업에서 검증한 POI -> VWorld Polygon -> projection 라벨 흐름을 TourAPI 후보에 적용
    - 김해/부산 후보 전환 가능하게 정리
 
-4. 건물형/비건물형 분기
+5. 건물형/비건물형 분기
    - VWorld Polygon이 있으면 건물형
    - Polygon이 없으면 point/area 관광지로 처리
    - 바다/공원/광장 등 비건물형 관광지 대응
 
-5. AR 라벨 UX 개선
+6. AR 라벨 UX 개선
    - 탭 상세
    - 거리/신뢰도/간단 설명 구성
    - 선택 상태와 다중 후보 표시 개선
 
-6. 6.4.6 세부 안정화 재개
+7. 6.4.6 세부 안정화 재개
    - 3D 기준 smoothing 계수 확정
    - edge marker 최종 UI 조정
    - 화면 안 짧은 이름 마커 탭 승격

@@ -2,6 +2,8 @@
 
 다음 작업자가 컨텍스트 없이 읽어도 이어서 작업할 수 있도록 현재 상태만 축약해 둔다. 세부 변경 이력은 기록하지 않는다.
 
+문서 전체 목차는 `ARBusan/docs/00_INDEX.md`에서 관리한다.
+
 ## 1. 현재 목표
 
 - 프로젝트: `ARBusan`
@@ -63,7 +65,7 @@ ARBusan/ARBusan/Data/Mock/MockTourismSpots.swift
 - OCR 없이 VPS/Polygon만 맞으면 `건물 인식됨`이 아니라 `근처 후보 감지`로 표시
 - SwiftData 방문/수집 상태 모델
 - 후보 선택/도감 화면
-- 테스트 기록 문서: `ARBusan/ARBusan_TEST_RESULTS.md`
+- 테스트 기록 문서: `ARBusan/docs/testing/TEST_RESULTS.md`
 
 ## 4. 보존된 비활성 코드
 
@@ -161,7 +163,7 @@ ARBusan/Config/Secrets.local.xcconfig
 세부 기술 후보와 단계별 적용 판단은 아래 자식 문서에 둔다.
 
 ```text
-ARBusan/ARBusan_AR_TECH_ROADMAP.md
+ARBusan/docs/planning/AR_TECH_ROADMAP.md
 ```
 
 우선순위:

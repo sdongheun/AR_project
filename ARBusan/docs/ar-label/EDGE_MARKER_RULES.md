@@ -1,6 +1,6 @@
 # ARBusan Edge Marker Rules
 
-이 문서는 `ARBusan_AR_TECH_ROADMAP.md`의 `6.4.6 projection 기반 라벨 안정화` 자식 문서다. 화면 안 후보 마커와 화면 밖 edge marker 규칙을 정리한다. 목적은 다음 작업자가 현재 구현 의도와 남은 작업을 바로 이해하는 것이다.
+이 문서는 `../planning/AR_TECH_ROADMAP.md`의 `6.4.6 projection 기반 라벨 안정화` 자식 문서다. 화면 안 후보 마커와 화면 밖 edge marker 규칙을 정리한다. 목적은 다음 작업자가 현재 구현 의도와 남은 작업을 바로 이해하는 것이다.
 
 현재 판단:
 
@@ -8,7 +8,7 @@
 - 3D 라벨 배치 MVP는 VWorld Polygon 외벽 후보점, Terrain Anchor 우선 시도, WGS84 Anchor fallback, RealityKit 3D 구체/라벨 표시까지 진행했다.
 - 세부 smoothing, 최종 edge marker UX, 화면 안 짧은 이름 마커 탭 승격은 3D 라벨 위치가 충분히 안정된 뒤 다시 조정한다.
 - 현재 3D 마커는 실제 AR 공간의 고정 크기를 사용한다. 즉 가까우면 크게, 멀면 작게 보이도록 두고, 추후 탭 시 확대와 최대 크기 제한을 추가한다.
-- 3D 라벨 고도화 작업의 상세 순서와 판단 기준은 `ARBusan_3D_LABEL_REFINEMENT_PLAN.md`에서 관리한다.
+- 3D 라벨 고도화 작업의 상세 순서와 판단 기준은 `3D_LABEL_REFINEMENT_PLAN.md`에서 관리한다.
 
 ## 1. 용어
 
@@ -98,7 +98,7 @@
 - 후참잘처럼 길 건너 건물에는 3D 구체/라벨이 표시되는 것을 확인했다.
 - 투썸/올리브영처럼 너무 가까운 건물은 구체 위치를 찾기 어려운 구간이 있었고, 이는 카메라 시야 방향 기반 외벽 후보점과 크기 정책을 조정하면서 계속 확인한다.
 - 3D 텍스트가 뒤집혀 보이는 문제가 있어 billboard 방향 보정을 적용했다.
-- Scene Semantics와 OCR은 발열 감소를 위해 현재 비활성화했다. 비활성화 목록은 `ARBusan_DISABLED_FEATURES.md`에 별도로 정리했다.
+- Scene Semantics와 OCR은 발열 감소를 위해 현재 비활성화했다. 비활성화 목록은 `../archive/DISABLED_FEATURES.md`에 별도로 정리했다.
 
 ## 4. 현재 유지하기로 한 제약
 
@@ -140,12 +140,12 @@
    - 바다/공원처럼 polygon이 없는 후보는 POI 중심 좌표 기반으로 edge marker를 표시한다.
 
 7. 3D 마커/라벨 UX 보정
-   - 상세 개선 항목은 `ARBusan_3D_LABEL_REFINEMENT_PLAN.md`에서 관리한다.
+   - 상세 개선 항목은 `3D_LABEL_REFINEMENT_PLAN.md`에서 관리한다.
    - 이 문서에는 현재 표시 규칙과 완료된 체크리스트만 유지한다.
 
 ## 6. 다음 진행 순서 제안
 
-1. 3D 라벨 고도화는 `ARBusan_3D_LABEL_REFINEMENT_PLAN.md`의 구현 순서를 따른다.
+1. 3D 라벨 고도화는 `3D_LABEL_REFINEMENT_PLAN.md`의 구현 순서를 따른다.
 2. 3D 위치/높이/크기 정책이 안정되면 이 문서의 edge marker와 2D overlay 역할을 다시 정리한다.
 3. TourAPI를 다시 연결해 1km 후보와 거리 반응형 표시를 검증한다.
 4. 120m 방향 후보 제한을 유지할지, 1km까지 확장할지 결정한다.
