@@ -50,6 +50,7 @@
 		B9E47DFC6663045173808E77 /* SceneSemanticsSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADD79F9408CE21AB49905898 /* SceneSemanticsSnapshot.swift */; };
 		C6AADF70D8D4AD9251D31387 /* LocalENUProjectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9695239FD05C987AAC843DAE /* LocalENUProjectorTests.swift */; };
 		CE278E2CF97EF8E79876A4FF /* VisitRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6900F8BE2E7DA41660DE44DD /* VisitRepository.swift */; };
+		D1A7C0DE0000000000000001 /* TMAPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A7C0DE0000000000000002 /* TMAPClient.swift */; };
 		DE915522041BBBB4C04B9CA3 /* RecognitionResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC0A994209BEEAC3EE4B42C7 /* RecognitionResult.swift */; };
 		E491AE0DF4774D3193982B81 /* PermissionStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B94377B0F6A4D737C1A4D39 /* PermissionStatus.swift */; };
 		EEDD8658344315C48E1677CF /* MockTourismSpots.swift in Sources */ = {isa = PBXBuildFile; fileRef = 720E65E6365B610695833BFD /* MockTourismSpots.swift */; };
@@ -116,6 +117,7 @@
 		CDA01EBF5C39B029106238F6 /* Pods-ARBusan.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ARBusan.debug.xcconfig"; path = "Target Support Files/Pods-ARBusan/Pods-ARBusan.debug.xcconfig"; sourceTree = "<group>"; };
 		CEDEA81D6A17B3DC0A507522 /* CameraDirectionCandidateProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraDirectionCandidateProvider.swift; sourceTree = "<group>"; };
 		CEFB2B3C248DAEC56E3E9272 /* VWorldClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VWorldClient.swift; sourceTree = "<group>"; };
+		D1A7C0DE0000000000000002 /* TMAPClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TMAPClient.swift; sourceTree = "<group>"; };
 		D4B48ED7C36C89A0059CC6C6 /* CameraHeadingCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraHeadingCalculator.swift; sourceTree = "<group>"; };
 		DC0A994209BEEAC3EE4B42C7 /* RecognitionResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecognitionResult.swift; sourceTree = "<group>"; };
 		DEE8767B9A27B53F27D6586A /* CollectionBookView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollectionBookView.swift; sourceTree = "<group>"; };
@@ -221,6 +223,7 @@
 			isa = PBXGroup;
 			children = (
 				FF93F6E79D564876DAA02AE3 /* Mock */,
+				D1A7C0DE0000000000000003 /* TMAP */,
 				40E6E53D210ABBA8EE5B23BA /* TourAPI */,
 				C01E649AE0652CDFBA6EE7C5 /* VWorld */,
 			);
@@ -306,6 +309,14 @@
 				CEFB2B3C248DAEC56E3E9272 /* VWorldClient.swift */,
 			);
 			path = VWorld;
+			sourceTree = "<group>";
+		};
+		D1A7C0DE0000000000000003 /* TMAP */ = {
+			isa = PBXGroup;
+			children = (
+				D1A7C0DE0000000000000002 /* TMAPClient.swift */,
+			);
+			path = TMAP;
 			sourceTree = "<group>";
 		};
 		D4F833EEEFD7B9130195201D /* ARBusanTests */ = {
@@ -606,6 +617,7 @@
 				1B39943CE8BA1A49909EA86C /* VWorldClient.swift in Sources */,
 				CE278E2CF97EF8E79876A4FF /* VisitRepository.swift in Sources */,
 				936ED82EAEAC978F407EB2CA /* VisitState.swift in Sources */,
+				D1A7C0DE0000000000000001 /* TMAPClient.swift in Sources */,
 				3CBD9BAB34453A32D179B3E1 /* VisualLandmarkRecognizer.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

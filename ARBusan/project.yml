@@ -46,6 +46,7 @@ targets:
         NSLocationTemporaryUsageDescriptionDictionary:
           ARBusanPreciseLocation: "정확한 건물 후보 판정과 VPS 인식을 위해 정밀 위치가 필요합니다."
         ARBUSAN_TOUR_API_KEY: "$(TOUR_API_KEY)"
+        ARBUSAN_TMAP_API_KEY: "$(TMAP_API_KEY)"
         ARBUSAN_VWORLD_API_KEY: "$(VWORLD_API_KEY)"
         ARBUSAN_GOOGLE_ARCORE_API_KEY: "$(GOOGLE_ARCORE_API_KEY)"
         GARAPIKey: "$(GOOGLE_ARCORE_API_KEY)"

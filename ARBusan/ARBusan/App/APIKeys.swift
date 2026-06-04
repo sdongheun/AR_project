@@ -3,14 +3,16 @@ import Foundation
 struct APIKeys: Equatable {
     let tourAPI: String
     let vworld: String
+    let tmap: String
     let googleARCore: String
 
-    static let empty = APIKeys(tourAPI: "", vworld: "", googleARCore: "")
+    static let empty = APIKeys(tourAPI: "", vworld: "", tmap: "", googleARCore: "")
 
     var statuses: [APIKeyStatus] {
         [
             APIKeyStatus(name: "TourAPI", isConfigured: tourAPI.isConfiguredAPIKey),
             APIKeyStatus(name: "VWorld", isConfigured: vworld.isConfiguredAPIKey),
+            APIKeyStatus(name: "TMAP", isConfigured: tmap.isConfiguredAPIKey),
             APIKeyStatus(name: "Google ARCore", isConfigured: googleARCore.isConfiguredAPIKey),
         ]
     }
@@ -27,6 +29,7 @@ enum APIKeyProvider {
         APIKeys(
             tourAPI: bundle.apiKey(for: "ARBUSAN_TOUR_API_KEY"),
             vworld: bundle.apiKey(for: "ARBUSAN_VWORLD_API_KEY"),
+            tmap: bundle.apiKey(for: "ARBUSAN_TMAP_API_KEY"),
             googleARCore: bundle.apiKey(for: "ARBUSAN_GOOGLE_ARCORE_API_KEY")
         )
     }

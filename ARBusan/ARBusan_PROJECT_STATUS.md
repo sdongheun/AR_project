@@ -8,26 +8,41 @@
 
 - 프로젝트: `ARBusan`
 - 방식: iOS Swift 네이티브
-- 현재 MVP: 지도/길찾기가 아니라 **카메라 기반 건물 인식**
+- 현재 MVP 방향: **TourAPI 목적지 후보 + TMAP 보행자 도착점 + AR 3D 마커/화살표 안내**
 - 최종 목표: TourAPI 부산 관광지/랜드마크 인식
-- 현재 테스트 대상: 김해 목업 건물 4개
+- 현재 테스트 대상: 김해 목업 4개 + 용원 목업 4개
 - 기존 React Native `mobile` 프로젝트는 참고용으로 보존
 
 현재 인식 구조:
 
 ```text
-김해 목업 후보
-+ OCR
+김해/용원 목업 후보
 + 카메라 heading 기반 방향 후보
 + VPS/위치 정확도
-+ 브이월드 Polygon 자동 후보
--> 점수화
--> 인식됨 / 근처 후보 / 후보 선택
++ projection matrix / 2D overlay
++ WGS84/RealityKit 3D 마커 실험
++ TMAP 보행자 경로 마지막 도착 좌표 검증
+-> 목적지 후보 / 방향 안내 / 3D 도착점 표시
 ```
+
+현재 UX 방향:
+
+```text
+3D 마커:
+    TMAP 보행자 경로의 마지막 도착 지점 표시
+
+길찾기 화살표:
+    현재 위치에서 목적지까지 이동 방향 안내
+
+edge marker:
+    화면 밖 후보 방향 안내
+```
+
+기존 “건물 외벽에 3D 텍스트를 직접 붙이는 방식”과 “VWorld Polygon 기반 대표/정문 좌표 자동 계산”은 테스트 교훈만 남긴다. 새 기본 방향은 TMAP 보행자 길찾기의 마지막 도착 좌표에 3D 마커를 고정하고, 정확한 이동 방향은 경로 화살표로 제공하는 방식이다.
 
 ## 2. 현재 실행 상태
 
-앱은 현재 TourAPI를 호출하지 않고 김해 목업 건물 4개로 실행된다.
+앱은 현재 TourAPI를 호출하지 않고 김해/용원 목업 건물로 실행된다.
 
 | 이름 | 주소 | ID |
 | --- | --- | --- |
@@ -35,6 +50,10 @@
 | 올리브영 | 경남 김해시 인제로 190 | `mock-gimhae-oliveyoung-inje-190` |
 | 후참잘 | 경남 김해시 인제로 191 | `mock-gimhae-hoochamjal-inje-191` |
 | 더존 101 | 경상남도 김해시 인제로 266 | `mock-gimhae-thezone101-inje-266` |
+| 맥도날드 진해 용원 | 진해 용원 테스트 좌표 | `mock-jinhae-yongwon-mcdonalds` |
+| LG전자 용원점 | 진해 용원 테스트 좌표 | `mock-jinhae-yongwon-lg-electronics` |
+| 다이소 용원점 | 진해 용원 테스트 좌표 | `mock-jinhae-yongwon-daiso` |
+| 고기집 | 진해 용원 테스트 좌표 | `mock-jinhae-yongwon-meat-restaurant` |
 
 목업 데이터 위치:
 
@@ -63,6 +82,14 @@ ARBusan/ARBusan/Data/Mock/MockTourismSpots.swift
 - OCR, 카메라 방향, 위치 정확도, Polygon 신호를 점수화하는 인식 파이프라인
 - OCR과 공간 후보가 충돌하면 자동 확정하지 않고 후보 선택으로 전환
 - OCR 없이 VPS/Polygon만 맞으면 `건물 인식됨`이 아니라 `근처 후보 감지`로 표시
+- Scene Semantics와 OCR은 발열/효과 대비 문제로 현재 메인 테스트 UI에서 제외
+- projection matrix 기반 2D 라벨/edge marker 표시
+- WGS84 Anchor + RealityKit Entity로 3D 구체/텍스트 표시 실험
+- 여러 근처 POI의 WGS84 Anchor를 동시에 유지하는 구조
+- stable origin 기반 3D 위치 안정화
+- 기존 외벽 후보점 방식과 대표/정문 자동 계산 방식의 한계를 확인하고 TMAP 도착점 방식으로 전환 예정
+- `preferredMarkerCoordinate`/`entranceCoordinate`가 있으면 기존 외벽 후보점보다 우선해 3D WGS84 후보로 사용하는 구조
+- TMAP 보행자 경로 API로 더존101/투썸/후참잘/올리브영의 마지막 도착 좌표가 POI 중심에서 도로/접근 지점 쪽으로 보정되는 것을 확인
 - SwiftData 방문/수집 상태 모델
 - 후보 선택/도감 화면
 - 테스트 기록 문서: `ARBusan/docs/testing/TEST_RESULTS.md`
@@ -137,6 +164,7 @@ TourAPI 코드는 삭제하지 않고 비활성화했다.
 - `TOUR_API_KEY`: TourAPI 관광지/랜드마크 데이터
 - `VWORLD_API_KEY`: 브이월드 Polygon/공간 검증
 - `GOOGLE_ARCORE_API_KEY`: ARCore Geospatial/VPS
+- `TMAP_API_KEY`: 보행자 경로/마지막 도착 좌표/향후 길찾기 화살표
 
 실제 키는 아래 파일에만 둔다.
 
@@ -148,15 +176,16 @@ ARBusan/Config/Secrets.local.xcconfig
 
 ## 7. 현재 한계
 
-- OCR과 카메라 방향 후보는 자동이다.
+- OCR과 Scene Semantics는 현재 주 로직에서 제외했다.
 - VPS는 건물 후보로 쓰지 않고 위치 정확도 신호로만 쓴다.
 - Polygon 후보는 브이월드 조회 결과가 있으면 실제 외곽 좌표 기반으로 반영한다.
-- 브이월드 Polygon 선택은 POI 포함 여부까지 개선됐지만, 카메라 시야각과 Polygon이 교차하는지 계산하는 로직은 아직 없다.
-- 조회한 Polygon 외곽에 3D 핀을 배치하는 렌더링은 아직 없다.
+- 브이월드 Polygon 선택은 POI 포함 여부까지 개선됐다.
+- 3D 렌더링은 WGS84/RealityKit으로 확인했지만, 기존 외벽 부착형 배치는 가까운 건물/도심/위치 흔들림에서 안정성이 부족했다.
+- 앞으로는 외벽점을 계속 따라가는 방식이 아니라 TMAP 보행자 길찾기 마지막 도착 좌표를 3D 마커 기준으로 사용한다.
 - 카메라 heading은 실내에서 자기장/기기 자세/위치 오차 때문에 실제 시야와 어긋날 수 있다.
 - 실내 VPS가 `보통`이면 위치 오차가 몇 m만 나도 가까운 건물 경계 판단이 크게 흔들릴 수 있다.
 - TourAPI 김해/부산 로딩은 현재 비활성화 상태다.
-- VPS 미지원 지역에서는 ARCore Geospatial 정밀 VPS를 기대하기 어렵고, CoreLocation + heading + OCR 중심으로 동작한다.
+- VPS 미지원 지역에서는 ARCore Geospatial 정밀 VPS를 기대하기 어렵고, CoreLocation + heading + Polygon/POI 중심으로 동작한다.
 
 ## 8. 정확도를 위해 개선해야 할 부분
 
@@ -168,31 +197,23 @@ ARBusan/docs/planning/AR_TECH_ROADMAP.md
 
 우선순위:
 
-1. `heading ↔ 선택 Polygon` 디버그 로그 추가
-   - 현재 위치 좌표
-   - 현재 heading
-   - 선택 Polygon centroid 방향각
-   - heading과 방향각 차이
-   - 카메라 시야각 안에 Polygon 외곽/중심이 들어오는지
-2. 카메라 시야 cone과 Polygon 교차 검사 구현
-   - 단순 후보 centroid 방향이 아니라 Polygon 외곽점/선분이 시야각 안에 들어오는지 판단한다.
-   - 건물 끝과 비건물 영역을 왔다갔다하는 테스트는 이 로직이 있어야 의미 있게 판별된다.
-   - 현재는 진단 로그까지 구현했고, 인식 점수 반영은 다음 단계다.
-3. 위치/heading 신뢰도 기반 보수적 판정
-   - 실내 VPS `보통`, 위치 정확도 낮음, heading 흔들림이 크면 `높음` 확정을 막는다.
-   - 최근 heading 샘플 변화량을 이용해 안정 상태일 때만 공간 점수를 높인다.
-4. Polygon 선택 fallback 개선
-   - POI가 어떤 Polygon에도 포함되지 않으면 centroid가 아니라 POI와 Polygon 외곽선까지의 최단 거리로 fallback한다.
-   - 포함 Polygon이 여러 개면 면적/건물명 속성/POI와 외곽 거리 등을 추가로 비교한다.
-5. 선택 Polygon 시각화
-   - 디버그 UI 또는 지도/AR 오버레이에 POI, BOX, 후보 Polygon, 선택 Polygon을 구분 표시한다.
-   - 이후 선택 Polygon 외곽 기준으로 3D 핀/텍스트 앵커를 만든다.
-6. Scene Semantics 보조 신호 추가 검토
-7. anchor 표시 높이 결정
-   - 브이월드 높이가 있으면 사용하고, 없으면 지상층수 * 평균층고, 그래도 없으면 기본 높이로 fallback한다.
-8. TourAPI 재연결 전 확인
-   - TourAPI POI 좌표가 실제 건물 내부인지 샘플로 확인한다.
-   - 관광지가 건물형이 아닌 경우에는 Polygon 필수 매칭이 아니라 area/point 관광지로 처리한다.
+1. TMAP 도착 좌표 방식으로 3D 기본 좌표 교체
+   - 방향 변경: TMAP 보행자 경로 마지막 도착 좌표를 3D 기본 좌표로 사용
+   - 다음: `TMAP_API_KEY` 앱 연결, TMAP 클라이언트, 마지막 좌표 파싱, 캐시 구현
+   - 기존 VWorld 외벽 ray/nearest facade/대표점은 fallback 또는 디버그로 낮춤
+2. 3D 마커와 길찾기 역할 분리
+   - 3D는 목적지 도착점
+   - 경로 화살표는 현재 위치에서 목적지까지 이동 방향
+   - 관광지 정보는 최종적으로 3D 마커 hit/tap 이벤트로 표시
+   - edge marker는 화면 밖 방향 안내
+3. 위치/heading 신뢰도 기반 보수적 갱신
+   - stable origin이 흔들리면 3D 좌표를 새로 확정하지 않음
+   - heading은 방향 문구와 edge marker에 주로 사용
+4. TourAPI 재연결 전 확인
+   - TourAPI POI를 목적지로 보고 TMAP 도착 좌표가 안정적으로 나오는지 샘플로 확인한다.
+   - 관광지가 건물형이든 비건물형이든 MVP에서는 TMAP 도착점 기반으로 통일한다.
+5. 건물형/비건물형 표시 검증
+   - VWorld는 필수 경로가 아니라 이상 케이스 검증/보정에 사용한다.
 
 ## 9. 실행 기준
 

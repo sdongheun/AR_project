@@ -6,6 +6,8 @@
 	<string>$(GOOGLE_ARCORE_API_KEY)</string>
 	<key>ARBUSAN_TOUR_API_KEY</key>
 	<string>$(TOUR_API_KEY)</string>
+	<key>ARBUSAN_TMAP_API_KEY</key>
+	<string>$(TMAP_API_KEY)</string>
 	<key>ARBUSAN_VWORLD_API_KEY</key>
 	<string>$(VWORLD_API_KEY)</string>
 	<key>CFBundleDevelopmentRegion</key>

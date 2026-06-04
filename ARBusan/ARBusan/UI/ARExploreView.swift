@@ -143,11 +143,7 @@ private struct DebugDashboardView: View {
 
             DebugStatusRowsView(rows: overviewRows)
 
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 150), alignment: .topLeading)],
-                alignment: .leading,
-                spacing: 10
-            ) {
+            VStack(alignment: .leading, spacing: 10) {
                 DebugStatusGroupView(title: "위치", rows: locationRows)
                 DebugStatusGroupView(title: "데이터", rows: dataRows)
                 DebugStatusGroupView(title: "표시", rows: displayRows)
@@ -187,7 +183,7 @@ private struct DebugStatusRowsView: View {
                     Text(row.value)
                         .font(.caption2)
                         .foregroundStyle(.primary)
-                        .lineLimit(2)
+                        .lineLimit(nil)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }

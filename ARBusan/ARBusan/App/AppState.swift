@@ -166,6 +166,8 @@ final class AppState: ObservableObject {
     @Published var polygonLookupLogs: [String] = []
     @Published var buildingPolygonsBySpotID: [TourismSpot.ID: BuildingPolygon] = [:]
     @Published var resolvedBuildingHeightsBySpotID: [TourismSpot.ID: ResolvedBuildingHeight] = [:]
+    @Published var tmapArrivalRoutesBySpotID: [TourismSpot.ID: TMAPPedestrianRoute] = [:]
+    @Published var tmapRouteStatus = "TMAP 도착 좌표를 아직 조회하지 않았습니다."
     @Published var tourismDataStatus = "TourAPI는 비활성화되어 있고 테스트 목업 건물 후보를 사용 중입니다."
     @Published var isIndoorDebugModeEnabled = false
     @Published var indoorDebugStatus = "실내 디버그 모드는 꺼져 있습니다."
@@ -176,6 +178,7 @@ final class AppState: ObservableObject {
     private let cameraDirectionCandidateProvider: CameraDirectionCandidateProvider
     private let tourAPIClient: any TourAPIClient
     private let vworldClient: any VWorldClient
+    private let tmapClient: any TMAPClient
     private let nearbySpotRadiusMeters: CLLocationDistance = 1_000
     private let headingInstabilityThresholdDegrees: Double = 12
     private let projectionHorizontalFOVDegrees: Double = 60
@@ -192,12 +195,15 @@ final class AppState: ObservableObject {
     private let stableOriginConfirmationInterval: TimeInterval = 1.2
     private let stableOriginDegradedTimeout: TimeInterval = 3.0
     private let polygonBoundaryToleranceMeters: CLLocationDistance = 0.8
+    private let markerPlacementToleranceMeters: CLLocationDistance = 8
     private let buildingHeightResolver = BuildingHeightResolver()
     private var loadedTourismSpots: [TourismSpot] = []
     private var polygonLookupTask: Task<Void, Never>?
     private var polygonLookupInFlightSpotID: TourismSpot.ID?
     private var polygonPrefetchTasksBySpotID: [TourismSpot.ID: Task<Void, Never>] = [:]
     private var polygonLookupNotFoundSpotIDs: Set<TourismSpot.ID> = []
+    private var tmapRouteTasksBySpotID: [TourismSpot.ID: Task<Void, Never>] = [:]
+    private var tmapRouteFailedSpotIDs: Set<TourismSpot.ID> = []
     private var latestSceneSemanticsSnapshot: SceneSemanticsSnapshot?
     private var sceneSemanticsEvidenceBySpotID: [TourismSpot.ID: SceneSemanticsSpotEvidence] = [:]
     private var stableGeospatial3DOrigin: LocationSnapshot?
@@ -209,6 +215,7 @@ final class AppState: ObservableObject {
     private var activeGeospatial3DSpotIDs: Set<TourismSpot.ID> = []
     private var stableFacadeSelectionsBySpotID: [TourismSpot.ID: StableBuildingFacadeSelection] = [:]
     private var fixedNearestFacadeCandidatesBySpotID: [TourismSpot.ID: BuildingFacadeCandidate] = [:]
+    private var markerPlacementDiagnosticsBySpotID: [TourismSpot.ID: String] = [:]
     private let facadeSwitchRayDistanceImprovementMeters: Double = 1.5
     private let facadeSwitchConfirmationInterval: TimeInterval = 0.5
     let geospatialSessionManager: GeospatialSessionManager
@@ -219,7 +226,8 @@ final class AppState: ObservableObject {
         cameraDirectionCandidateProvider: CameraDirectionCandidateProvider = CameraDirectionCandidateProvider(),
         apiKeys: APIKeys = APIKeyProvider.load(),
         tourAPIClient: (any TourAPIClient)? = nil,
-        vworldClient: (any VWorldClient)? = nil
+        vworldClient: (any VWorldClient)? = nil,
+        tmapClient: (any TMAPClient)? = nil
     ) {
         self.spots = spots
         self.recognitionPipeline = recognitionPipeline
@@ -227,6 +235,7 @@ final class AppState: ObservableObject {
         self.apiKeys = apiKeys
         self.tourAPIClient = tourAPIClient ?? MockTourAPIClient()
         self.vworldClient = vworldClient ?? VWorldDataAPIClient(apiKey: apiKeys.vworld)
+        self.tmapClient = tmapClient ?? SKOpenAPITMAPClient(apiKey: apiKeys.tmap)
         self.loadedTourismSpots = spots
         self.geospatialSessionManager = GeospatialSessionManager(apiKeysProvider: { apiKeys })
         self.cameraTextInput = ""
@@ -472,12 +481,15 @@ final class AppState: ObservableObject {
     }
 
     var dataDebugRows: [DebugStatusRow] {
-        [
+        var rows = [
             DebugStatusRow(title: "TourAPI", value: compactDiagnosticText(tourismDataStatus)),
+            DebugStatusRow(title: "TMAP", value: tmapRouteSummaryText),
             DebugStatusRow(title: "표시 후보", value: "\(spots.count)개"),
             DebugStatusRow(title: "VWorld", value: compactDiagnosticText(polygonValidationStatus)),
             DebugStatusRow(title: "Polygon 로그", value: polygonLookupLogs.isEmpty ? "없음" : "\(polygonLookupLogs.count)줄")
         ]
+        rows.append(contentsOf: tmapArrivalDebugRows)
+        return rows
     }
 
     var displayDebugRows: [DebugStatusRow] {
@@ -554,6 +566,43 @@ final class AppState: ObservableObject {
         }
 
         return String(normalized.prefix(maxLength)) + "..."
+    }
+
+    private var tmapRouteSummaryText: String {
+        let cachedCount = tmapArrivalRoutesBySpotID.count
+        let requestCount = tmapRouteTasksBySpotID.count
+        let failedCount = tmapRouteFailedSpotIDs.count
+
+        if cachedCount == 0, requestCount == 0, failedCount == 0 {
+            return "도착 좌표 없음"
+        }
+
+        var parts: [String] = []
+        if cachedCount > 0 {
+            parts.append("도착 좌표 \(cachedCount)개")
+        }
+        if requestCount > 0 {
+            parts.append("요청 중 \(requestCount)개")
+        }
+        if failedCount > 0 {
+            parts.append("실패 \(failedCount)개")
+        }
+        return parts.joined(separator: " / ")
+    }
+
+    private var tmapArrivalDebugRows: [DebugStatusRow] {
+        spots.enumerated().compactMap { index, spot -> DebugStatusRow? in
+            guard let route = tmapArrivalRoutesBySpotID[spot.id] else {
+                return nil
+            }
+
+            let offsetMeters = spot.center.distance(to: route.arrivalCoordinate)
+            let distanceText = route.totalDistanceMeters.map { " / 경로 \(Int($0))m" } ?? ""
+            return DebugStatusRow(
+                title: "TMAP \(index + 1)",
+                value: "\(spot.edgeMarkerShortTitle) \(route.arrivalCoordinate.shortText) / POI 보정 \(String(format: "%.1f", offsetMeters))m\(distanceText)"
+            )
+        }
     }
 
     func updateCameraTextFromLiveOCR(_ text: String) {
@@ -914,6 +963,11 @@ final class AppState: ObservableObject {
         polygonPrefetchTasksBySpotID.values.forEach { $0.cancel() }
         polygonPrefetchTasksBySpotID = [:]
         polygonLookupNotFoundSpotIDs = []
+        tmapRouteTasksBySpotID.values.forEach { $0.cancel() }
+        tmapRouteTasksBySpotID = [:]
+        tmapRouteFailedSpotIDs = []
+        tmapArrivalRoutesBySpotID = [:]
+        tmapRouteStatus = "후보 초기화로 TMAP 도착 좌표 캐시도 초기화했습니다."
         resolvedBuildingHeightsBySpotID = [:]
         sceneSemanticsEvidenceBySpotID = [:]
         sceneSemanticsScoringDiagnostics = "후보 초기화로 Scene Semantics 라벨 보정도 초기화했습니다."
@@ -973,6 +1027,7 @@ final class AppState: ObservableObject {
 
         spots = filteredSpots
         dropSelectionsOutsideVisibleSpots()
+        prefetchTMAPArrivalRoutes(from: latestLocationSnapshot)
         if let stableGeospatial3DOrigin, stableOriginReadyFor3DAnchors {
             prefetchNearbyBuildingPolygonsFor3DAnchors(from: stableGeospatial3DOrigin)
         }
@@ -999,8 +1054,89 @@ final class AppState: ObservableObject {
         if let selectedSpot, !visibleSpotIDs.contains(selectedSpot.id) {
             self.selectedSpot = nil
         }
+        tmapArrivalRoutesBySpotID = tmapArrivalRoutesBySpotID.filter { visibleSpotIDs.contains($0.key) }
+        tmapRouteFailedSpotIDs = tmapRouteFailedSpotIDs.filter { visibleSpotIDs.contains($0) }
         edgeMarkerOverlays.removeAll { !visibleSpotIDs.contains($0.id) }
         onScreenCandidateMarkerOverlays.removeAll { !visibleSpotIDs.contains($0.id) }
+    }
+
+    private func prefetchTMAPArrivalRoutes(from origin: LocationSnapshot) {
+        guard apiKeys.tmap.isRuntimeConfiguredAPIKey else {
+            tmapRouteStatus = "TMAP_API_KEY가 비어 있어 도착 좌표를 조회하지 않습니다."
+            return
+        }
+
+        let candidates = spots
+            .sorted {
+                origin.coordinate.distance(to: $0.center) < origin.coordinate.distance(to: $1.center)
+            }
+            .filter { spot in
+                tmapArrivalRoutesBySpotID[spot.id] == nil
+                    && tmapRouteTasksBySpotID[spot.id] == nil
+                    && !tmapRouteFailedSpotIDs.contains(spot.id)
+            }
+            .prefix(maxActiveGeospatial3DAnchorCount)
+
+        if candidates.isEmpty {
+            updateTMAPRouteStatus()
+            return
+        }
+
+        updateTMAPRouteStatus(extra: "조회 중 \(candidates.count)개")
+        for spot in candidates {
+            let task = Task { @MainActor [weak self] in
+                guard let self else {
+                    return
+                }
+
+                do {
+                    let route = try await self.tmapClient.fetchPedestrianRoute(
+                        from: origin.coordinate,
+                        to: spot
+                    )
+                    guard !Task.isCancelled else {
+                        return
+                    }
+
+                    self.tmapRouteTasksBySpotID[spot.id] = nil
+                    self.tmapArrivalRoutesBySpotID[spot.id] = route
+                    self.updateTMAPRouteStatus()
+                } catch {
+                    guard !Task.isCancelled else {
+                        return
+                    }
+
+                    self.tmapRouteTasksBySpotID[spot.id] = nil
+                    self.tmapRouteFailedSpotIDs.insert(spot.id)
+                    self.updateTMAPRouteStatus(extra: "\(spot.name) 실패: \(error.localizedDescription)")
+                }
+            }
+            tmapRouteTasksBySpotID[spot.id] = task
+        }
+    }
+
+    private func updateTMAPRouteStatus(extra: String? = nil) {
+        let routeSummaries = spots.compactMap { spot -> String? in
+            guard let route = tmapArrivalRoutesBySpotID[spot.id] else {
+                return nil
+            }
+            let offsetMeters = spot.center.distance(to: route.arrivalCoordinate)
+            return "\(spot.name) 도착 \(route.arrivalCoordinate.shortText) / POI 보정 \(String(format: "%.1f", offsetMeters))m"
+        }
+
+        let failedText = tmapRouteFailedSpotIDs.isEmpty
+            ? ""
+            : " / 실패 \(tmapRouteFailedSpotIDs.count)개"
+        let inFlightText = tmapRouteTasksBySpotID.isEmpty
+            ? ""
+            : " / 요청 중 \(tmapRouteTasksBySpotID.count)개"
+        let extraText = extra.map { " / \($0)" } ?? ""
+
+        if routeSummaries.isEmpty {
+            tmapRouteStatus = "TMAP 도착 좌표 캐시 없음\(inFlightText)\(failedText)\(extraText)"
+        } else {
+            tmapRouteStatus = "TMAP 도착 좌표 \(routeSummaries.count)개 / " + routeSummaries.joined(separator: " | ") + inFlightText + failedText + extraText
+        }
     }
 
     private func prefetchNearbyBuildingPolygonsFor3DAnchors(from origin: LocationSnapshot) {
@@ -1560,6 +1696,26 @@ final class AppState: ObservableObject {
         var keptWithoutNewFacade: [(spot: TourismSpot, distanceMeters: CLLocationDistance)] = []
 
         for spot in spots {
+            if let route = tmapArrivalRoutesBySpotID[spot.id] {
+                let facadeCandidate = tmapArrivalCandidate(
+                    spot: spot,
+                    route: route,
+                    from: origin
+                )
+                let distanceMeters = facadeCandidate.distanceFromUserMeters
+
+                guard shouldKeepGeospatial3DAnchor(
+                    spotID: spot.id,
+                    distanceMeters: distanceMeters
+                ) else {
+                    continue
+                }
+
+                let labelHeight = arrivalLabelHeightDecision(distanceMeters: distanceMeters)
+                preparedRequests.append((spot, labelHeight, facadeCandidate, distanceMeters))
+                continue
+            }
+
             guard let polygon = buildingPolygonsBySpotID[spot.id] else {
                 continue
             }
@@ -1616,8 +1772,9 @@ final class AppState: ObservableObject {
             }
             activeGeospatial3DSpotIDs = []
             fixedNearestFacadeCandidatesBySpotID = [:]
+            markerPlacementDiagnosticsBySpotID = [:]
             lastRequestedTerrainAnchorSpotIDs = []
-            geospatialWGS84CandidateDiagnostics = "3D 숨김 / \(Int(geospatial3DCreateRadiusMeters))m 안에 Polygon+외벽 후보가 있는 건물이 없습니다."
+            geospatialWGS84CandidateDiagnostics = "3D 숨김 / \(Int(geospatial3DCreateRadiusMeters))m 안에 TMAP 도착 좌표 또는 Polygon fallback 후보가 없습니다."
             return
         }
 
@@ -1637,8 +1794,17 @@ final class AppState: ObservableObject {
         fixedNearestFacadeCandidatesBySpotID = fixedNearestFacadeCandidatesBySpotID.filter {
             requestedSpotIDs.contains($0.key)
         }
+        markerPlacementDiagnosticsBySpotID = markerPlacementDiagnosticsBySpotID.filter {
+            requestedSpotIDs.contains($0.key)
+        }
         lastRequestedTerrainAnchorSpotIDs = Set(limitedRequests.map(\.spot.id))
-        geospatialWGS84CandidateDiagnostics = "WGS84 Anchor 후보 \(requestedSpotIDs.count)개 / 기존 anchor가 있는 건물은 최초 안정 외벽점을 유지 / " + summaries.joined(separator: " | ")
+        let markerDiagnostics = requestedSpotIDs
+            .compactMap { markerPlacementDiagnosticsBySpotID[$0] }
+            .sorted()
+        let markerText = markerDiagnostics.isEmpty
+            ? ""
+            : " / 마커 좌표 판단: " + markerDiagnostics.joined(separator: " | ")
+        geospatialWGS84CandidateDiagnostics = "WGS84 Anchor 후보 \(requestedSpotIDs.count)개 / TMAP 도착 좌표 우선, 없으면 기존 Polygon fallback / " + summaries.joined(separator: " | ") + markerText
     }
 
     private func requestGeospatialTerrainAnchorIfPossible(
@@ -1726,22 +1892,31 @@ final class AppState: ObservableObject {
         labelHeightMeters: Double,
         origin: LocationSnapshot
     ) -> GeospatialWGS84AnchorCandidate? {
-        guard let polygon = buildingPolygonsBySpotID[spot.id] else {
-            geospatialWGS84CandidateDiagnostics = "\(spot.name) WGS84 후보 폐기 / Polygon이 없어 boundary 검증을 할 수 없습니다."
-            return nil
-        }
-
         let deviceHeightAssumptionMeters = 1.5
         let relativeLabelHeightFromCameraGround = labelHeightMeters - deviceHeightAssumptionMeters
-        let displayAnchorCoordinate = closeRangeDisplayAnchorCoordinate(
-            spot: spot,
-            polygon: polygon,
-            facadeCandidate: facadeCandidate,
-            origin: origin
-        )
-        guard polygonAllowsDisplayCoordinate(displayAnchorCoordinate, polygon: polygon) else {
-            geospatialWGS84CandidateDiagnostics = "\(spot.name) WGS84 후보 폐기 / 최종 좌표가 Polygon boundary 허용 범위 밖입니다."
-            return nil
+        let displayAnchorCoordinate: CLLocationCoordinate2D
+
+        if isTMAPArrivalCandidate(facadeCandidate) {
+            displayAnchorCoordinate = facadeCandidate.anchorCoordinate
+        } else {
+            guard let polygon = buildingPolygonsBySpotID[spot.id] else {
+                geospatialWGS84CandidateDiagnostics = "\(spot.name) WGS84 후보 폐기 / Polygon이 없어 boundary 검증을 할 수 없습니다."
+                return nil
+            }
+
+            displayAnchorCoordinate = closeRangeDisplayAnchorCoordinate(
+                spot: spot,
+                polygon: polygon,
+                facadeCandidate: facadeCandidate,
+                origin: origin
+            )
+            let coordinateAllowed = isManualMarkerCandidate(facadeCandidate)
+                ? polygonAllowsMarkerCoordinate(displayAnchorCoordinate, polygon: polygon)
+                : polygonAllowsDisplayCoordinate(displayAnchorCoordinate, polygon: polygon)
+            guard coordinateAllowed else {
+                geospatialWGS84CandidateDiagnostics = "\(spot.name) WGS84 후보 폐기 / 최종 좌표가 허용된 Polygon/대표 마커 범위 밖입니다."
+                return nil
+            }
         }
 
         let displayAnchorLabel = displayAnchorCoordinate.isApproximatelyEqual(to: facadeCandidate.anchorCoordinate)
@@ -1775,6 +1950,10 @@ final class AppState: ObservableObject {
         facadeCandidate: BuildingFacadeCandidate,
         origin: LocationSnapshot
     ) -> CLLocationCoordinate2D {
+        guard !isManualMarkerCandidate(facadeCandidate) else {
+            return facadeCandidate.anchorCoordinate
+        }
+
         guard facadeCandidate.distanceFromUserMeters < 5 else {
             return facadeCandidate.anchorCoordinate
         }
@@ -1799,6 +1978,45 @@ final class AppState: ObservableObject {
         }
 
         return adjustedCoordinate
+    }
+
+    private func isManualMarkerCandidate(_ candidate: BuildingFacadeCandidate) -> Bool {
+        candidate.selectionReason.contains("수동 대표")
+            || candidate.selectionReason.contains("수동 입구")
+            || candidate.selectionReason.contains("TMAP 도착 좌표")
+    }
+
+    private func isTMAPArrivalCandidate(_ candidate: BuildingFacadeCandidate) -> Bool {
+        candidate.selectionReason.contains("TMAP 도착 좌표")
+    }
+
+    private func tmapArrivalCandidate(
+        spot: TourismSpot,
+        route: TMAPPedestrianRoute,
+        from origin: LocationSnapshot
+    ) -> BuildingFacadeCandidate {
+        let coordinate = route.arrivalCoordinate
+        let enu = LocalENUProjector.project(coordinate, from: origin)
+        let distanceMeters = enu.groundDistanceMeters
+        markerPlacementDiagnosticsBySpotID[spot.id] = "\(spot.name): TMAP 도착 좌표 사용 / \(coordinate.shortText)"
+
+        return BuildingFacadeCandidate(
+            segmentKey: "\(spot.id)-tmap-arrival",
+            startCoordinate: coordinate,
+            endCoordinate: coordinate,
+            midpointCoordinate: coordinate,
+            anchorCoordinate: coordinate,
+            startENU: enu,
+            endENU: enu,
+            midpointENU: enu,
+            anchorENU: enu,
+            lengthMeters: 0,
+            distanceFromUserMeters: distanceMeters,
+            rayDistanceMeters: 0,
+            rayForwardDistanceMeters: distanceMeters,
+            selectionReason: "TMAP 도착 좌표",
+            stabilizationNote: "TMAP 보행자 경로 마지막 도착점: 사용자 heading으로 재계산하지 않음"
+        )
     }
 
     private func labelHeightDecision(
@@ -1831,6 +2049,27 @@ final class AppState: ObservableObject {
             valueMeters: resolvedHeightValue,
             rangeLabel: rangeLabel,
             reason: reason
+        )
+    }
+
+    private func arrivalLabelHeightDecision(distanceMeters: CLLocationDistance) -> BuildingLabelHeightDecision {
+        let rangeLabel: String
+
+        switch distanceMeters {
+        case ..<5:
+            rangeLabel = "도착점 근거리 0~5m"
+        case ..<30:
+            rangeLabel = "도착점 중거리 5~30m"
+        case ..<120:
+            rangeLabel = "도착점 장거리 30~120m"
+        default:
+            rangeLabel = "도착점 원거리 120m~1km"
+        }
+
+        return BuildingLabelHeightDecision(
+            valueMeters: 1.7,
+            rangeLabel: rangeLabel,
+            reason: "TMAP 도착 좌표는 현장 검증 전까지 지면 기준 눈높이 1.7m로 고정합니다."
         )
     }
 
@@ -1910,6 +2149,20 @@ final class AppState: ObservableObject {
     ) -> BuildingFacadeCandidate? {
         let segments = polygon.rings.flatMap { facadeSegments(for: $0, from: origin) }
 
+        if let manualCandidate = manualMarkerCandidate(
+            spot: spot,
+            polygon: polygon,
+            segments: segments,
+            from: origin
+        ) {
+            fixedNearestFacadeCandidatesBySpotID[spot.id] = manualCandidate
+            return manualCandidate
+        }
+
+        if spot.preferredMarkerCoordinate == nil, spot.entranceCoordinate == nil {
+            markerPlacementDiagnosticsBySpotID[spot.id] = "\(spot.name): 수동 좌표 없음 -> 기존 외벽 fallback"
+        }
+
         if activeGeospatial3DSpotIDs.contains(spot.id),
            let fixedCandidate = fixedNearestFacadeCandidatesBySpotID[spot.id],
            let currentSegment = segments.first(where: { $0.segmentKey == fixedCandidate.segmentKey }),
@@ -1951,6 +2204,55 @@ final class AppState: ObservableObject {
             .withStabilizationNote("카메라 방향과 무관한 선생성 기본점")
         fixedNearestFacadeCandidatesBySpotID[spot.id] = candidate
         return candidate
+    }
+
+    private func manualMarkerCandidate(
+        spot: TourismSpot,
+        polygon: BuildingPolygon,
+        segments: [BuildingFacadeCandidate],
+        from origin: LocationSnapshot
+    ) -> BuildingFacadeCandidate? {
+        let coordinate: CLLocationCoordinate2D
+        let reason: String
+        if let preferred = spot.preferredMarkerCoordinate {
+            coordinate = preferred
+            reason = "수동 대표 마커 좌표"
+        } else if let entrance = spot.entranceCoordinate {
+            coordinate = entrance
+            reason = "수동 입구 마커 좌표"
+        } else {
+            return nil
+        }
+
+        guard polygonAllowsMarkerCoordinate(coordinate, polygon: polygon) else {
+            let distance = polygon.rings
+                .map { distanceFromCoordinate(coordinate, toRingBoundary: $0) }
+                .min() ?? .greatestFiniteMagnitude
+            markerPlacementDiagnosticsBySpotID[spot.id] = "\(spot.name): \(reason) 거부 / Polygon 외곽 거리 \(String(format: "%.1f", distance))m > \(Int(markerPlacementToleranceMeters))m"
+            return nil
+        }
+
+        let markerENU = LocalENUProjector.project(coordinate, from: origin)
+        let baseSegment = segments.min {
+            distanceFromCoordinate(coordinate, toSegmentStart: $0.startCoordinate, end: $0.endCoordinate)
+                < distanceFromCoordinate(coordinate, toSegmentStart: $1.startCoordinate, end: $1.endCoordinate)
+        }
+
+        guard let baseSegment else {
+            markerPlacementDiagnosticsBySpotID[spot.id] = "\(spot.name): \(reason) 거부 / Polygon 외벽 선분 없음"
+            return nil
+        }
+
+        markerPlacementDiagnosticsBySpotID[spot.id] = "\(spot.name): \(reason) 사용 / \(coordinate.shortText)"
+        return baseSegment
+            .withAnchor(
+                coordinate: coordinate,
+                enu: markerENU,
+                rayDistanceMeters: markerENU.groundDistanceMeters,
+                rayForwardDistanceMeters: markerENU.groundDistanceMeters,
+                selectionReason: reason
+            )
+            .withStabilizationNote("수동 좌표 우선: 사용자 위치/heading으로 재계산하지 않음")
     }
 
     private func stabilizedFacadeCandidate(
@@ -2289,6 +2591,19 @@ final class AppState: ObservableObject {
         return polygon.rings
             .map { distanceFromCoordinate(coordinate, toRingBoundary: $0) }
             .min() ?? .greatestFiniteMagnitude <= polygonBoundaryToleranceMeters
+    }
+
+    private func polygonAllowsMarkerCoordinate(
+        _ coordinate: CLLocationCoordinate2D,
+        polygon: BuildingPolygon
+    ) -> Bool {
+        if polygonContains(coordinate, polygon: polygon) {
+            return true
+        }
+
+        return polygon.rings
+            .map { distanceFromCoordinate(coordinate, toRingBoundary: $0) }
+            .min() ?? .greatestFiniteMagnitude <= markerPlacementToleranceMeters
     }
 
     private func polygonContains(
@@ -3095,6 +3410,13 @@ private extension RecognitionConfidence {
         case .low:
             return .low
         }
+    }
+}
+
+private extension String {
+    var isRuntimeConfiguredAPIKey: Bool {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmed.isEmpty && !trimmed.contains("$(") && !trimmed.contains("your_")
     }
 }
 

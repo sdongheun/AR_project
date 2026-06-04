@@ -13,7 +13,8 @@ enum MockTourismSpots {
             geometryKind: .buildingPolygon,
             center: CLLocationCoordinate2D(latitude: 35.245758, longitude: 128.904074),
             recognitionHints: ["투썸", "투썸플레이스", "TWOSOME", "A TWOSOME PLACE"],
-            notes: "간판이 잘 보이고 입구가 명확하다. 1층짜리 건물이며 상가는 2개만 있다."
+            notes: "간판이 잘 보이고 입구가 명확하다. 1층짜리 건물이며 상가는 2개만 있다.",
+            preferredMarkerCoordinate: CLLocationCoordinate2D(latitude: 35.245758, longitude: 128.904041)
         ),
         TourismSpot(
             id: "mock-gimhae-oliveyoung-inje-190",
@@ -25,7 +26,8 @@ enum MockTourismSpots {
             geometryKind: .buildingPolygon,
             center: CLLocationCoordinate2D(latitude: 35.245555, longitude: 128.904186),
             recognitionHints: ["올리브영", "OLIVE YOUNG", "OLIVEYOUNG"],
-            notes: "간판이 잘 보인다. 약 5층 건물이며 여러 상가가 존재한다."
+            notes: "간판이 잘 보인다. 약 5층 건물이며 여러 상가가 존재한다.",
+            preferredMarkerCoordinate: CLLocationCoordinate2D(latitude: 35.245555, longitude: 128.904153)
         ),
         TourismSpot(
             id: "mock-gimhae-hoochamjal-inje-191",
@@ -37,7 +39,8 @@ enum MockTourismSpots {
             geometryKind: .buildingPolygon,
             center: CLLocationCoordinate2D(latitude: 35.245678, longitude: 128.903683),
             recognitionHints: ["후참잘", "후라이드참잘하는집"],
-            notes: "간판이 잘 보인다. 약 2층 건물이며 간판들이 빼곡하게 있다."
+            notes: "간판이 잘 보인다. 약 2층 건물이며 간판들이 빼곡하게 있다.",
+            preferredMarkerCoordinate: CLLocationCoordinate2D(latitude: 35.245678, longitude: 128.903716)
         ),
         TourismSpot(
             id: "mock-gimhae-thezone101-inje-266",

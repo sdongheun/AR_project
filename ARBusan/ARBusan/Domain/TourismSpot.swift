@@ -23,6 +23,39 @@ struct TourismSpot: Identifiable, Hashable {
     let center: CLLocationCoordinate2D
     let recognitionHints: [String]
     let notes: String
+    let preferredMarkerCoordinate: CLLocationCoordinate2D?
+    let entranceCoordinate: CLLocationCoordinate2D?
+    let frontHeadingDegrees: Double?
+
+    init(
+        id: String,
+        name: String,
+        address: String,
+        districtName: String,
+        category: String,
+        source: Source,
+        geometryKind: GeometryKind,
+        center: CLLocationCoordinate2D,
+        recognitionHints: [String],
+        notes: String,
+        preferredMarkerCoordinate: CLLocationCoordinate2D? = nil,
+        entranceCoordinate: CLLocationCoordinate2D? = nil,
+        frontHeadingDegrees: Double? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.address = address
+        self.districtName = districtName
+        self.category = category
+        self.source = source
+        self.geometryKind = geometryKind
+        self.center = center
+        self.recognitionHints = recognitionHints
+        self.notes = notes
+        self.preferredMarkerCoordinate = preferredMarkerCoordinate
+        self.entranceCoordinate = entranceCoordinate
+        self.frontHeadingDegrees = frontHeadingDegrees
+    }
 
     static func == (lhs: TourismSpot, rhs: TourismSpot) -> Bool {
         lhs.id == rhs.id
@@ -32,4 +65,3 @@ struct TourismSpot: Identifiable, Hashable {
         hasher.combine(id)
     }
 }
-
