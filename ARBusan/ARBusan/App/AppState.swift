@@ -191,6 +191,7 @@ final class AppState: ObservableObject {
     private let stableOriginMaxJumpMeters: CLLocationDistance = 12
     private let stableOriginConfirmationInterval: TimeInterval = 1.2
     private let stableOriginDegradedTimeout: TimeInterval = 3.0
+    private let polygonBoundaryToleranceMeters: CLLocationDistance = 0.8
     private let buildingHeightResolver = BuildingHeightResolver()
     private var loadedTourismSpots: [TourismSpot] = []
     private var polygonLookupTask: Task<Void, Never>?
@@ -207,6 +208,7 @@ final class AppState: ObservableObject {
     private var lastRequestedTerrainAnchorSpotIDs: Set<TourismSpot.ID> = []
     private var activeGeospatial3DSpotIDs: Set<TourismSpot.ID> = []
     private var stableFacadeSelectionsBySpotID: [TourismSpot.ID: StableBuildingFacadeSelection] = [:]
+    private var fixedNearestFacadeCandidatesBySpotID: [TourismSpot.ID: BuildingFacadeCandidate] = [:]
     private let facadeSwitchRayDistanceImprovementMeters: Double = 1.5
     private let facadeSwitchConfirmationInterval: TimeInterval = 0.5
     let geospatialSessionManager: GeospatialSessionManager
@@ -359,6 +361,7 @@ final class AppState: ObservableObject {
             stableOriginDiagnostics = "실내 디버그 종료로 3D stable origin을 초기화했습니다."
             geospatialSessionManager.clearAllGeospatialDebugAnchors(reason: "실내 디버그 종료로 WGS84 Anchor를 모두 제거했습니다.")
             activeGeospatial3DSpotIDs = []
+            fixedNearestFacadeCandidatesBySpotID = [:]
             lastRequestedTerrainAnchorSpotIDs = []
             refreshSpatialTrackingConfidence()
         }
@@ -924,6 +927,7 @@ final class AppState: ObservableObject {
         activeGeospatial3DSpotIDs = []
         geospatialSessionManager.clearAllGeospatialDebugAnchors(reason: "후보 초기화로 WGS84 Anchor를 모두 제거했습니다.")
         stableFacadeSelectionsBySpotID = [:]
+        fixedNearestFacadeCandidatesBySpotID = [:]
         arLabelOverlay = nil
         arLabelOverlayDiagnostics = "후보 초기화로 AR 라벨도 초기화했습니다."
         matrixProjectionDebugOverlay = nil
@@ -1362,6 +1366,7 @@ final class AppState: ObservableObject {
         if !activeGeospatial3DSpotIDs.isEmpty || !lastRequestedTerrainAnchorSpotIDs.isEmpty {
             geospatialSessionManager.clearAllGeospatialDebugAnchors(reason: "3D stable origin 불안정으로 WGS84 Anchor를 일시 제거했습니다.")
             activeGeospatial3DSpotIDs = []
+            fixedNearestFacadeCandidatesBySpotID = [:]
             lastRequestedTerrainAnchorSpotIDs = []
             geospatialWGS84CandidateDiagnostics = "WGS84 Anchor 후보 일시정지 / \(message)"
         }
@@ -1602,6 +1607,7 @@ final class AppState: ObservableObject {
                 for: spotID,
                 reason: "WGS84 Anchor 숨김 / 생성 \(Int(geospatial3DCreateRadiusMeters))m, 삭제 \(Int(geospatial3DDeleteRadiusMeters))m 기준 밖"
             )
+            fixedNearestFacadeCandidatesBySpotID[spotID] = nil
         }
 
         if requestedSpotIDs.isEmpty {
@@ -1609,6 +1615,7 @@ final class AppState: ObservableObject {
                 geospatialSessionManager.clearAllGeospatialDebugAnchors(reason: "3D 표시 범위 안의 WGS84 Anchor 후보가 없습니다.")
             }
             activeGeospatial3DSpotIDs = []
+            fixedNearestFacadeCandidatesBySpotID = [:]
             lastRequestedTerrainAnchorSpotIDs = []
             geospatialWGS84CandidateDiagnostics = "3D 숨김 / \(Int(geospatial3DCreateRadiusMeters))m 안에 Polygon+외벽 후보가 있는 건물이 없습니다."
             return
@@ -1627,8 +1634,11 @@ final class AppState: ObservableObject {
         })
 
         activeGeospatial3DSpotIDs = requestedSpotIDs
+        fixedNearestFacadeCandidatesBySpotID = fixedNearestFacadeCandidatesBySpotID.filter {
+            requestedSpotIDs.contains($0.key)
+        }
         lastRequestedTerrainAnchorSpotIDs = Set(limitedRequests.map(\.spot.id))
-        geospatialWGS84CandidateDiagnostics = "WGS84 Anchor 후보 \(requestedSpotIDs.count)개 / 기본 위치는 각 건물의 가장 가까운 외벽점으로 고정 / " + summaries.joined(separator: " | ")
+        geospatialWGS84CandidateDiagnostics = "WGS84 Anchor 후보 \(requestedSpotIDs.count)개 / 기존 anchor가 있는 건물은 최초 안정 외벽점을 유지 / " + summaries.joined(separator: " | ")
     }
 
     private func requestGeospatialTerrainAnchorIfPossible(
@@ -1716,13 +1726,24 @@ final class AppState: ObservableObject {
         labelHeightMeters: Double,
         origin: LocationSnapshot
     ) -> GeospatialWGS84AnchorCandidate? {
+        guard let polygon = buildingPolygonsBySpotID[spot.id] else {
+            geospatialWGS84CandidateDiagnostics = "\(spot.name) WGS84 후보 폐기 / Polygon이 없어 boundary 검증을 할 수 없습니다."
+            return nil
+        }
+
         let deviceHeightAssumptionMeters = 1.5
         let relativeLabelHeightFromCameraGround = labelHeightMeters - deviceHeightAssumptionMeters
         let displayAnchorCoordinate = closeRangeDisplayAnchorCoordinate(
             spot: spot,
+            polygon: polygon,
             facadeCandidate: facadeCandidate,
             origin: origin
         )
+        guard polygonAllowsDisplayCoordinate(displayAnchorCoordinate, polygon: polygon) else {
+            geospatialWGS84CandidateDiagnostics = "\(spot.name) WGS84 후보 폐기 / 최종 좌표가 Polygon boundary 허용 범위 밖입니다."
+            return nil
+        }
+
         let displayAnchorLabel = displayAnchorCoordinate.isApproximatelyEqual(to: facadeCandidate.anchorCoordinate)
             ? "\(facadeCandidate.selectionReason) WGS84 기준점"
             : "\(facadeCandidate.selectionReason) WGS84 기준점 / 근거리 외벽 안쪽 보정"
@@ -1750,6 +1771,7 @@ final class AppState: ObservableObject {
 
     private func closeRangeDisplayAnchorCoordinate(
         spot: TourismSpot,
+        polygon: BuildingPolygon,
         facadeCandidate: BuildingFacadeCandidate,
         origin: LocationSnapshot
     ) -> CLLocationCoordinate2D {
@@ -1767,11 +1789,16 @@ final class AppState: ObservableObject {
         }
 
         let inwardOffsetMeters = min(0.45, facadeCandidate.distanceFromUserMeters * 0.18)
-        return LocalENUProjector.coordinate(
+        let adjustedCoordinate = LocalENUProjector.coordinate(
             eastMeters: anchorENU.eastMeters + (directionEast / directionLength) * inwardOffsetMeters,
             northMeters: anchorENU.northMeters + (directionNorth / directionLength) * inwardOffsetMeters,
             from: origin
         )
+        guard polygonAllowsDisplayCoordinate(adjustedCoordinate, polygon: polygon) else {
+            return facadeCandidate.anchorCoordinate
+        }
+
+        return adjustedCoordinate
     }
 
     private func labelHeightDecision(
@@ -1882,6 +1909,23 @@ final class AppState: ObservableObject {
         from origin: LocationSnapshot
     ) -> BuildingFacadeCandidate? {
         let segments = polygon.rings.flatMap { facadeSegments(for: $0, from: origin) }
+
+        if activeGeospatial3DSpotIDs.contains(spot.id),
+           let fixedCandidate = fixedNearestFacadeCandidatesBySpotID[spot.id],
+           let currentSegment = segments.first(where: { $0.segmentKey == fixedCandidate.segmentKey }),
+           polygonAllowsDisplayCoordinate(fixedCandidate.anchorCoordinate, polygon: polygon) {
+            let anchorENU = LocalENUProjector.project(fixedCandidate.anchorCoordinate, from: origin)
+            return currentSegment
+                .withAnchor(
+                    coordinate: fixedCandidate.anchorCoordinate,
+                    enu: anchorENU,
+                    rayDistanceMeters: anchorENU.groundDistanceMeters,
+                    rayForwardDistanceMeters: anchorENU.groundDistanceMeters,
+                    selectionReason: "고정된 최초 안정 외벽점"
+                )
+                .withStabilizationNote("기존 3D anchor 유지: 내 위치 이동만으로 외벽점 갱신 안 함")
+        }
+
         guard let nearestSegment = segments.min(by: { $0.distanceFromUserMeters < $1.distanceFromUserMeters }) else {
             return nil
         }
@@ -1896,7 +1940,7 @@ final class AppState: ObservableObject {
             ratio: closestPoint.segmentRatio
         )
 
-        return nearestSegment
+        let candidate = nearestSegment
             .withAnchor(
                 coordinate: anchorCoordinate,
                 enu: closestPoint.anchorENU,
@@ -1905,6 +1949,8 @@ final class AppState: ObservableObject {
                 selectionReason: "내 위치 기준 가장 가까운 외벽점"
             )
             .withStabilizationNote("카메라 방향과 무관한 선생성 기본점")
+        fixedNearestFacadeCandidatesBySpotID[spot.id] = candidate
+        return candidate
     }
 
     private func stabilizedFacadeCandidate(
@@ -2230,6 +2276,138 @@ final class AppState: ObservableObject {
         let closestEast = startENU.eastMeters + clampedRatio * segmentEast
         let closestNorth = startENU.northMeters + clampedRatio * segmentNorth
         return hypot(closestEast, closestNorth)
+    }
+
+    private func polygonAllowsDisplayCoordinate(
+        _ coordinate: CLLocationCoordinate2D,
+        polygon: BuildingPolygon
+    ) -> Bool {
+        if polygonContains(coordinate, polygon: polygon) {
+            return true
+        }
+
+        return polygon.rings
+            .map { distanceFromCoordinate(coordinate, toRingBoundary: $0) }
+            .min() ?? .greatestFiniteMagnitude <= polygonBoundaryToleranceMeters
+    }
+
+    private func polygonContains(
+        _ coordinate: CLLocationCoordinate2D,
+        polygon: BuildingPolygon
+    ) -> Bool {
+        polygon.rings.contains { ring in
+            ringContains(coordinate, ring: ring)
+        }
+    }
+
+    private func ringContains(
+        _ coordinate: CLLocationCoordinate2D,
+        ring: [CLLocationCoordinate2D]
+    ) -> Bool {
+        guard ring.count >= 3 else {
+            return false
+        }
+
+        let pointX = coordinate.longitude
+        let pointY = coordinate.latitude
+        var isInside = false
+        var previousIndex = ring.count - 1
+
+        for currentIndex in ring.indices {
+            let current = ring[currentIndex]
+            let previous = ring[previousIndex]
+
+            if coordinateIsOnSegment(
+                coordinate,
+                start: previous,
+                end: current
+            ) {
+                return true
+            }
+
+            let intersects = (current.latitude > pointY) != (previous.latitude > pointY)
+                && pointX < (previous.longitude - current.longitude) * (pointY - current.latitude) / (previous.latitude - current.latitude) + current.longitude
+            if intersects {
+                isInside.toggle()
+            }
+
+            previousIndex = currentIndex
+        }
+
+        return isInside
+    }
+
+    private func distanceFromCoordinate(
+        _ coordinate: CLLocationCoordinate2D,
+        toRingBoundary ring: [CLLocationCoordinate2D]
+    ) -> CLLocationDistance {
+        guard ring.count >= 2 else {
+            return .greatestFiniteMagnitude
+        }
+
+        var minimumDistance = CLLocationDistance.greatestFiniteMagnitude
+        for index in 1..<ring.count {
+            minimumDistance = min(
+                minimumDistance,
+                distanceFromCoordinate(
+                    coordinate,
+                    toSegmentStart: ring[index - 1],
+                    end: ring[index]
+                )
+            )
+        }
+        return minimumDistance
+    }
+
+    private func distanceFromCoordinate(
+        _ coordinate: CLLocationCoordinate2D,
+        toSegmentStart start: CLLocationCoordinate2D,
+        end: CLLocationCoordinate2D
+    ) -> CLLocationDistance {
+        let metersPerLatitudeDegree = 111_320.0
+        let metersPerLongitudeDegree = cos(coordinate.latitude * .pi / 180) * metersPerLatitudeDegree
+
+        let pointX = coordinate.longitude * metersPerLongitudeDegree
+        let pointY = coordinate.latitude * metersPerLatitudeDegree
+        let startX = start.longitude * metersPerLongitudeDegree
+        let startY = start.latitude * metersPerLatitudeDegree
+        let endX = end.longitude * metersPerLongitudeDegree
+        let endY = end.latitude * metersPerLatitudeDegree
+
+        let segmentX = endX - startX
+        let segmentY = endY - startY
+        let segmentLengthSquared = segmentX * segmentX + segmentY * segmentY
+        guard segmentLengthSquared > 0 else {
+            return hypot(pointX - startX, pointY - startY)
+        }
+
+        let rawProjection = ((pointX - startX) * segmentX + (pointY - startY) * segmentY) / segmentLengthSquared
+        let projection = min(1, max(0, rawProjection))
+        let projectedX = startX + projection * segmentX
+        let projectedY = startY + projection * segmentY
+        return hypot(pointX - projectedX, pointY - projectedY)
+    }
+
+    private func coordinateIsOnSegment(
+        _ coordinate: CLLocationCoordinate2D,
+        start: CLLocationCoordinate2D,
+        end: CLLocationCoordinate2D
+    ) -> Bool {
+        let epsilon = 0.000000001
+        let crossProduct = (coordinate.latitude - start.latitude) * (end.longitude - start.longitude)
+            - (coordinate.longitude - start.longitude) * (end.latitude - start.latitude)
+        guard abs(crossProduct) <= epsilon else {
+            return false
+        }
+
+        let minLongitude = min(start.longitude, end.longitude) - epsilon
+        let maxLongitude = max(start.longitude, end.longitude) + epsilon
+        let minLatitude = min(start.latitude, end.latitude) - epsilon
+        let maxLatitude = max(start.latitude, end.latitude) + epsilon
+        return coordinate.longitude >= minLongitude
+            && coordinate.longitude <= maxLongitude
+            && coordinate.latitude >= minLatitude
+            && coordinate.latitude <= maxLatitude
     }
 
     private func updateSpatialAlignmentDiagnostics(for candidate: CameraDirectionCandidate) {
