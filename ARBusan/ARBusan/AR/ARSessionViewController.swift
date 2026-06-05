@@ -10,9 +10,21 @@ final class ARSessionViewController: UIViewController {
         let labelEntity: Entity
     }
 
+    private struct RouteArrowRenderNode {
+        let anchorEntity: AnchorEntity
+        let arrowEntities: [Entity]
+    }
+
     private var arView: ARView!
     private let geospatialSessionManager: GeospatialSessionManager
     private var geospatialDebugNodesByID: [UUID: GeospatialDebugRenderNode] = [:]
+    private var routeArrowNode: RouteArrowRenderNode?
+    private var latestRouteArrowPath: RouteArrowPathSnapshot?
+    private var detectedGroundY: Float?
+    private var lastGroundRaycastTimestamp: TimeInterval = 0
+    private let groundRaycastInterval: TimeInterval = 1.0
+    private let markerScreenScalePerMeter: Float = 0.085
+    private let labelScreenScalePerMeter: Float = 0.075
     private var selectedGeospatialDebugAnchorID: UUID?
     private var shows3DGeospatialDebugMarker = true
     private let ocrRecognizer = OCRRecognizer()
@@ -29,6 +41,7 @@ final class ARSessionViewController: UIViewController {
     var onCameraHeadingUpdated: ((Double) -> Void)?
     var onCameraPoseUpdated: ((CameraPoseSnapshot) -> Void)?
     var onCameraProjectionUpdated: ((CameraProjectionSnapshot) -> Void)?
+    var onRouteArrowRenderStatusUpdated: ((String) -> Void)?
 
     init(geospatialSessionManager: GeospatialSessionManager) {
         self.geospatialSessionManager = geospatialSessionManager
@@ -69,6 +82,7 @@ final class ARSessionViewController: UIViewController {
 
         let configuration = ARWorldTrackingConfiguration()
         configuration.worldAlignment = .gravityAndHeading
+        configuration.planeDetection = [.horizontal]
 
         arView.session.run(configuration)
     }
@@ -78,6 +92,81 @@ final class ARSessionViewController: UIViewController {
         geospatialDebugNodesByID.values.forEach {
             $0.anchorEntity.isEnabled = isVisible
         }
+    }
+
+    func setRouteArrowPath(_ path: RouteArrowPathSnapshot?) {
+        latestRouteArrowPath = path
+        applyRouteArrowPath(path)
+    }
+
+    private func applyRouteArrowPath(_ path: RouteArrowPathSnapshot?) {
+        guard let path, !path.arrows.isEmpty else {
+            if let routeArrowNode {
+                arView.scene.removeAnchor(routeArrowNode.anchorEntity)
+                self.routeArrowNode = nil
+                onRouteArrowRenderStatusUpdated?("RealityKit 화살표 제거 / routeArrowPath nil 또는 0개")
+            } else {
+                onRouteArrowRenderStatusUpdated?("RealityKit 화살표 없음 / routeArrowPath nil 또는 0개")
+            }
+            return
+        }
+
+        if let routeArrowNode,
+           routeArrowNode.arrowEntities.count == path.arrows.count {
+            for (arrow, entity) in zip(path.arrows, routeArrowNode.arrowEntities) {
+                entity.position = routeArrowPosition(from: arrow)
+                entity.orientation = simd_quatf(angle: arrow.yawRadians, axis: SIMD3<Float>(0, 1, 0))
+            }
+            let groundText = detectedGroundY.map { "groundY \(String(format: "%.2f", $0))" } ?? "groundY 미감지"
+            onRouteArrowRenderStatusUpdated?("\(path.spotName) RealityKit 화살표 업데이트 / \(path.arrows.count)개 / \(groundText)")
+            return
+        }
+
+        if let routeArrowNode {
+            arView.scene.removeAnchor(routeArrowNode.anchorEntity)
+        }
+
+        let anchor = AnchorEntity(world: matrix_identity_float4x4)
+        let arrows = path.arrows.map { snapshot in
+            let arrow = makeRouteArrowEntity()
+            arrow.position = routeArrowPosition(from: snapshot)
+            arrow.orientation = simd_quatf(angle: snapshot.yawRadians, axis: SIMD3<Float>(0, 1, 0))
+            anchor.addChild(arrow)
+            return arrow
+        }
+        routeArrowNode = RouteArrowRenderNode(anchorEntity: anchor, arrowEntities: arrows)
+        arView.scene.addAnchor(anchor)
+        let groundText = detectedGroundY.map { "groundY \(String(format: "%.2f", $0))" } ?? "groundY 미감지"
+        onRouteArrowRenderStatusUpdated?("\(path.spotName) RealityKit 화살표 생성 / \(arrows.count)개 / \(groundText)")
+    }
+
+    private func routeArrowPosition(from snapshot: RouteArrowSnapshot) -> SIMD3<Float> {
+        var position = snapshot.position
+        if let detectedGroundY {
+            position.y = detectedGroundY + 0.035
+        }
+        return position
+    }
+
+    private func makeRouteArrowEntity() -> Entity {
+        let root = Entity()
+        let material = SimpleMaterial(color: .systemCyan.withAlphaComponent(0.86), roughness: 0.35, isMetallic: false)
+
+        let shaft = ModelEntity(
+            mesh: .generateBox(size: SIMD3<Float>(0.14, 0.035, 0.55)),
+            materials: [material]
+        )
+        shaft.position = SIMD3<Float>(0, 0, 0.16)
+
+        let head = ModelEntity(
+            mesh: .generateBox(size: SIMD3<Float>(0.34, 0.04, 0.24)),
+            materials: [material]
+        )
+        head.position = SIMD3<Float>(0, 0, -0.22)
+
+        root.addChild(shaft)
+        root.addChild(head)
+        return root
     }
 
     private func updateGeospatialDebugAnchors(_ snapshots: [GeospatialDebugAnchorSnapshot]) {
@@ -135,42 +224,48 @@ final class ARSessionViewController: UIViewController {
     }
 
     private func makeGeospatialDebugMarker(kind: String) -> ModelEntity {
-        let mesh = MeshResource.generateSphere(radius: 0.55)
         let color: UIColor = kind == "Terrain" ? .systemGreen : .systemPink
         let material = SimpleMaterial(color: color, roughness: 0.1, isMetallic: false)
-        let marker = ModelEntity(mesh: mesh, materials: [material])
+        let marker = ModelEntity(mesh: .generateSphere(radius: 0.34), materials: [material])
+        marker.position = SIMD3<Float>(0, 0.28, 0)
+
+        let stem = ModelEntity(
+            mesh: .generateBox(size: SIMD3<Float>(0.13, 0.52, 0.13)),
+            materials: [material]
+        )
+        stem.position = SIMD3<Float>(0, -0.28, 0)
+        marker.addChild(stem)
+
+        let tip = ModelEntity(mesh: .generateSphere(radius: 0.13), materials: [material])
+        tip.position = SIMD3<Float>(0, -0.58, 0)
+        marker.addChild(tip)
         marker.generateCollisionShapes(recursive: false)
         return marker
     }
 
     private func makeGeospatialDebugLabel(text: String) -> Entity {
         let root = Entity()
-        root.position = SIMD3<Float>(-1.15, 1.1, 0)
-
-        let backgroundMesh = MeshResource.generatePlane(width: 2.9, height: 0.92)
-        let backgroundMaterial = SimpleMaterial(
-            color: UIColor.black.withAlphaComponent(0.78),
-            roughness: 0.2,
-            isMetallic: false
-        )
-        let background = ModelEntity(mesh: backgroundMesh, materials: [backgroundMaterial])
-        background.position = SIMD3<Float>(1.03, 0.28, -0.02)
-        background.generateCollisionShapes(recursive: false)
+        root.position = SIMD3<Float>(-1.45, 1.18, 0)
 
         let textMesh = MeshResource.generateText(
             text,
-            extrusionDepth: 0.018,
-            font: .boldSystemFont(ofSize: 0.48),
-            containerFrame: CGRect(x: 0, y: 0, width: 2.65, height: 0.68),
+            extrusionDepth: 0.022,
+            font: .boldSystemFont(ofSize: 0.68),
+            containerFrame: CGRect(x: 0, y: 0, width: 3.4, height: 0.86),
             alignment: .center,
             lineBreakMode: .byTruncatingTail
         )
+        let shadowMaterial = SimpleMaterial(color: UIColor.black.withAlphaComponent(0.84), roughness: 0.18, isMetallic: false)
+        let shadowEntity = ModelEntity(mesh: textMesh, materials: [shadowMaterial])
+        shadowEntity.position = SIMD3<Float>(0.045, -0.045, 0)
+        shadowEntity.generateCollisionShapes(recursive: false)
+
         let textMaterial = SimpleMaterial(color: .white, roughness: 0.1, isMetallic: false)
         let textEntity = ModelEntity(mesh: textMesh, materials: [textMaterial])
         textEntity.position = SIMD3<Float>(0, 0, 0.02)
         textEntity.generateCollisionShapes(recursive: false)
 
-        root.addChild(background)
+        root.addChild(shadowEntity)
         root.addChild(textEntity)
         return root
     }
@@ -218,15 +313,48 @@ final class ARSessionViewController: UIViewController {
             let contentPosition = node.contentEntity.position(relativeTo: nil)
             let distance = simd_distance(cameraPosition, contentPosition)
             let isSelected = selectedGeospatialDebugAnchorID == id
-            node.markerEntity.scale = SIMD3<Float>(
-                repeating: markerVisualScale(forDistance: distance, isSelected: isSelected)
-            )
-            node.labelEntity.scale = SIMD3<Float>(
-                repeating: labelVisualScale(forDistance: distance, isSelected: isSelected)
-            )
+            let markerScale = markerVisualScale(forDistance: distance, isSelected: isSelected)
+            let labelScale = labelVisualScale(forDistance: distance, isSelected: isSelected)
+            node.markerEntity.scale = SIMD3<Float>(repeating: markerScale)
+            node.labelEntity.scale = SIMD3<Float>(repeating: labelScale)
+            node.labelEntity.position = labelPosition(forScale: labelScale)
             node.labelEntity.look(at: cameraPosition, from: node.labelEntity.position(relativeTo: nil), relativeTo: nil)
             node.labelEntity.orientation *= simd_quatf(angle: .pi, axis: SIMD3<Float>(0, 1, 0))
         }
+    }
+
+    private func updateRouteArrowGroundYIfNeeded(from frame: ARFrame) {
+        guard latestRouteArrowPath != nil,
+              frame.timestamp - lastGroundRaycastTimestamp >= groundRaycastInterval else {
+            return
+        }
+
+        lastGroundRaycastTimestamp = frame.timestamp
+        let raycastPoint = CGPoint(x: arView.bounds.midX, y: arView.bounds.maxY * 0.72)
+        let results = arView.raycast(
+            from: raycastPoint,
+            allowing: .estimatedPlane,
+            alignment: .horizontal
+        )
+
+        guard let result = results.first else {
+            if let latestRouteArrowPath {
+                onRouteArrowRenderStatusUpdated?("\(latestRouteArrowPath.spotName) RealityKit 화살표 유지 / 바닥 raycast 미감지 / 기존 높이 사용")
+            }
+            return
+        }
+
+        let nextGroundY = result.worldTransform.columns.3.y
+        if let detectedGroundY,
+           abs(detectedGroundY - nextGroundY) < 0.05 {
+            return
+        }
+
+        detectedGroundY = nextGroundY
+        if let latestRouteArrowPath {
+            onRouteArrowRenderStatusUpdated?("\(latestRouteArrowPath.spotName) 바닥 raycast 감지 / groundY \(String(format: "%.2f", nextGroundY)) / 화살표 높이 보정")
+        }
+        applyRouteArrowPath(latestRouteArrowPath)
     }
 
     private func smoothedContentOffset(
@@ -297,33 +425,25 @@ final class ARSessionViewController: UIViewController {
     }
 
     private func markerVisualScale(forDistance distance: Float, isSelected: Bool) -> Float {
-        let baseScale: Float = switch distance {
-        case ..<5:
-            0.42
-        case ..<15:
-            0.85
-        case ..<30:
-            1.35
-        default:
-            1.6
-        }
-        let selectedScale: Float = isSelected ? 1.2 : 1.0
-        return min(baseScale * selectedScale, 2.0)
+        let baseScale = distance * markerScreenScalePerMeter
+        let selectedScale: Float = isSelected ? 1.25 : 1.0
+        return (baseScale * selectedScale).clamped(to: 0.42...8.0)
     }
 
     private func labelVisualScale(forDistance distance: Float, isSelected: Bool) -> Float {
-        let baseScale: Float = switch distance {
-        case ..<5:
-            0.9
-        case ..<15:
-            1.1
-        case ..<30:
-            1.5
-        default:
-            1.85
-        }
-        let selectedScale: Float = isSelected ? 1.45 : 1.0
-        return min(baseScale * selectedScale, 2.6)
+        let baseScale = distance * labelScreenScalePerMeter
+        let selectedScale: Float = isSelected ? 1.35 : 1.0
+        return (baseScale * selectedScale).clamped(to: 0.5...7.5)
+    }
+
+    private func labelPosition(forScale scale: Float) -> SIMD3<Float> {
+        SIMD3<Float>(-1.45 * scale, 1.18 * scale, 0)
+    }
+}
+
+private extension Float {
+    func clamped(to range: ClosedRange<Float>) -> Float {
+        min(max(self, range.lowerBound), range.upperBound)
     }
 }
 
@@ -331,6 +451,7 @@ extension ARSessionViewController: ARSessionDelegate {
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
         geospatialSessionManager.update(with: frame)
         updateGeospatialDebugVisualsForCamera()
+        updateRouteArrowGroundYIfNeeded(from: frame)
         publishCameraHeadingIfNeeded(from: frame)
         publishCameraProjectionIfNeeded(from: frame)
         if shouldRunLiveOCR {

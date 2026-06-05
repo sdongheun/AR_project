@@ -3,72 +3,149 @@ import SwiftUI
 struct MVPRecognitionControlView: View {
     @EnvironmentObject private var appState: AppState
     @State private var showsIndoorDebugSpotList = false
+    @State private var showsNavigationDestinationList = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("테스트 제어")
                 .font(.subheadline.weight(.semibold))
 
-            RecognitionSignalSection(
-                title: "해운대 TourAPI 실내 디버그",
-                caption: "실제 GPS/VPS 대신 해운대 TourAPI POI 주변의 가상 위치와 heading을 주입해 계산 로직을 검증합니다."
-            ) {
-                Toggle(
-                    "실내 디버그 모드",
-                    isOn: Binding(
-                        get: { appState.isIndoorDebugModeEnabled },
-                        set: { appState.setIndoorDebugModeEnabled($0) }
+            if FeatureFlags.enableIndoorDebugControls {
+                RecognitionSignalSection(
+                    title: "해운대 TourAPI 실내 디버그",
+                    caption: "실제 GPS/VPS 대신 해운대 TourAPI POI 주변의 가상 위치와 heading을 주입해 계산 로직을 검증합니다."
+                ) {
+                    Toggle(
+                        "실내 디버그 모드",
+                        isOn: Binding(
+                            get: { appState.isIndoorDebugModeEnabled },
+                            set: { appState.setIndoorDebugModeEnabled($0) }
+                        )
                     )
-                )
-                .font(.caption)
+                    .font(.caption)
 
-                Button("해운대 TourAPI 후보 불러오기") {
-                    Task {
-                        await appState.loadHaeundaeTourAPIDebugSpots()
-                    }
-                }
-                .buttonStyle(.bordered)
-
-                if !appState.spots.isEmpty {
-                    IndoorDebugSpotSelector(
-                        spots: Array(appState.spots.prefix(120)),
-                        selectedSpotID: appState.indoorDebugSelectedSpotID ?? appState.spots.first?.id,
-                        isExpanded: $showsIndoorDebugSpotList
-                    ) { spot in
-                        appState.selectIndoorDebugSpot(id: spot.id)
-                    }
-                }
-
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 8)], spacing: 8) {
-                    ForEach(IndoorDebugScenario.allCases) { scenario in
-                        Button(scenario.title) {
-                            appState.applyIndoorDebugScenario(scenario)
+                    Button("해운대 TourAPI 후보 불러오기") {
+                        Task {
+                            await appState.loadHaeundaeTourAPIDebugSpots()
                         }
-                        .buttonStyle(.bordered)
-                        .tint(appState.indoorDebugScenario == scenario ? .blue : .secondary)
-                        .font(.caption)
                     }
-                }
+                    .buttonStyle(.bordered)
 
-                Text(appState.indoorDebugStatus)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(nil)
-                    .fixedSize(horizontal: false, vertical: true)
+                    if !appState.spots.isEmpty {
+                        IndoorDebugSpotSelector(
+                            title: "대상 POI",
+                            spots: Array(appState.spots.prefix(120)),
+                            selectedSpotID: appState.indoorDebugSelectedSpotID ?? appState.spots.first?.id,
+                            isExpanded: $showsIndoorDebugSpotList
+                        ) { spot in
+                            appState.selectIndoorDebugSpot(id: spot.id)
+                        }
+                    }
+
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 8)], spacing: 8) {
+                        ForEach(IndoorDebugScenario.allCases) { scenario in
+                            Button(scenario.title) {
+                                appState.applyIndoorDebugScenario(scenario)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(appState.indoorDebugScenario == scenario ? .blue : .secondary)
+                            .font(.caption)
+                        }
+                    }
+
+                    Text(appState.indoorDebugStatus)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
-            RecognitionSignalSection(
-                title: "디버그 표시",
-                caption: "기본 화면은 현장 테스트용으로 축약합니다. 필요할 때만 상세 로그를 켭니다."
-            ) {
-                Toggle("matrix 마커 표시", isOn: $appState.showsMatrixDebugMarker)
+            if FeatureFlags.enableNavigationRouteControls {
+                RecognitionSignalSection(
+                    title: "길찾기",
+                    caption: "목적지를 선택하면 TMAP 보행자 경로와 도착 좌표를 기준으로 AR 안내를 준비합니다."
+                ) {
+                    Toggle(
+                        "길찾기 모드",
+                        isOn: Binding(
+                            get: { appState.isNavigationModeEnabled },
+                            set: { appState.setNavigationModeEnabled($0) }
+                        )
+                    )
                     .font(.caption)
-                Toggle("핑크/주황 후보 마커 표시", isOn: $appState.showsOnScreenCandidateDebugMarkers)
-                    .font(.caption)
-                Toggle("3D 지리 앵커 마커 표시", isOn: $appState.shows3DGeospatialDebugMarker)
-                    .font(.caption)
-                Toggle("전체 로그 보기", isOn: $appState.showsFullDebugLogs)
-                    .font(.caption)
+
+                    if appState.isNavigationModeEnabled {
+                        IndoorDebugSpotSelector(
+                            title: "목적지",
+                            spots: appState.spots,
+                            selectedSpotID: appState.navigationDestinationSpotID,
+                            isExpanded: $showsNavigationDestinationList
+                        ) { spot in
+                            appState.selectNavigationDestination(spot)
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(appState.navigationGuidanceTitle)
+                                .font(.headline.weight(.semibold))
+                            Text(appState.navigationGuidanceDetail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(nil)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.blue.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+
+                        Text(appState.routeArrowDiagnostics)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(nil)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        if appState.showsFullDebugLogs {
+                            Text(appState.routeArrowComputationDiagnostics)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(nil)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            Text(appState.routeArrowRenderDiagnostics)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(nil)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
+
+            if FeatureFlags.enableLegacyMatrixDebugOverlay ||
+                FeatureFlags.enableLegacyOnScreenCandidateDebugMarkers ||
+                FeatureFlags.enableLegacyGeospatial3DMarkers ||
+                FeatureFlags.enableLegacyFullDebugLogs {
+                RecognitionSignalSection(
+                    title: "디버그 표시",
+                    caption: "기본 화면은 현장 테스트용으로 축약합니다. 필요할 때만 상세 로그를 켭니다."
+                ) {
+                    if FeatureFlags.enableLegacyMatrixDebugOverlay {
+                        Toggle("matrix 마커 표시", isOn: $appState.showsMatrixDebugMarker)
+                            .font(.caption)
+                    }
+                    if FeatureFlags.enableLegacyOnScreenCandidateDebugMarkers {
+                        Toggle("핑크/주황 후보 마커 표시", isOn: $appState.showsOnScreenCandidateDebugMarkers)
+                            .font(.caption)
+                    }
+                    if FeatureFlags.enableLegacyGeospatial3DMarkers {
+                        Toggle("3D 지리 앵커 마커 표시", isOn: $appState.shows3DGeospatialDebugMarker)
+                            .font(.caption)
+                    }
+                    if FeatureFlags.enableLegacyFullDebugLogs {
+                        Toggle("전체 로그 보기", isOn: $appState.showsFullDebugLogs)
+                            .font(.caption)
+                    }
+                }
             }
 
             if appState.showsFullDebugLogs {
@@ -118,31 +195,33 @@ struct MVPRecognitionControlView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                RecognitionSignalSection(
-                    title: "3. 브이월드 Polygon",
-                    caption: "POI 주변 Polygon 조회 상태와 선택 근거를 확인합니다."
-                ) {
-                    DebugRowsBlock(rows: appState.dataDebugRows)
-                    DetailedLogText(title: "정렬", text: appState.spatialAlignmentDiagnostics)
+                if FeatureFlags.enableVWorldPolygonDebugUI {
+                    RecognitionSignalSection(
+                        title: "3. 브이월드 Polygon",
+                        caption: "POI 주변 Polygon 조회 상태와 선택 근거를 확인합니다."
+                    ) {
+                        DebugRowsBlock(rows: appState.dataDebugRows)
+                        DetailedLogText(title: "정렬", text: appState.spatialAlignmentDiagnostics)
 
-                    if let startedAt = appState.polygonLookupStartedAt {
-                        Text("조회 시작: \(startedAt.formatted(date: .omitted, time: .standard))")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
+                        if let startedAt = appState.polygonLookupStartedAt {
+                            Text("조회 시작: \(startedAt.formatted(date: .omitted, time: .standard))")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
 
-                    if let finishedAt = appState.polygonLookupFinishedAt {
-                        Text("조회 완료: \(finishedAt.formatted(date: .omitted, time: .standard))")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
+                        if let finishedAt = appState.polygonLookupFinishedAt {
+                            Text("조회 완료: \(finishedAt.formatted(date: .omitted, time: .standard))")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
 
-                    if !appState.polygonLookupLogs.isEmpty {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("브이월드 응답 로그")
-                                .font(.caption2.weight(.semibold))
-                            ForEach(Array(appState.polygonLookupLogs.enumerated()), id: \.offset) { _, log in
-                                PolygonLogLineView(log: log)
+                        if !appState.polygonLookupLogs.isEmpty {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("브이월드 응답 로그")
+                                    .font(.caption2.weight(.semibold))
+                                ForEach(Array(appState.polygonLookupLogs.enumerated()), id: \.offset) { _, log in
+                                    PolygonLogLineView(log: log)
+                                }
                             }
                         }
                     }
@@ -156,17 +235,21 @@ struct MVPRecognitionControlView: View {
                     DetailedLogText(title: "Polygon 화면 투영", text: appState.polygonProjectionDiagnostics)
                     DetailedLogText(title: "Matrix 비교", text: appState.matrixProjectionComparisonDiagnostics)
                     DetailedLogText(title: "2D 라벨", text: appState.arLabelOverlayDiagnostics)
+                    DetailedLogText(title: "길찾기 화살표 계산", text: appState.routeArrowComputationDiagnostics)
+                    DetailedLogText(title: "길찾기 화살표 렌더", text: appState.routeArrowRenderDiagnostics)
                 }
 
-                RecognitionSignalSection(
-                    title: "5. 3D Anchor/라벨",
-                    caption: "외벽 후보점, 라벨 높이, WGS84 Anchor 생성 상태를 확인합니다."
-                ) {
-                    DebugRowsBlock(rows: appState.anchorDebugRows)
-                    DetailedLogText(title: "외벽 후보", text: appState.buildingFacadeAnchorDiagnostics)
-                    DetailedLogText(title: "높이", text: appState.buildingLabelHeightDiagnostics)
-                    DetailedLogText(title: "WGS84 후보", text: appState.geospatialWGS84CandidateDiagnostics)
-                    DetailedLogText(title: "WGS84 앵커", text: appState.geospatialAnchorStateDiagnostics)
+                if FeatureFlags.enableLegacy3DAnchorDebugUI {
+                    RecognitionSignalSection(
+                        title: "5. 3D Anchor/라벨",
+                        caption: "외벽 후보점, 라벨 높이, WGS84 Anchor 생성 상태를 확인합니다."
+                    ) {
+                        DebugRowsBlock(rows: appState.anchorDebugRows)
+                        DetailedLogText(title: "외벽 후보", text: appState.buildingFacadeAnchorDiagnostics)
+                        DetailedLogText(title: "높이", text: appState.buildingLabelHeightDiagnostics)
+                        DetailedLogText(title: "WGS84 후보", text: appState.geospatialWGS84CandidateDiagnostics)
+                        DetailedLogText(title: "WGS84 앵커", text: appState.geospatialAnchorStateDiagnostics)
+                    }
                 }
 
                 RecognitionSignalSection(
@@ -216,6 +299,7 @@ private struct RecognitionSignalSection<Content: View>: View {
 }
 
 private struct IndoorDebugSpotSelector: View {
+    let title: String
     let spots: [TourismSpot]
     let selectedSpotID: TourismSpot.ID?
     @Binding var isExpanded: Bool
@@ -238,7 +322,7 @@ private struct IndoorDebugSpotSelector: View {
             } label: {
                 HStack(spacing: 8) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("대상 POI")
+                        Text(title)
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(.secondary)
                         Text(selectedSpot?.name ?? "선택 없음")

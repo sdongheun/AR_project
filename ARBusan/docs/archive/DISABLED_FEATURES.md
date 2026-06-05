@@ -1,6 +1,6 @@
 # ARBusan 비활성화 기능 정리
 
-현재 목표는 3D 지리 앵커와 라벨 위치 검증이다. 발열과 배터리 부담을 줄이기 위해 아래 기능은 일시적으로 꺼둔다.
+현재 목표는 공모전용 `지도/레이더 + 카메라 AR 방향 안내` MVP다. 발열, 배터리, 가독성, 정합성 문제를 줄이기 위해 아래 기능은 일시적으로 꺼둔다.
 
 ## 비활성화 중
 
@@ -24,9 +24,19 @@
   - 위치: `ARSessionViewController`
   - 현재 상태: `shouldRunLiveOCR = false`로 프레임별 OCR 실행 차단.
 
+- Legacy matrix/Polygon/3D Anchor 디버그 UI
+  - 이유: 새 MVP는 정밀 외벽 부착이 아니라 하단 지도/레이더와 카메라 방향 안내가 기준이다.
+  - 위치: `FeatureFlags`, `MVPRecognitionControlView`, `ARExploreView`
+  - 현재 상태: `FeatureFlags` 기본값으로 실내 디버그, matrix 마커, 후보 마커, 3D 지리 앵커 마커, Polygon 상세 로그를 숨김.
+
+- 기존 3D 지리 앵커 마커 기본 표시
+  - 이유: 실제 공간에 구체/텍스트를 정밀 배치하는 방식은 테스트에서 가독성과 정합성이 불안정했다.
+  - 위치: `FeatureFlags.enableLegacyGeospatial3DMarkers`
+  - 현재 상태: 기본값 `false`. 필요 시 플래그를 켜서 과거 실험을 다시 확인한다.
+
 ## 다시 켤 때 기준
 
 - Scene Semantics: 라벨을 건물 영역에만 붙이는 보조 로직을 다시 검증할 때.
 - Scene reconstruction mesh: 근거리 건물 표면 또는 깊이 기반 보정이 필요할 때.
 - OCR: 간판 기반 자동 후보 선택을 다시 테스트할 때.
-
+- Legacy 3D Anchor/Polygon UI: 새 MVP 구현 이후 정밀 AR 실험을 다시 비교할 때.

@@ -47,6 +47,34 @@ struct OnScreenCandidateMarkerOverlay: Identifiable, Equatable {
     let role: Role
 }
 
+struct RadarMarkerOverlay: Identifiable, Equatable {
+    let id: TourismSpot.ID
+    let shortTitle: String
+    let distanceText: String
+    let normalizedX: Double
+    let normalizedY: Double
+    let isSelected: Bool
+    let isBehind: Bool
+}
+
+struct RouteArrowPathSnapshot: Equatable {
+    let spotID: TourismSpot.ID
+    let spotName: String
+    let arrows: [RouteArrowSnapshot]
+}
+
+struct RouteArrowSnapshot: Identifiable, Equatable {
+    let id: Int
+    let position: SIMD3<Float>
+    let yawRadians: Float
+    let distanceFromOriginMeters: Double
+}
+
+private struct NavigationGuidance {
+    let title: String
+    let detail: String
+}
+
 struct DebugStatusRow: Identifiable, Equatable {
     let title: String
     let value: String
@@ -134,10 +162,20 @@ final class AppState: ObservableObject {
     @Published var matrixProjectionDebugOverlay: MatrixProjectionDebugOverlay?
     @Published var edgeMarkerOverlays: [EdgeMarkerOverlay] = []
     @Published var onScreenCandidateMarkerOverlays: [OnScreenCandidateMarkerOverlay] = []
-    @Published var showsMatrixDebugMarker = true
-    @Published var showsOnScreenCandidateDebugMarkers = true
-    @Published var shows3DGeospatialDebugMarker = true
-    @Published var showsFullDebugLogs = false
+    @Published var radarMarkerOverlays: [RadarMarkerOverlay] = []
+    @Published var radarDiagnostics = "반원형 레이더를 아직 계산하지 않았습니다."
+    @Published var isNavigationModeEnabled = false
+    @Published var navigationDestinationSpotID: TourismSpot.ID?
+    @Published var routeArrowPath: RouteArrowPathSnapshot?
+    @Published var routeArrowDiagnostics = "길찾기 바닥 화살표 경로를 아직 계산하지 않았습니다."
+    @Published var routeArrowComputationDiagnostics = "길찾기 화살표 계산 로그를 아직 만들지 않았습니다."
+    @Published var routeArrowRenderDiagnostics = "길찾기 화살표 렌더 로그를 아직 받지 못했습니다."
+    @Published var navigationGuidanceTitle = "목적지를 선택하세요"
+    @Published var navigationGuidanceDetail = "TMAP 경로를 준비하면 다음 진행 방향을 표시합니다."
+    @Published var showsMatrixDebugMarker = FeatureFlags.enableLegacyMatrixDebugOverlay
+    @Published var showsOnScreenCandidateDebugMarkers = FeatureFlags.enableLegacyOnScreenCandidateDebugMarkers
+    @Published var shows3DGeospatialDebugMarker = FeatureFlags.enableLegacyGeospatial3DMarkers
+    @Published var showsFullDebugLogs = FeatureFlags.enableLegacyFullDebugLogs
     @Published var cameraHeadingDegrees: Double?
     @Published var cameraHeadingSampleCount = 0
     @Published var cameraHeadingLastUpdatedAt: Date?
@@ -185,11 +223,19 @@ final class AppState: ObservableObject {
     private let projectionVerticalFOVDegrees: Double = 45
     private let fovFallbackMaxHeadingDeltaDegrees: Double = 75
     private let maxEdgeMarkerCount = 3
+    private let maxRadarMarkerCount = 12
+    private let radarRadiusMeters: CLLocationDistance = 1_000
     private let distantMarkerThresholdMeters: CLLocationDistance = 1_000
     private let distantMarkerScale = 0.78
     private let geospatial3DCreateRadiusMeters: CLLocationDistance = 120
     private let geospatial3DDeleteRadiusMeters: CLLocationDistance = 140
-    private let maxActiveGeospatial3DAnchorCount = 5
+    private let maxActiveGeospatial3DAnchorCount = 3
+    private let routeArrowLookAheadMeters: CLLocationDistance = 50
+    private let routeArrowSpacingMeters: CLLocationDistance = 5
+    private let routeArrowGroundYOffsetMeters: Float = -1.35
+    private let maxRouteArrowCount = 10
+    private let tmapRouteReuseDistanceMeters: CLLocationDistance = 50
+    private let geospatial3DAnchorRefreshInterval: TimeInterval = 2.0
     private let stableOriginMaxAccuracyMeters: CLLocationAccuracy = 10
     private let stableOriginMaxJumpMeters: CLLocationDistance = 12
     private let stableOriginConfirmationInterval: TimeInterval = 1.2
@@ -204,6 +250,7 @@ final class AppState: ObservableObject {
     private var polygonLookupNotFoundSpotIDs: Set<TourismSpot.ID> = []
     private var tmapRouteTasksBySpotID: [TourismSpot.ID: Task<Void, Never>] = [:]
     private var tmapRouteFailedSpotIDs: Set<TourismSpot.ID> = []
+    private var navigationRouteTask: Task<Void, Never>?
     private var latestSceneSemanticsSnapshot: SceneSemanticsSnapshot?
     private var sceneSemanticsEvidenceBySpotID: [TourismSpot.ID: SceneSemanticsSpotEvidence] = [:]
     private var stableGeospatial3DOrigin: LocationSnapshot?
@@ -211,6 +258,7 @@ final class AppState: ObservableObject {
     private var pendingStableOriginFirstSeenAt: Date?
     private var stableOriginLastAcceptedAt: Date?
     private var stableOriginIsUsableFor3DAnchors = false
+    private var lastGeospatial3DAnchorRefreshAt: Date?
     private var lastRequestedTerrainAnchorSpotIDs: Set<TourismSpot.ID> = []
     private var activeGeospatial3DSpotIDs: Set<TourismSpot.ID> = []
     private var stableFacadeSelectionsBySpotID: [TourismSpot.ID: StableBuildingFacadeSelection] = [:]
@@ -266,6 +314,9 @@ final class AppState: ObservableObject {
                 self?.refreshMatrixProjectionComparisonDiagnostics()
                 self?.refreshEdgeMarkerOverlays()
                 self?.refreshOnScreenCandidateMarkerOverlays()
+                self?.refreshRadarMarkerOverlays()
+                self?.refreshRouteArrowPath()
+                self?.ensureNavigationRouteForDestination()
             }
         }
         self.geospatialSessionManager.onStatusChanged = { [weak self] status in
@@ -372,6 +423,11 @@ final class AppState: ObservableObject {
             activeGeospatial3DSpotIDs = []
             fixedNearestFacadeCandidatesBySpotID = [:]
             lastRequestedTerrainAnchorSpotIDs = []
+            routeArrowPath = nil
+            routeArrowDiagnostics = "실내 디버그 종료로 길찾기 화살표를 초기화했습니다."
+            routeArrowComputationDiagnostics = "실내 디버그 종료로 화살표 계산 로그를 초기화했습니다."
+            radarMarkerOverlays = []
+            radarDiagnostics = "실내 디버그 종료로 반원형 레이더를 초기화했습니다."
             refreshSpatialTrackingConfidence()
         }
     }
@@ -380,6 +436,52 @@ final class AppState: ObservableObject {
         indoorDebugSelectedSpotID = id
         selectedSpot = spots.first(where: { $0.id == id })
         applyIndoorDebugScenario(indoorDebugScenario)
+        refreshRadarMarkerOverlays()
+        refreshRouteArrowPath()
+        ensureNavigationRouteForDestination()
+    }
+
+    func setNavigationModeEnabled(_ isEnabled: Bool) {
+        isNavigationModeEnabled = isEnabled
+
+        if isEnabled {
+            if navigationDestinationSpotID == nil {
+                navigationDestinationSpotID = selectedSpot?.id ?? recognitionResult.labelSpot?.id
+            }
+            routeArrowDiagnostics = navigationDestinationSpotID == nil
+                ? "길찾기 모드 켜짐 / 목적지를 선택하세요."
+                : "길찾기 모드 켜짐 / 목적지 경로를 준비합니다."
+            refreshRadarMarkerOverlays()
+            refreshRouteArrowPath()
+            ensureNavigationRouteForDestination()
+        } else {
+            navigationRouteTask?.cancel()
+            navigationRouteTask = nil
+            routeArrowPath = nil
+            routeArrowDiagnostics = "길찾기 모드 꺼짐 / 목적지를 선택하면 화살표를 표시합니다."
+            routeArrowComputationDiagnostics = "길찾기 모드 꺼짐 / 화살표 계산 안 함"
+            navigationGuidanceTitle = "길찾기 꺼짐"
+            navigationGuidanceDetail = "목적지를 선택하면 TMAP 경로 기준 방향 안내를 표시합니다."
+            refreshRadarMarkerOverlays()
+            refreshGeospatial3DAnchorRequestsIfPossible(force: true)
+        }
+    }
+
+    func selectNavigationDestination(_ spot: TourismSpot) {
+        navigationRouteTask?.cancel()
+        navigationRouteTask = nil
+        isNavigationModeEnabled = true
+        navigationDestinationSpotID = spot.id
+        selectedSpot = spot
+        routeArrowPath = nil
+        routeArrowDiagnostics = "\(spot.name) 길찾기 목적지 선택 / TMAP 경로를 준비합니다."
+        routeArrowComputationDiagnostics = "\(spot.name) 목적지 선택 / 현재 위치 기준 TMAP route 준비"
+        navigationGuidanceTitle = "\(spot.name) 경로 준비 중"
+        navigationGuidanceDetail = "현재 위치에서 목적지까지의 TMAP 보행자 경로를 요청합니다."
+        refreshGeospatial3DAnchorRequestsIfPossible(force: true)
+        refreshRadarMarkerOverlays()
+        refreshRouteArrowPath()
+        ensureNavigationRouteForDestination()
     }
 
     func applyIndoorDebugScenario(_ scenario: IndoorDebugScenario) {
@@ -444,11 +546,15 @@ final class AppState: ObservableObject {
         let targetName = selectedSpot?.name ?? cameraDirectionSpotName ?? "선택 없음"
         let scenarioText = isIndoorDebugModeEnabled ? indoorDebugScenario.title : "해당 없음"
         let distanceText = selectedSpotDistanceText ?? "거리 미계산"
+        let navigationText = isNavigationModeEnabled
+            ? (navigationDestinationSpot?.name ?? "목적지 선택 필요")
+            : "꺼짐"
 
         return [
             DebugStatusRow(title: "모드", value: mode),
             DebugStatusRow(title: "대상", value: targetName),
             DebugStatusRow(title: "시나리오", value: scenarioText),
+            DebugStatusRow(title: "길찾기", value: navigationText),
             DebugStatusRow(title: "거리", value: distanceText),
             DebugStatusRow(title: "인식", value: recognitionSummaryText)
         ]
@@ -511,8 +617,19 @@ final class AppState: ObservableObject {
             DebugStatusRow(title: "2D 라벨", value: labelText),
             DebugStatusRow(title: "edge marker", value: "\(edgeMarkerOverlays.count)개"),
             DebugStatusRow(title: "화면 후보", value: "\(onScreenCandidateMarkerOverlays.count)개"),
+            DebugStatusRow(title: "레이더", value: compactDiagnosticText(radarDiagnostics)),
+            DebugStatusRow(title: "경로 화살표", value: compactDiagnosticText(routeArrowDiagnostics)),
+            DebugStatusRow(title: "화살표 계산", value: compactDiagnosticText(routeArrowComputationDiagnostics)),
+            DebugStatusRow(title: "화살표 렌더", value: compactDiagnosticText(routeArrowRenderDiagnostics)),
             DebugStatusRow(title: "matrix", value: matrixText)
         ]
+    }
+
+    func updateRouteArrowRenderDiagnostics(_ diagnostics: String) {
+        guard routeArrowRenderDiagnostics != diagnostics else {
+            return
+        }
+        routeArrowRenderDiagnostics = diagnostics
     }
 
     var anchorDebugRows: [DebugStatusRow] {
@@ -541,6 +658,14 @@ final class AppState: ObservableObject {
 
         let distanceMeters = latestLocationSnapshot.coordinate.distance(to: spot.center)
         return "\(Int(distanceMeters))m"
+    }
+
+    var navigationDestinationSpot: TourismSpot? {
+        guard let navigationDestinationSpotID else {
+            return nil
+        }
+
+        return spots.first(where: { $0.id == navigationDestinationSpotID })
     }
 
     private var recognitionSummaryText: String {
@@ -661,6 +786,7 @@ final class AppState: ObservableObject {
         refreshMatrixProjectionComparisonDiagnostics()
         refreshEdgeMarkerOverlays()
         refreshOnScreenCandidateMarkerOverlays()
+        refreshRadarMarkerOverlays()
         refreshARLabelOverlay()
         runRecognition()
     }
@@ -710,6 +836,7 @@ final class AppState: ObservableObject {
         refreshARLabelOverlay()
         refreshEdgeMarkerOverlays()
         refreshOnScreenCandidateMarkerOverlays()
+        refreshRadarMarkerOverlays()
     }
 
     func runMockRecognition() {
@@ -733,6 +860,8 @@ final class AppState: ObservableObject {
             refreshEdgeMarkerOverlays()
         }
         refreshARLabelOverlay()
+        refreshRadarMarkerOverlays()
+        refreshRouteArrowPath()
     }
 
     func selectCandidate(_ spot: TourismSpot) {
@@ -744,6 +873,8 @@ final class AppState: ObservableObject {
         )
         refreshEdgeMarkerOverlays()
         refreshARLabelOverlay()
+        refreshRadarMarkerOverlays()
+        refreshRouteArrowPath()
     }
 
     private func updateCameraDirectionCandidate() {
@@ -966,6 +1097,10 @@ final class AppState: ObservableObject {
         tmapRouteTasksBySpotID.values.forEach { $0.cancel() }
         tmapRouteTasksBySpotID = [:]
         tmapRouteFailedSpotIDs = []
+        navigationRouteTask?.cancel()
+        navigationRouteTask = nil
+        navigationDestinationSpotID = nil
+        isNavigationModeEnabled = false
         tmapArrivalRoutesBySpotID = [:]
         tmapRouteStatus = "후보 초기화로 TMAP 도착 좌표 캐시도 초기화했습니다."
         resolvedBuildingHeightsBySpotID = [:]
@@ -976,10 +1111,15 @@ final class AppState: ObservableObject {
         pendingStableOriginFirstSeenAt = nil
         stableOriginLastAcceptedAt = nil
         stableOriginIsUsableFor3DAnchors = false
+        lastGeospatial3DAnchorRefreshAt = nil
         stableOriginDiagnostics = "후보 초기화로 3D stable origin도 초기화했습니다."
         lastRequestedTerrainAnchorSpotIDs = []
-        activeGeospatial3DSpotIDs = []
-        geospatialSessionManager.clearAllGeospatialDebugAnchors(reason: "후보 초기화로 WGS84 Anchor를 모두 제거했습니다.")
+            activeGeospatial3DSpotIDs = []
+            routeArrowPath = nil
+            routeArrowDiagnostics = "후보 초기화로 길찾기 화살표를 초기화했습니다."
+            routeArrowComputationDiagnostics = "후보 초기화로 화살표 계산 로그를 초기화했습니다."
+            routeArrowRenderDiagnostics = "후보 초기화로 화살표 렌더 로그를 초기화했습니다."
+            geospatialSessionManager.clearAllGeospatialDebugAnchors(reason: "후보 초기화로 WGS84 Anchor를 모두 제거했습니다.")
         stableFacadeSelectionsBySpotID = [:]
         fixedNearestFacadeCandidatesBySpotID = [:]
         arLabelOverlay = nil
@@ -1028,6 +1168,7 @@ final class AppState: ObservableObject {
         spots = filteredSpots
         dropSelectionsOutsideVisibleSpots()
         prefetchTMAPArrivalRoutes(from: latestLocationSnapshot)
+        refreshRadarMarkerOverlays()
         if let stableGeospatial3DOrigin, stableOriginReadyFor3DAnchors {
             prefetchNearbyBuildingPolygonsFor3DAnchors(from: stableGeospatial3DOrigin)
         }
@@ -1054,10 +1195,22 @@ final class AppState: ObservableObject {
         if let selectedSpot, !visibleSpotIDs.contains(selectedSpot.id) {
             self.selectedSpot = nil
         }
+        if let navigationDestinationSpotID, !visibleSpotIDs.contains(navigationDestinationSpotID) {
+            self.navigationDestinationSpotID = nil
+            self.routeArrowPath = nil
+            routeArrowDiagnostics = "길찾기 목적지가 표시 후보 밖이라 초기화했습니다."
+            routeArrowComputationDiagnostics = "길찾기 목적지가 현재 표시 후보 밖입니다."
+        }
         tmapArrivalRoutesBySpotID = tmapArrivalRoutesBySpotID.filter { visibleSpotIDs.contains($0.key) }
         tmapRouteFailedSpotIDs = tmapRouteFailedSpotIDs.filter { visibleSpotIDs.contains($0) }
         edgeMarkerOverlays.removeAll { !visibleSpotIDs.contains($0.id) }
         onScreenCandidateMarkerOverlays.removeAll { !visibleSpotIDs.contains($0.id) }
+        radarMarkerOverlays.removeAll { !visibleSpotIDs.contains($0.id) }
+        if let routeArrowPath, !visibleSpotIDs.contains(routeArrowPath.spotID) {
+            self.routeArrowPath = nil
+            routeArrowDiagnostics = "길찾기 화살표 숨김 / 표시 후보 밖"
+            routeArrowComputationDiagnostics = "routeArrowPath spotID가 현재 표시 후보 밖입니다."
+        }
     }
 
     private func prefetchTMAPArrivalRoutes(from origin: LocationSnapshot) {
@@ -1101,6 +1254,9 @@ final class AppState: ObservableObject {
                     self.tmapRouteTasksBySpotID[spot.id] = nil
                     self.tmapArrivalRoutesBySpotID[spot.id] = route
                     self.updateTMAPRouteStatus()
+                    self.refreshRouteArrowPath()
+                    self.ensureNavigationRouteForDestination()
+                    self.refreshGeospatial3DAnchorRequestsIfPossible(force: true)
                 } catch {
                     guard !Task.isCancelled else {
                         return
@@ -1109,6 +1265,7 @@ final class AppState: ObservableObject {
                     self.tmapRouteTasksBySpotID[spot.id] = nil
                     self.tmapRouteFailedSpotIDs.insert(spot.id)
                     self.updateTMAPRouteStatus(extra: "\(spot.name) 실패: \(error.localizedDescription)")
+                    self.refreshRouteArrowPath()
                 }
             }
             tmapRouteTasksBySpotID[spot.id] = task
@@ -1137,6 +1294,350 @@ final class AppState: ObservableObject {
         } else {
             tmapRouteStatus = "TMAP 도착 좌표 \(routeSummaries.count)개 / " + routeSummaries.joined(separator: " | ") + inFlightText + failedText + extraText
         }
+    }
+
+    private func ensureNavigationRouteForDestination() {
+        guard isNavigationModeEnabled else {
+            return
+        }
+
+        guard let destination = navigationDestinationSpot else {
+            routeArrowPath = nil
+            routeArrowDiagnostics = "길찾기 모드 켜짐 / 목적지를 선택하세요."
+            routeArrowComputationDiagnostics = "목적지 없음 / TMAP 요청 안 함"
+            return
+        }
+
+        guard let origin = stableGeospatial3DOrigin ?? latestGeospatialLocationSnapshot ?? latestLocationSnapshot else {
+            routeArrowPath = nil
+            routeArrowDiagnostics = "\(destination.name) 길찾기 대기 / 현재 위치 수신 필요"
+            routeArrowComputationDiagnostics = "\(destination.name) / origin 없음 / CoreLocation 또는 ARCore Geospatial snapshot 대기"
+            return
+        }
+
+        if let cachedRoute = tmapArrivalRoutesBySpotID[destination.id],
+           cachedRoute.requestedStart.distance(to: origin.coordinate) <= tmapRouteReuseDistanceMeters {
+            routeArrowComputationDiagnostics = "\(destination.name) cached TMAP route 재사용 / 요청 시작점과 현재 origin 차이 \(Int(cachedRoute.requestedStart.distance(to: origin.coordinate)))m / route 좌표 \(cachedRoute.routeCoordinates.count)개"
+            refreshRouteArrowPath()
+            refreshGeospatial3DAnchorRequestsIfPossible(force: true)
+            return
+        }
+
+        guard navigationRouteTask == nil else {
+            return
+        }
+
+        guard apiKeys.tmap.isRuntimeConfiguredAPIKey else {
+            routeArrowPath = nil
+            routeArrowDiagnostics = "\(destination.name) 길찾기 불가 / TMAP_API_KEY가 비어 있습니다."
+            routeArrowComputationDiagnostics = "\(destination.name) / TMAP_API_KEY 없음 / 경로 요청 불가"
+            return
+        }
+
+        routeArrowPath = nil
+        routeArrowDiagnostics = "\(destination.name) TMAP 보행자 경로 요청 중 / 현재 위치 기준"
+        routeArrowComputationDiagnostics = "\(destination.name) TMAP 요청 시작 / origin \(origin.coordinate.shortText) / destination \(destination.center.shortText)"
+        updateTMAPRouteStatus(extra: "\(destination.name) 길찾기 요청 중")
+
+        navigationRouteTask = Task { @MainActor [weak self] in
+            guard let self else {
+                return
+            }
+
+            do {
+                let route = try await self.tmapClient.fetchPedestrianRoute(
+                    from: origin.coordinate,
+                    to: destination
+                )
+                guard !Task.isCancelled else {
+                    return
+                }
+
+                self.navigationRouteTask = nil
+                self.tmapRouteFailedSpotIDs.remove(destination.id)
+                self.tmapArrivalRoutesBySpotID[destination.id] = route
+                self.routeArrowComputationDiagnostics = "\(destination.name) TMAP 응답 성공 / route 좌표 \(route.routeCoordinates.count)개 / 도착 \(route.arrivalCoordinate.shortText) / 총거리 \(route.totalDistanceMeters.map { "\(Int($0))m" } ?? "없음")"
+                self.updateTMAPRouteStatus(extra: "\(destination.name) 길찾기 경로 확보")
+                self.refreshRadarMarkerOverlays()
+                self.refreshRouteArrowPath()
+                self.refreshGeospatial3DAnchorRequestsIfPossible(force: true)
+            } catch {
+                guard !Task.isCancelled else {
+                    return
+                }
+
+                self.navigationRouteTask = nil
+                self.routeArrowPath = nil
+                self.tmapRouteFailedSpotIDs.insert(destination.id)
+                self.updateTMAPRouteStatus(extra: "\(destination.name) 실패: \(error.localizedDescription)")
+                self.routeArrowDiagnostics = "\(destination.name) 길찾기 경로 요청 실패: \(error.localizedDescription)"
+                self.routeArrowComputationDiagnostics = "\(destination.name) TMAP 요청 실패 / \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func refreshRouteArrowPath() {
+        guard isNavigationModeEnabled else {
+            routeArrowPath = nil
+            routeArrowDiagnostics = "길찾기 모드 꺼짐 / 목적지를 선택하면 화살표를 표시합니다."
+            routeArrowComputationDiagnostics = "길찾기 모드 꺼짐 / routeArrowPath nil"
+            navigationGuidanceTitle = "길찾기 꺼짐"
+            navigationGuidanceDetail = "목적지를 선택하면 TMAP 경로 기준 방향 안내를 표시합니다."
+            return
+        }
+
+        guard navigationDestinationSpotID != nil else {
+            routeArrowPath = nil
+            routeArrowDiagnostics = "길찾기 화살표 숨김 / 목적지를 선택하세요."
+            routeArrowComputationDiagnostics = "목적지 미선택 / routeArrowPath nil"
+            navigationGuidanceTitle = "목적지를 선택하세요"
+            navigationGuidanceDetail = "길찾기 모드에서 안내할 관광지/건물을 선택해야 합니다."
+            return
+        }
+
+        guard let origin = stableGeospatial3DOrigin ?? latestGeospatialLocationSnapshot ?? latestLocationSnapshot else {
+            routeArrowPath = nil
+            routeArrowDiagnostics = "길찾기 화살표 숨김 / 현재 위치 기준 없음"
+            routeArrowComputationDiagnostics = "origin 없음 / routeArrowPath nil"
+            navigationGuidanceTitle = "현재 위치 대기"
+            navigationGuidanceDetail = "CoreLocation 또는 ARCore Geospatial 위치가 들어오면 방향 안내를 계산합니다."
+            return
+        }
+
+        guard let targetSpot = routeArrowTargetSpot() else {
+            routeArrowPath = nil
+            routeArrowDiagnostics = "길찾기 화살표 숨김 / 선택 목적지가 표시 후보 밖"
+            routeArrowComputationDiagnostics = "선택 목적지가 spots 목록에 없음 / routeArrowPath nil"
+            navigationGuidanceTitle = "목적지 후보 없음"
+            navigationGuidanceDetail = "선택한 목적지가 현재 후보 목록에 없어 안내를 계산하지 못했습니다."
+            return
+        }
+
+        guard let route = tmapArrivalRoutesBySpotID[targetSpot.id] else {
+            routeArrowPath = nil
+            routeArrowDiagnostics = "\(targetSpot.name) 길찾기 화살표 대기 / TMAP 경로 없음"
+            routeArrowComputationDiagnostics = "\(targetSpot.name) TMAP route 캐시 없음 / routeArrowPath nil"
+            navigationGuidanceTitle = "\(targetSpot.name) 경로 대기"
+            navigationGuidanceDetail = "TMAP 보행자 경로 응답을 기다리는 중입니다."
+            return
+        }
+
+        let arrows = routeArrowSnapshots(for: route, from: origin)
+        guard !arrows.isEmpty else {
+            routeArrowPath = nil
+            routeArrowDiagnostics = "\(targetSpot.name) 길찾기 화살표 숨김 / 표시 가능한 앞쪽 경로 좌표 없음"
+            let nearestDistance = route.routeCoordinates
+                .map { origin.coordinate.distance(to: $0) }
+                .min()
+            let nearestText = nearestDistance.map { "\(Int($0))m" } ?? "없음"
+            routeArrowComputationDiagnostics = "\(targetSpot.name) route 좌표 \(route.routeCoordinates.count)개지만 샘플 0개 / 앞쪽 \(Int(routeArrowLookAheadMeters))m 안 좌표 부족 가능 / origin \(origin.coordinate.shortText) / route 최근접 \(nearestText)"
+            updateNavigationGuidance(for: route, targetSpot: targetSpot, origin: origin)
+            return
+        }
+
+        routeArrowPath = RouteArrowPathSnapshot(
+            spotID: targetSpot.id,
+            spotName: targetSpot.name,
+            arrows: arrows
+        )
+        routeArrowDiagnostics = "\(targetSpot.name) 길찾기 화살표 \(arrows.count)개 / 앞쪽 \(Int(routeArrowLookAheadMeters))m / 간격 \(Int(routeArrowSpacingMeters))m"
+        let first = arrows.first
+        let firstText = first.map { "첫 화살표 pos x \(String(format: "%.1f", $0.position.x)) y \(String(format: "%.1f", $0.position.y)) z \(String(format: "%.1f", $0.position.z)) / yaw \(Int(Double($0.yawRadians).radiansToDegrees))도" } ?? "첫 화살표 없음"
+        let routeLength = routePolylineLengthMeters(route.routeCoordinates)
+        routeArrowComputationDiagnostics = "\(targetSpot.name) route 좌표 \(route.routeCoordinates.count)개 / 경로 길이 \(Int(routeLength))m -> AR 화살표 \(arrows.count)개 생성 / origin \(origin.source.rawValue) \(origin.coordinate.shortText) / \(firstText)"
+        updateNavigationGuidance(for: route, targetSpot: targetSpot, origin: origin)
+    }
+
+    private func updateNavigationGuidance(
+        for route: TMAPPedestrianRoute,
+        targetSpot: TourismSpot,
+        origin: LocationSnapshot
+    ) {
+        let guidance = navigationGuidance(for: route, targetSpot: targetSpot, origin: origin)
+        navigationGuidanceTitle = guidance.title
+        navigationGuidanceDetail = guidance.detail
+    }
+
+    private func navigationGuidance(
+        for route: TMAPPedestrianRoute,
+        targetSpot: TourismSpot,
+        origin: LocationSnapshot
+    ) -> NavigationGuidance {
+        let arrivalDistance = origin.coordinate.distance(to: route.arrivalCoordinate)
+        if arrivalDistance <= 12 {
+            return NavigationGuidance(
+                title: "\(targetSpot.name) 도착 지점 근처",
+                detail: "TMAP 마지막 도착 좌표까지 약 \(Int(arrivalDistance))m 남았습니다."
+            )
+        }
+
+        guard let nextCoordinate = nextRouteGuidanceCoordinate(
+            from: origin.coordinate,
+            routeCoordinates: route.routeCoordinates
+        ) else {
+            let bearing = origin.coordinate.bearing(to: route.arrivalCoordinate)
+            return NavigationGuidance(
+                title: "\(targetSpot.name) 방향으로 이동",
+                detail: "경로 좌표가 부족해 도착 좌표 방향각 \(Int(bearing))도를 기준으로 안내합니다."
+            )
+        }
+
+        let targetBearing = origin.coordinate.bearing(to: nextCoordinate)
+        let heading = cameraHeadingDegrees ?? targetBearing
+        let signedDelta = heading.signedAngularDifference(to: targetBearing)
+        let distanceToNext = origin.coordinate.distance(to: nextCoordinate)
+        let remainingDistance = remainingRouteDistance(
+            from: origin.coordinate,
+            routeCoordinates: route.routeCoordinates,
+            fallbackDestination: route.arrivalCoordinate
+        )
+        let action = navigationActionText(forSignedDelta: signedDelta)
+        let remainingText = remainingDistance.map { "\(Int($0))m" } ?? "\(Int(arrivalDistance))m"
+
+        return NavigationGuidance(
+            title: action,
+            detail: "\(targetSpot.name)까지 약 \(remainingText) / 다음 기준점 \(Int(distanceToNext))m / heading \(Int(heading))도 -> 경로 \(Int(targetBearing))도 / 차이 \(Int(signedDelta))도"
+        )
+    }
+
+    private func nextRouteGuidanceCoordinate(
+        from origin: CLLocationCoordinate2D,
+        routeCoordinates: [CLLocationCoordinate2D]
+    ) -> CLLocationCoordinate2D? {
+        guard !routeCoordinates.isEmpty else {
+            return nil
+        }
+
+        let nearestIndex = routeCoordinates.indices.min {
+            origin.distance(to: routeCoordinates[$0]) < origin.distance(to: routeCoordinates[$1])
+        } ?? routeCoordinates.startIndex
+
+        let lookAheadDistance: CLLocationDistance = 8
+        for index in routeCoordinates.indices where index >= nearestIndex {
+            let coordinate = routeCoordinates[index]
+            if origin.distance(to: coordinate) >= lookAheadDistance {
+                return coordinate
+            }
+        }
+
+        return routeCoordinates.last
+    }
+
+    private func remainingRouteDistance(
+        from origin: CLLocationCoordinate2D,
+        routeCoordinates: [CLLocationCoordinate2D],
+        fallbackDestination: CLLocationCoordinate2D
+    ) -> CLLocationDistance? {
+        guard routeCoordinates.count >= 2 else {
+            return origin.distance(to: fallbackDestination)
+        }
+
+        let nearestIndex = routeCoordinates.indices.min {
+            origin.distance(to: routeCoordinates[$0]) < origin.distance(to: routeCoordinates[$1])
+        } ?? routeCoordinates.startIndex
+
+        var distance = origin.distance(to: routeCoordinates[nearestIndex])
+        guard nearestIndex < routeCoordinates.index(before: routeCoordinates.endIndex) else {
+            return distance
+        }
+
+        for index in routeCoordinates.index(after: nearestIndex)..<routeCoordinates.endIndex {
+            distance += routeCoordinates[index - 1].distance(to: routeCoordinates[index])
+        }
+        return distance
+    }
+
+    private func navigationActionText(forSignedDelta signedDelta: Double) -> String {
+        switch signedDelta {
+        case -180 ..< -120:
+            return "뒤쪽 왼편으로 돌아보세요"
+        case -120 ..< -35:
+            return "왼쪽으로 이동하세요"
+        case -35 ... 35:
+            return "계속 직진하세요"
+        case 35 ... 120:
+            return "오른쪽으로 이동하세요"
+        default:
+            return "뒤쪽 오른편으로 돌아보세요"
+        }
+    }
+
+    private func routeArrowTargetSpot() -> TourismSpot? {
+        guard let navigationDestinationSpotID else {
+            return nil
+        }
+
+        return spots.first(where: { $0.id == navigationDestinationSpotID })
+    }
+
+    private func routeArrowSnapshots(
+        for route: TMAPPedestrianRoute,
+        from origin: LocationSnapshot
+    ) -> [RouteArrowSnapshot] {
+        let enuPoints = route.routeCoordinates
+            .map { LocalENUProjector.project($0, from: origin) }
+
+        guard enuPoints.count >= 2 else {
+            return []
+        }
+
+        var arrows: [RouteArrowSnapshot] = []
+        var nextSampleDistance = routeArrowSpacingMeters
+        var traveledDistance: CLLocationDistance = 0
+
+        for index in 1..<enuPoints.count {
+            let start = enuPoints[index - 1]
+            let end = enuPoints[index]
+            let deltaEast = end.eastMeters - start.eastMeters
+            let deltaNorth = end.northMeters - start.northMeters
+            let segmentLength = hypot(deltaEast, deltaNorth)
+
+            guard segmentLength > 0.5 else {
+                continue
+            }
+
+            while nextSampleDistance <= traveledDistance + segmentLength,
+                  nextSampleDistance <= routeArrowLookAheadMeters,
+                  arrows.count < maxRouteArrowCount {
+                let ratio = (nextSampleDistance - traveledDistance) / segmentLength
+                let east = start.eastMeters + deltaEast * ratio
+                let north = start.northMeters + deltaNorth * ratio
+                let yaw = Float(atan2(deltaEast, deltaNorth))
+                let position = SIMD3<Float>(
+                    Float(east),
+                    routeArrowGroundYOffsetMeters,
+                    Float(-north)
+                )
+                arrows.append(
+                    RouteArrowSnapshot(
+                        id: arrows.count,
+                        position: position,
+                        yawRadians: yaw,
+                        distanceFromOriginMeters: nextSampleDistance
+                    )
+                )
+                nextSampleDistance += routeArrowSpacingMeters
+            }
+
+            traveledDistance += segmentLength
+            if traveledDistance > routeArrowLookAheadMeters || arrows.count >= maxRouteArrowCount {
+                break
+            }
+        }
+
+        return arrows
+    }
+
+    private func routePolylineLengthMeters(_ coordinates: [CLLocationCoordinate2D]) -> CLLocationDistance {
+        guard coordinates.count >= 2 else {
+            return 0
+        }
+
+        var length: CLLocationDistance = 0
+        for index in 1..<coordinates.count {
+            length += coordinates[index - 1].distance(to: coordinates[index])
+        }
+        return length
     }
 
     private func prefetchNearbyBuildingPolygonsFor3DAnchors(from origin: LocationSnapshot) {
@@ -1250,6 +1751,60 @@ final class AppState: ObservableObject {
         }
     }
 
+    private func refreshRadarMarkerOverlays() {
+        guard let latestLocationSnapshot,
+              let heading = cameraHeadingDegrees else {
+            radarMarkerOverlays = []
+            radarDiagnostics = "반원형 레이더 숨김 / 위치 또는 heading 없음"
+            return
+        }
+
+        let selectedSpotID = selectedSpot?.id ?? recognitionResult.labelSpot?.id
+        let markers = spots.compactMap { spot -> (marker: RadarMarkerOverlay, distance: CLLocationDistance)? in
+            let targetCoordinate = tmapArrivalRoutesBySpotID[spot.id]?.arrivalCoordinate ?? spot.center
+            let distance = latestLocationSnapshot.coordinate.distance(to: targetCoordinate)
+            guard distance <= radarRadiusMeters else {
+                return nil
+            }
+
+            let bearing = latestLocationSnapshot.coordinate.bearing(to: targetCoordinate)
+            let signedDelta = heading.signedAngularDifference(to: bearing)
+            let clampedDelta = signedDelta.clamped(to: -90...90)
+            let isBehind = abs(signedDelta) > 90
+            let distanceRatio = min(distance / radarRadiusMeters, 1)
+            let angleRadians = (180 - clampedDelta).degreesToRadians
+            let radiusRatio = 0.18 + distanceRatio * 0.78
+            let normalizedX = 0.5 + cos(angleRadians) * radiusRatio * 0.48
+            let normalizedY = 0.96 - sin(angleRadians) * radiusRatio * 0.88
+
+            return (
+                RadarMarkerOverlay(
+                    id: spot.id,
+                    shortTitle: spot.edgeMarkerShortTitle,
+                    distanceText: radarDistanceText(for: distance),
+                    normalizedX: normalizedX.clamped(to: 0.06...0.94),
+                    normalizedY: normalizedY.clamped(to: 0.08...0.96),
+                    isSelected: spot.id == selectedSpotID,
+                    isBehind: isBehind
+                ),
+                distance
+            )
+        }
+        .sorted { lhs, rhs in
+            if lhs.marker.isSelected != rhs.marker.isSelected {
+                return lhs.marker.isSelected
+            }
+            return lhs.distance < rhs.distance
+        }
+        .prefix(maxRadarMarkerCount)
+        .map(\.marker)
+
+        radarMarkerOverlays = Array(markers)
+        radarDiagnostics = radarMarkerOverlays.isEmpty
+            ? "반원형 레이더 표시 후보 없음 / \(Int(radarRadiusMeters))m 이내"
+            : "반원형 레이더 \(radarMarkerOverlays.count)개 / 반경 \(Int(radarRadiusMeters))m"
+    }
+
     private func updateEdgeMarkerOverlays(focusing focusedSpot: TourismSpot?) {
         guard let latestLocationSnapshot,
               let heading = cameraHeadingDegrees,
@@ -1334,6 +1889,16 @@ final class AppState: ObservableObject {
         return distance >= 10_000
             ? "\(Int((distance / 1_000).rounded()))km"
             : String(format: "%.1fkm", distance / 1_000)
+    }
+
+    private func radarDistanceText(for distance: CLLocationDistance) -> String {
+        if distance < 100 {
+            return "\(Int(distance))m"
+        }
+        if distance < 1_000 {
+            return "\(Int((distance / 10).rounded() * 10))m"
+        }
+        return String(format: "%.1fkm", distance / 1_000)
     }
 
     private func projectedPoints(
@@ -1499,6 +2064,7 @@ final class AppState: ObservableObject {
         stableOriginIsUsableFor3DAnchors = false
         pendingStableGeospatial3DOrigin = nil
         pendingStableOriginFirstSeenAt = nil
+        lastGeospatial3DAnchorRefreshAt = nil
         if !activeGeospatial3DSpotIDs.isEmpty || !lastRequestedTerrainAnchorSpotIDs.isEmpty {
             geospatialSessionManager.clearAllGeospatialDebugAnchors(reason: "3D stable origin 불안정으로 WGS84 Anchor를 일시 제거했습니다.")
             activeGeospatial3DSpotIDs = []
@@ -1665,17 +2231,24 @@ final class AppState: ObservableObject {
         let sourcePropertiesText = sourceHeightPropertiesText(for: polygon)
         buildingLabelHeightDiagnostics = "\(spot.name) 3D 라벨 높이 기준 / \(distanceSource) \(Int(distanceMeters))m / \(labelHeight.rangeLabel) / 건물 높이 \(resolvedHeight.displayText) / 라벨 후보 높이 \(String(format: "%.1f", labelHeight.valueMeters))m / \(labelHeight.reason) / \(resolvedHeight.explanation)\(sourcePropertiesText)"
 
-        refreshGeospatial3DAnchorRequests(origin: stableOrigin)
+        refreshGeospatial3DAnchorRequestsIfPossible()
     }
 
-    private func refreshGeospatial3DAnchorRequestsIfPossible() {
+    private func refreshGeospatial3DAnchorRequestsIfPossible(force: Bool = false) {
         guard let stableGeospatial3DOrigin,
               stableOriginReadyFor3DAnchors else {
             geospatialWGS84CandidateDiagnostics = "WGS84 Anchor 후보 대기 / \(stableOriginDiagnostics)"
             return
         }
 
-        prefetchNearbyBuildingPolygonsFor3DAnchors(from: stableGeospatial3DOrigin)
+        let now = Date()
+        if !force,
+           let lastGeospatial3DAnchorRefreshAt,
+           now.timeIntervalSince(lastGeospatial3DAnchorRefreshAt) < geospatial3DAnchorRefreshInterval {
+            return
+        }
+
+        lastGeospatial3DAnchorRefreshAt = now
         refreshGeospatial3DAnchorRequests(origin: stableGeospatial3DOrigin)
     }
 
@@ -1692,93 +2265,141 @@ final class AppState: ObservableObject {
 
     private func refreshGeospatial3DAnchorRequests(origin: LocationSnapshot) {
         let previousActiveSpotIDs = activeGeospatial3DSpotIDs
-        var preparedRequests: [(spot: TourismSpot, labelHeight: BuildingLabelHeightDecision, facadeCandidate: BuildingFacadeCandidate, distanceMeters: CLLocationDistance)] = []
-        var keptWithoutNewFacade: [(spot: TourismSpot, distanceMeters: CLLocationDistance)] = []
-
-        for spot in spots {
-            if let route = tmapArrivalRoutesBySpotID[spot.id] {
-                let facadeCandidate = tmapArrivalCandidate(
-                    spot: spot,
-                    route: route,
-                    from: origin
-                )
-                let distanceMeters = facadeCandidate.distanceFromUserMeters
-
-                guard shouldKeepGeospatial3DAnchor(
-                    spotID: spot.id,
-                    distanceMeters: distanceMeters
-                ) else {
-                    continue
-                }
-
-                let labelHeight = arrivalLabelHeightDecision(distanceMeters: distanceMeters)
-                preparedRequests.append((spot, labelHeight, facadeCandidate, distanceMeters))
-                continue
-            }
-
-            guard let polygon = buildingPolygonsBySpotID[spot.id] else {
-                continue
-            }
-
-            let resolvedHeight = resolvedBuildingHeightsBySpotID[spot.id] ?? buildingHeightResolver.resolve(polygon: polygon)
-            resolvedBuildingHeightsBySpotID[spot.id] = resolvedHeight
-            let facadeCandidate = nearestFacadeCandidate(
-                spot: spot,
-                polygon: polygon,
-                from: origin
+        guard isNavigationModeEnabled else {
+            refreshBrowsingGeospatial3DAnchorRequests(
+                origin: origin,
+                previousActiveSpotIDs: previousActiveSpotIDs
             )
-            let distanceMeters = facadeCandidate?.distanceFromUserMeters
-                ?? origin.coordinate.distance(to: spot.center)
-
-            guard shouldKeepGeospatial3DAnchor(
-                spotID: spot.id,
-                distanceMeters: distanceMeters
-            ) else {
-                continue
-            }
-
-            guard let facadeCandidate else {
-                if previousActiveSpotIDs.contains(spot.id) {
-                    keptWithoutNewFacade.append((spot, distanceMeters))
-                }
-                continue
-            }
-
-            let labelHeight = labelHeightDecision(
-                for: resolvedHeight,
-                distanceMeters: distanceMeters
-            )
-            preparedRequests.append((spot, labelHeight, facadeCandidate, distanceMeters))
+            return
         }
 
-        preparedRequests.sort { lhs, rhs in
-            lhs.distanceMeters < rhs.distanceMeters
-        }
-        let limitedRequests = Array(preparedRequests.prefix(maxActiveGeospatial3DAnchorCount))
-        let keptSpotIDs = Set(keptWithoutNewFacade.map(\.spot.id))
-        let requestedSpotIDs = Set(limitedRequests.map(\.spot.id)).union(keptSpotIDs)
-
-        for spotID in previousActiveSpotIDs where !requestedSpotIDs.contains(spotID) {
-            geospatialSessionManager.clearGeospatialDebugAnchor(
-                for: spotID,
-                reason: "WGS84 Anchor 숨김 / 생성 \(Int(geospatial3DCreateRadiusMeters))m, 삭제 \(Int(geospatial3DDeleteRadiusMeters))m 기준 밖"
-            )
-            fixedNearestFacadeCandidatesBySpotID[spotID] = nil
-        }
-
-        if requestedSpotIDs.isEmpty {
+        guard let destination = navigationDestinationSpot else {
             if !previousActiveSpotIDs.isEmpty || !lastRequestedTerrainAnchorSpotIDs.isEmpty {
-                geospatialSessionManager.clearAllGeospatialDebugAnchors(reason: "3D 표시 범위 안의 WGS84 Anchor 후보가 없습니다.")
+                geospatialSessionManager.clearAllGeospatialDebugAnchors(reason: "길찾기 목적지 없음 / 3D 목적지 마커 숨김")
             }
             activeGeospatial3DSpotIDs = []
             fixedNearestFacadeCandidatesBySpotID = [:]
             markerPlacementDiagnosticsBySpotID = [:]
             lastRequestedTerrainAnchorSpotIDs = []
-            geospatialWGS84CandidateDiagnostics = "3D 숨김 / \(Int(geospatial3DCreateRadiusMeters))m 안에 TMAP 도착 좌표 또는 Polygon fallback 후보가 없습니다."
+            geospatialWGS84CandidateDiagnostics = "3D 목적지 마커 대기 / 길찾기 목적지를 선택하세요."
             return
         }
 
-        var summaries = limitedRequests.map { request in
+        guard let route = tmapArrivalRoutesBySpotID[destination.id] else {
+            for spotID in previousActiveSpotIDs {
+                geospatialSessionManager.clearGeospatialDebugAnchor(
+                    for: spotID,
+                    reason: "TMAP 도착 좌표 없음 / 기존 3D 목적지 마커 제거"
+                )
+            }
+            activeGeospatial3DSpotIDs = []
+            fixedNearestFacadeCandidatesBySpotID = [:]
+            markerPlacementDiagnosticsBySpotID = [:]
+            lastRequestedTerrainAnchorSpotIDs = []
+            geospatialWGS84CandidateDiagnostics = "\(destination.name) 3D 목적지 마커 대기 / TMAP 보행자 경로 마지막 도착 좌표가 아직 없습니다."
+            ensureNavigationRouteForDestination()
+            return
+        }
+
+        let facadeCandidate = tmapArrivalCandidate(
+            spot: destination,
+            route: route,
+            from: origin
+        )
+        let distanceMeters = facadeCandidate.distanceFromUserMeters
+        let labelHeight = arrivalLabelHeightDecision(distanceMeters: distanceMeters)
+        let requestedSpotIDs: Set<TourismSpot.ID> = [destination.id]
+
+        for spotID in previousActiveSpotIDs where !requestedSpotIDs.contains(spotID) {
+            geospatialSessionManager.clearGeospatialDebugAnchor(
+                for: spotID,
+                reason: "선택 목적지 변경 / 길찾기 목적지 1개만 3D 마커로 유지"
+            )
+            fixedNearestFacadeCandidatesBySpotID[spotID] = nil
+        }
+
+        let summary = requestGeospatialTerrainAnchorIfPossible(
+            spot: destination,
+            facadeCandidate: facadeCandidate,
+            labelHeightMeters: labelHeight.valueMeters,
+            origin: origin
+        )
+
+        activeGeospatial3DSpotIDs = requestedSpotIDs
+        fixedNearestFacadeCandidatesBySpotID = [:]
+        markerPlacementDiagnosticsBySpotID = markerPlacementDiagnosticsBySpotID.filter {
+            requestedSpotIDs.contains($0.key)
+        }
+        lastRequestedTerrainAnchorSpotIDs = requestedSpotIDs
+        let markerDiagnostics = requestedSpotIDs
+            .compactMap { markerPlacementDiagnosticsBySpotID[$0] }
+            .sorted()
+        let markerText = markerDiagnostics.isEmpty
+            ? ""
+            : " / 마커 좌표 판단: " + markerDiagnostics.joined(separator: " | ")
+        geospatialWGS84CandidateDiagnostics = "3D 목적지 마커 1개 / TMAP 마지막 도착 좌표 고정 / \(summary) / 목적지 POI \(destination.center.shortText) / TMAP 도착 \(route.arrivalCoordinate.shortText)\(markerText)"
+        refreshRouteArrowPath()
+    }
+
+    private func refreshBrowsingGeospatial3DAnchorRequests(
+        origin: LocationSnapshot,
+        previousActiveSpotIDs: Set<TourismSpot.ID>
+    ) {
+        let preparedRequests = spots.compactMap { spot -> (spot: TourismSpot, labelHeight: BuildingLabelHeightDecision, facadeCandidate: BuildingFacadeCandidate, distanceMeters: CLLocationDistance, route: TMAPPedestrianRoute)? in
+            guard let route = tmapArrivalRoutesBySpotID[spot.id] else {
+                return nil
+            }
+
+            let facadeCandidate = tmapArrivalCandidate(
+                spot: spot,
+                route: route,
+                from: origin
+            )
+            let distanceMeters = facadeCandidate.distanceFromUserMeters
+
+            guard shouldKeepGeospatial3DAnchor(
+                spotID: spot.id,
+                distanceMeters: distanceMeters
+            ) else {
+                return nil
+            }
+
+            return (
+                spot: spot,
+                labelHeight: arrivalLabelHeightDecision(distanceMeters: distanceMeters),
+                facadeCandidate: facadeCandidate,
+                distanceMeters: distanceMeters,
+                route: route
+            )
+        }
+        .sorted { lhs, rhs in
+            lhs.distanceMeters < rhs.distanceMeters
+        }
+
+        let limitedRequests = Array(preparedRequests.prefix(maxActiveGeospatial3DAnchorCount))
+        let requestedSpotIDs = Set(limitedRequests.map(\.spot.id))
+
+        for spotID in previousActiveSpotIDs where !requestedSpotIDs.contains(spotID) {
+            geospatialSessionManager.clearGeospatialDebugAnchor(
+                for: spotID,
+                reason: "둘러보기 TMAP 도착 좌표 후보 밖 / 3D 마커 제거"
+            )
+            fixedNearestFacadeCandidatesBySpotID[spotID] = nil
+        }
+
+        guard !limitedRequests.isEmpty else {
+            if !previousActiveSpotIDs.isEmpty || !lastRequestedTerrainAnchorSpotIDs.isEmpty {
+                geospatialSessionManager.clearAllGeospatialDebugAnchors(reason: "둘러보기 3D 후보 없음 / TMAP 도착 좌표가 있는 근처 POI가 없습니다.")
+            }
+            activeGeospatial3DSpotIDs = []
+            fixedNearestFacadeCandidatesBySpotID = [:]
+            markerPlacementDiagnosticsBySpotID = [:]
+            lastRequestedTerrainAnchorSpotIDs = []
+            geospatialWGS84CandidateDiagnostics = "둘러보기 3D 마커 대기 / TMAP 마지막 도착 좌표가 있는 근처 POI가 없습니다."
+            return
+        }
+
+        let summaries = limitedRequests.map { request in
             requestGeospatialTerrainAnchorIfPossible(
                 spot: request.spot,
                 facadeCandidate: request.facadeCandidate,
@@ -1786,25 +2407,21 @@ final class AppState: ObservableObject {
                 origin: origin
             )
         }
-        summaries.append(contentsOf: keptWithoutNewFacade.map {
-            "\($0.spot.name) 유지 / 외벽 후보점 없음 / \(Int($0.distanceMeters))m"
-        })
 
         activeGeospatial3DSpotIDs = requestedSpotIDs
-        fixedNearestFacadeCandidatesBySpotID = fixedNearestFacadeCandidatesBySpotID.filter {
-            requestedSpotIDs.contains($0.key)
-        }
+        fixedNearestFacadeCandidatesBySpotID = [:]
         markerPlacementDiagnosticsBySpotID = markerPlacementDiagnosticsBySpotID.filter {
             requestedSpotIDs.contains($0.key)
         }
-        lastRequestedTerrainAnchorSpotIDs = Set(limitedRequests.map(\.spot.id))
+        lastRequestedTerrainAnchorSpotIDs = requestedSpotIDs
+
         let markerDiagnostics = requestedSpotIDs
             .compactMap { markerPlacementDiagnosticsBySpotID[$0] }
             .sorted()
         let markerText = markerDiagnostics.isEmpty
             ? ""
             : " / 마커 좌표 판단: " + markerDiagnostics.joined(separator: " | ")
-        geospatialWGS84CandidateDiagnostics = "WGS84 Anchor 후보 \(requestedSpotIDs.count)개 / TMAP 도착 좌표 우선, 없으면 기존 Polygon fallback / " + summaries.joined(separator: " | ") + markerText
+        geospatialWGS84CandidateDiagnostics = "둘러보기 3D 마커 \(requestedSpotIDs.count)개 / 모두 TMAP 마지막 도착 좌표 고정 / " + summaries.joined(separator: " | ") + markerText
     }
 
     private func requestGeospatialTerrainAnchorIfPossible(

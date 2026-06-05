@@ -6,12 +6,13 @@ struct ARExploreView: View {
 
     var body: some View {
         GeometryReader { geometry in
+            let bottomPanelHeight = min(430, geometry.size.height * 0.48)
             ZStack(alignment: .bottom) {
                 ARViewContainer()
                     .frame(width: geometry.size.width, height: geometry.size.height)
                     .ignoresSafeArea()
 
-                if let label = appState.arLabelOverlay {
+                if !FeatureFlags.useARMapMVPDirection, let label = appState.arLabelOverlay {
                     ARSpotLabelView(label: label)
                         .position(
                             x: label.normalizedX * geometry.size.width,
@@ -21,7 +22,9 @@ struct ARExploreView: View {
                         .animation(.easeOut(duration: 0.18), value: label)
                 }
 
-                if appState.showsMatrixDebugMarker, let debugOverlay = appState.matrixProjectionDebugOverlay {
+                if FeatureFlags.enableLegacyMatrixDebugOverlay,
+                   appState.showsMatrixDebugMarker,
+                   let debugOverlay = appState.matrixProjectionDebugOverlay {
                     MatrixProjectionDebugMarkerView(overlay: debugOverlay)
                         .position(
                             x: debugOverlay.normalizedX * geometry.size.width,
@@ -31,7 +34,8 @@ struct ARExploreView: View {
                         .animation(.easeOut(duration: 0.12), value: debugOverlay)
                 }
 
-                if appState.showsOnScreenCandidateDebugMarkers {
+                if FeatureFlags.enableLegacyOnScreenCandidateDebugMarkers,
+                   appState.showsOnScreenCandidateDebugMarkers {
                     ForEach(appState.onScreenCandidateMarkerOverlays) { marker in
                         OnScreenCandidateMarkerView(marker: marker)
                             .position(
@@ -53,16 +57,29 @@ struct ARExploreView: View {
                         .animation(.easeOut(duration: 0.16), value: marker)
                 }
 
+                if !appState.radarMarkerOverlays.isEmpty {
+                    RadarOverlayView(markers: appState.radarMarkerOverlays) { markerID in
+                        if let spot = appState.spots.first(where: { $0.id == markerID }) {
+                            appState.selectCandidate(spot)
+                        }
+                    }
+                    .frame(width: min(geometry.size.width - 32, 360), height: 150)
+                    .padding(.bottom, bottomPanelHeight + 8)
+                    .transition(.opacity)
+                }
+
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         APIKeyStatusView(statuses: appState.apiKeys.statuses)
-                        DebugDashboardView(
-                            overviewRows: appState.debugOverviewRows,
-                            locationRows: appState.locationDebugRows,
-                            dataRows: appState.dataDebugRows,
-                            displayRows: appState.displayDebugRows,
-                            anchorRows: appState.anchorDebugRows
-                        )
+                        if FeatureFlags.showCompactDebugDashboard {
+                            DebugDashboardView(
+                                overviewRows: appState.debugOverviewRows,
+                                locationRows: appState.locationDebugRows,
+                                dataRows: appState.dataDebugRows,
+                                displayRows: appState.displayDebugRows,
+                                anchorRows: appState.anchorDebugRows
+                            )
+                        }
                         if appState.showsFullDebugLogs {
                             GeospatialStatusView(
                                 status: appState.geospatialStatus,
@@ -119,13 +136,119 @@ struct ARExploreView: View {
                     .frame(width: geometry.size.width, alignment: .leading)
                 }
                 .frame(width: geometry.size.width)
-                .frame(maxHeight: min(430, geometry.size.height * 0.48))
+                .frame(maxHeight: bottomPanelHeight)
                 .background(.regularMaterial)
             }
         }
         .sheet(isPresented: $showsCollection) {
             CollectionBookView(spots: appState.spots, selectedSpot: appState.selectedSpot)
         }
+    }
+}
+
+private struct RadarOverlayView: View {
+    let markers: [RadarMarkerOverlay]
+    let onSelect: (TourismSpot.ID) -> Void
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                RadarBackgroundShape()
+                    .fill(.black.opacity(0.48))
+                RadarBackgroundShape()
+                    .stroke(.white.opacity(0.5), lineWidth: 1)
+
+                Path { path in
+                    let width = geometry.size.width
+                    let height = geometry.size.height
+                    let center = CGPoint(x: width / 2, y: height - 8)
+                    path.move(to: CGPoint(x: width * 0.5, y: height - 8))
+                    path.addLine(to: CGPoint(x: width * 0.5, y: 12))
+                    path.move(to: CGPoint(x: width * 0.12, y: height - 8))
+                    path.addLine(to: CGPoint(x: width * 0.88, y: height - 8))
+                    path.move(to: center)
+                    path.addArc(
+                        center: center,
+                        radius: min(width * 0.38, height * 0.76),
+                        startAngle: .degrees(200),
+                        endAngle: .degrees(340),
+                        clockwise: false
+                    )
+                }
+                .stroke(.white.opacity(0.24), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+
+                VStack(spacing: 2) {
+                    Image(systemName: "location.north.fill")
+                        .font(.caption.weight(.bold))
+                    Text("내 시야")
+                        .font(.caption2.weight(.semibold))
+                }
+                .foregroundStyle(.white.opacity(0.88))
+                .position(x: geometry.size.width / 2, y: geometry.size.height - 26)
+
+                ForEach(markers) { marker in
+                    Button {
+                        onSelect(marker.id)
+                    } label: {
+                        RadarMarkerDotView(marker: marker)
+                    }
+                    .buttonStyle(.plain)
+                    .position(
+                        x: marker.normalizedX * geometry.size.width,
+                        y: marker.normalizedY * geometry.size.height
+                    )
+                }
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .shadow(color: .black.opacity(0.35), radius: 10, x: 0, y: 4)
+    }
+}
+
+private struct RadarBackgroundShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let center = CGPoint(x: rect.midX, y: rect.maxY - 8)
+        let radius = min(rect.width * 0.48, rect.height * 0.92)
+        path.move(to: center)
+        path.addArc(
+            center: center,
+            radius: radius,
+            startAngle: .degrees(200),
+            endAngle: .degrees(340),
+            clockwise: false
+        )
+        path.closeSubpath()
+        return path
+    }
+}
+
+private struct RadarMarkerDotView: View {
+    let marker: RadarMarkerOverlay
+
+    var body: some View {
+        VStack(spacing: 2) {
+            Circle()
+                .fill(marker.isSelected ? .blue : .red)
+                .frame(width: marker.isSelected ? 13 : 10, height: marker.isSelected ? 13 : 10)
+                .overlay(
+                    Circle()
+                        .stroke(.white.opacity(marker.isSelected ? 0.95 : 0.75), lineWidth: 1)
+                )
+                .opacity(marker.isBehind ? 0.55 : 1)
+
+            Text(marker.shortTitle)
+                .font(.caption2.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(marker.distanceText)
+                .font(.caption2)
+                .lineLimit(1)
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 5)
+        .padding(.vertical, 3)
+        .background(.black.opacity(marker.isSelected ? 0.58 : 0.34), in: RoundedRectangle(cornerRadius: 6))
     }
 }
 
@@ -347,11 +470,17 @@ private struct ARViewContainer: UIViewControllerRepresentable {
         viewController.onCameraProjectionUpdated = { projection in
             appState.updateCameraProjection(projection)
         }
+        viewController.onRouteArrowRenderStatusUpdated = { diagnostics in
+            DispatchQueue.main.async {
+                appState.updateRouteArrowRenderDiagnostics(diagnostics)
+            }
+        }
         return viewController
     }
 
     func updateUIViewController(_ uiViewController: ARSessionViewController, context: Context) {
         uiViewController.setShows3DGeospatialDebugMarker(appState.shows3DGeospatialDebugMarker)
+        uiViewController.setRouteArrowPath(appState.routeArrowPath)
     }
 }
 

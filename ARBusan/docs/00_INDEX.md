@@ -7,29 +7,30 @@
 | 순서 | 문서 | 역할 |
 | --- | --- | --- |
 | 1 | [`../ARBusan_PROJECT_STATUS.md`](../ARBusan_PROJECT_STATUS.md) | 현재 프로젝트 상태와 다음 작업 요약 |
-| 2 | [`planning/AR_TECH_ROADMAP.md`](planning/AR_TECH_ROADMAP.md) | AR 인식/라벨 기술 방향과 큰 작업 순서 |
-| 3 | [`testing/HAEUNDAE_TOURAPI_INDOOR_DEBUG_PLAN.md`](testing/HAEUNDAE_TOURAPI_INDOOR_DEBUG_PLAN.md) | 해운대구 TourAPI 실내 디버그 테스트 구조 |
+| 2 | [`planning/AR_MVP_DIRECTION.md`](planning/AR_MVP_DIRECTION.md) | 현재 공모전 MVP 방향: 지도/레이더 + 카메라 AR 방향 안내 |
+| 3 | [`planning/AR_TECH_ROADMAP.md`](planning/AR_TECH_ROADMAP.md) | 이전 AR 인식/라벨 기술 실험과 보류 판단 |
 
 ## 2. Planning
 
 | 문서 | 역할 | 상태 |
 | --- | --- | --- |
-| [`planning/AR_TECH_ROADMAP.md`](planning/AR_TECH_ROADMAP.md) | AR 기술 판단, 처리 흐름, 작업 순서 | 활성 |
+| [`planning/AR_MVP_DIRECTION.md`](planning/AR_MVP_DIRECTION.md) | 공모전 MVP 기준과 새 구현 순서 | 활성 |
+| [`planning/AR_TECH_ROADMAP.md`](planning/AR_TECH_ROADMAP.md) | AR 기술 판단, 처리 흐름, 작업 순서 | 참고/보류 판단 |
 | [`planning/NATIVE_TRANSITION.md`](planning/NATIVE_TRANSITION.md) | React Native에서 Swift 네이티브로 전환한 배경과 초기 세팅 기록 | 보관/참고 |
 
 ## 3. AR Label
 
 | 문서 | 역할 | 상태 |
 | --- | --- | --- |
-| [`ar-label/3D_LABEL_REFINEMENT_PLAN.md`](ar-label/3D_LABEL_REFINEMENT_PLAN.md) | 3D 구체/라벨의 현재 규칙과 구현 체크리스트 | 활성 |
-| [`ar-label/3D_LABEL_OPTIMIZATION_PLAN.md`](ar-label/3D_LABEL_OPTIMIZATION_PLAN.md) | 3D 라벨 흔들림, stable origin, WGS84 anchor 최적화 | 활성 |
-| [`ar-label/EDGE_MARKER_RULES.md`](ar-label/EDGE_MARKER_RULES.md) | 화면 안/밖 2D marker, edge marker 규칙 | 활성 |
+| [`ar-label/3D_LABEL_REFINEMENT_PLAN.md`](ar-label/3D_LABEL_REFINEMENT_PLAN.md) | 3D 구체/라벨의 기존 규칙과 실험 기록 | 보류/참고 |
+| [`ar-label/3D_LABEL_OPTIMIZATION_PLAN.md`](ar-label/3D_LABEL_OPTIMIZATION_PLAN.md) | 3D 라벨 흔들림, stable origin, WGS84 anchor 최적화 | 보류/참고 |
+| [`ar-label/EDGE_MARKER_RULES.md`](ar-label/EDGE_MARKER_RULES.md) | 화면 안/밖 2D marker, edge marker 규칙 | 참고 |
 
 ## 4. Testing
 
 | 문서 | 역할 | 상태 |
 | --- | --- | --- |
-| [`testing/HAEUNDAE_TOURAPI_INDOOR_DEBUG_PLAN.md`](testing/HAEUNDAE_TOURAPI_INDOOR_DEBUG_PLAN.md) | TourAPI 해운대구 샘플로 실내 계산 검증 | 다음 작업 |
+| [`testing/HAEUNDAE_TOURAPI_INDOOR_DEBUG_PLAN.md`](testing/HAEUNDAE_TOURAPI_INDOOR_DEBUG_PLAN.md) | TourAPI 해운대구 샘플로 실내 계산 검증 | 보류/필요 시 |
 | [`testing/TEST_RESULTS.md`](testing/TEST_RESULTS.md) | 사용자가 현장에서 확인한 테스트 결과 기록 | 활성 |
 | [`testing/3D_LABEL_STABILITY_TESTS.md`](testing/3D_LABEL_STABILITY_TESTS.md) | 3D 라벨 장기 안정화 테스트 시나리오 | 후속 |
 
@@ -54,4 +55,3 @@
 - 200줄 이하: 유지
 - 200~260줄: 당장 문제는 아니지만 다음 정리 때 축약 후보
 - 260줄 초과: 분할 또는 archive 이동 후보. 삭제 전 사용자 확인 필수
-

@@ -3,6 +3,7 @@ import Foundation
 
 struct TMAPPedestrianRoute {
     let destinationName: String
+    let requestedStart: CLLocationCoordinate2D
     let requestedDestination: CLLocationCoordinate2D
     let arrivalCoordinate: CLLocationCoordinate2D
     let routeCoordinates: [CLLocationCoordinate2D]
@@ -82,6 +83,7 @@ struct SKOpenAPITMAPClient: TMAPClient {
 
         return TMAPPedestrianRoute(
             destinationName: destination.name,
+            requestedStart: start,
             requestedDestination: destination.center,
             arrivalCoordinate: arrivalCoordinate,
             routeCoordinates: payload.routeCoordinates,
