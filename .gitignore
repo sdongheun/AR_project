@@ -1,3 +1,20 @@
 .DS_Store
 .pnpm-store/
 .derivedData/
+\[iOS_VSM\]TmapSDK_3.6.zip
+
+# Local iOS/Xcode generated files
+DerivedData/
+*.xcuserstate
+*.xcuserdata/
+
+# Local secrets
+ARBusan/Config/Secrets.local.xcconfig
+
+# Dependency checkouts/build output generated locally
+ARBusan/Pods/
+ARBusan/ARBusan.xcworkspace/
+ARBusan/ARBusan.xcodeproj/project.xcworkspace/
+
+# TMAP iOS SDK is a local third-party binary SDK. Keep it out of public git.
+ARBusan/Vendor/TMapSDK/

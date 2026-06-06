@@ -9,6 +9,8 @@
 /* Begin PBXBuildFile section */
 		F1A2B3C4D5E6F7890A1B2C3D /* FeatureFlags.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A2B3C4D5E6F7890A1B2C3E /* FeatureFlags.swift */; };
 		045C3EDAD4B96FDC841A7ABB /* Pods_ARBusan.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4BA5637E4EAC2D0F5721D0F6 /* Pods_ARBusan.framework */; };
+		0D9A4B7C8E1F23456789A001 /* TMapSDK.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0D9A4B7C8E1F23456789A003 /* TMapSDK.xcframework */; };
+		0D9A4B7C8E1F23456789A002 /* TMapSDK.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 0D9A4B7C8E1F23456789A003 /* TMapSDK.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		1484811185B1840342819C60 /* OCRRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F2DF903FCD974FC53B53400 /* OCRRecognizer.swift */; };
 		17E4E7B7C9763DE9420D5C98 /* CameraHeadingCalculatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86E1BEFF4915330160AE3E1A /* CameraHeadingCalculatorTests.swift */; };
 		198E059DE74B609E15F1C020 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 436B845C11E88760A1D14EE6 /* Assets.xcassets */; };
@@ -41,6 +43,8 @@
 		9A2C46E705E9BC7F540D3A67 /* AppStatePolygonLookupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90D3B240A096A12D6848EA33 /* AppStatePolygonLookupTests.swift */; };
 		9B05FAEA79811C6D4AD265E0 /* CoreLocation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 67757602351B050E84917B7E /* CoreLocation.framework */; };
 		9FB4F7B4D0D81F0E23C5B4DE /* ARKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1BEEFAABBBBDE97B3D65763B /* ARKit.framework */; };
+		AB34CD56EF78901234560001 /* VSMSDK.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = AB34CD56EF78901234560003 /* VSMSDK.xcframework */; };
+		AB34CD56EF78901234560002 /* VSMSDK.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = AB34CD56EF78901234560003 /* VSMSDK.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		A2CA9E9B2CA16976E69DBA19 /* TourismSpotEntity.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF75EB13A6FB8209F1C5B6EB /* TourismSpotEntity.swift */; };
 		A64513A935681A0CF640A70C /* Pods_ARBusanTests.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 04D29C5DAF3EBD94D103CE51 /* Pods_ARBusanTests.framework */; };
 		A6E235E0B1A944FF6EA011C5 /* RealityAnchorRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39DF0E4705621DEB16B3F29D /* RealityAnchorRenderer.swift */; };
@@ -57,6 +61,21 @@
 		EEDD8658344315C48E1677CF /* MockTourismSpots.swift in Sources */ = {isa = PBXBuildFile; fileRef = 720E65E6365B610695833BFD /* MockTourismSpots.swift */; };
 		EF6B663CF975E7ED6B8DADE3 /* LocationSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3C1EB7D834ACCD23C5208F0 /* LocationSnapshot.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		0D9A4B7C8E1F23456789A004 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				0D9A4B7C8E1F23456789A002 /* TMapSDK.xcframework in Embed Frameworks */,
+				AB34CD56EF78901234560002 /* VSMSDK.xcframework in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXContainerItemProxy section */
 		F061B969BDEA67789718A674 /* PBXContainerItemProxy */ = {
@@ -76,8 +95,10 @@
 		1679F3B9837757C3DC24386B /* RecognitionPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecognitionPipeline.swift; sourceTree = "<group>"; };
 		176A6D9A524E66E5F1660B66 /* ARSessionViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARSessionViewController.swift; sourceTree = "<group>"; };
 		1BEEFAABBBBDE97B3D65763B /* ARKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ARKit.framework; path = System/Library/Frameworks/ARKit.framework; sourceTree = SDKROOT; };
+		0D9A4B7C8E1F23456789A003 /* TMapSDK.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = TMapSDK.xcframework; path = Vendor/TMapSDK/TMapSDK.xcframework; sourceTree = "<group>"; };
 		209535A9C81DC4F623248B6E /* Pods-ARBusan.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ARBusan.release.xcconfig"; path = "Target Support Files/Pods-ARBusan/Pods-ARBusan.release.xcconfig"; sourceTree = "<group>"; };
 		20F5E8A02E2E4F8ACD84B20B /* VisualLandmarkRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisualLandmarkRecognizer.swift; sourceTree = "<group>"; };
+		AB34CD56EF78901234560003 /* VSMSDK.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = VSMSDK.xcframework; path = Vendor/TMapSDK/VSMSDK.xcframework; sourceTree = "<group>"; };
 		21D260256C3BC47708FAC2B8 /* GeospatialSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeospatialSessionManager.swift; sourceTree = "<group>"; };
 		34305BA710A2F58FF0E393E3 /* ARExploreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARExploreView.swift; sourceTree = "<group>"; };
 		39DF0E4705621DEB16B3F29D /* RealityAnchorRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealityAnchorRenderer.swift; sourceTree = "<group>"; };
@@ -147,6 +168,8 @@
 				8E766E0AF2FAF7D4BCA7A123 /* Vision.framework in Frameworks */,
 				9B05FAEA79811C6D4AD265E0 /* CoreLocation.framework in Frameworks */,
 				8A5C20B607E66F54B70639EC /* SwiftData.framework in Frameworks */,
+				0D9A4B7C8E1F23456789A001 /* TMapSDK.xcframework in Frameworks */,
+				AB34CD56EF78901234560001 /* VSMSDK.xcframework in Frameworks */,
 				045C3EDAD4B96FDC841A7ABB /* Pods_ARBusan.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -215,7 +238,9 @@
 				67757602351B050E84917B7E /* CoreLocation.framework */,
 				9C6BDBD65F5F41B4E29AC0D8 /* RealityKit.framework */,
 				9997A22255DB4A2B06DC9654 /* SwiftData.framework */,
+				0D9A4B7C8E1F23456789A003 /* TMapSDK.xcframework */,
 				42017936B64E3D57C601D1F4 /* Vision.framework */,
+				AB34CD56EF78901234560003 /* VSMSDK.xcframework */,
 				4BA5637E4EAC2D0F5721D0F6 /* Pods_ARBusan.framework */,
 				04D29C5DAF3EBD94D103CE51 /* Pods_ARBusanTests.framework */,
 			);
@@ -381,6 +406,7 @@
 				8B39F1837E8CBF5DC7FDAABA /* Sources */,
 				9630C0C03F6FE66F196C8F78 /* Resources */,
 				59BA39DDD96BA0E588C76220 /* Frameworks */,
+				0D9A4B7C8E1F23456789A004 /* Embed Frameworks */,
 				7869A34A35E6C558B897377D /* [CP] Embed Pods Frameworks */,
 				E0C8CC23A367DD078E314A5B /* [CP] Copy Pods Resources */,
 			);

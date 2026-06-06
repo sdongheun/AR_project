@@ -7,10 +7,9 @@ struct ARBusanApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ARExploreView()
+            MainMapHomeView()
                 .environmentObject(appState)
         }
         .modelContainer(for: TourismSpotEntity.self)
     }
 }
-

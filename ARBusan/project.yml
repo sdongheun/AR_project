@@ -63,6 +63,10 @@ targets:
       - sdk: Vision.framework
       - sdk: CoreLocation.framework
       - sdk: SwiftData.framework
+      - framework: Vendor/TMapSDK/TMapSDK.xcframework
+        embed: true
+      - framework: Vendor/TMapSDK/VSMSDK.xcframework
+        embed: true
   ARBusanTests:
     type: bundle.unit-test
     platform: iOS

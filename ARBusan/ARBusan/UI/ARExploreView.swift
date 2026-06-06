@@ -1,4 +1,363 @@
+import CoreLocation
 import SwiftUI
+import TMapSDK
+import UIKit
+
+struct MainMapHomeView: View {
+    @EnvironmentObject private var appState: AppState
+    @State private var selectedSpot: TourismSpot?
+    @State private var showsARNavigation = false
+    @State private var showsInfoSheet = false
+
+    private var mapCenter: CLLocationCoordinate2D {
+        if let coordinate = appState.latestLocationSnapshot?.coordinate {
+            return coordinate
+        }
+
+        if let selectedSpot {
+            return selectedSpot.center
+        }
+
+        return appState.spots.first?.center ?? CLLocationCoordinate2D(latitude: 35.1796, longitude: 129.0756)
+    }
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            TMAPNativeMapView(
+                apiKey: appState.apiKeys.tmap,
+                spots: appState.spots,
+                selectedSpotID: selectedSpot?.id,
+                center: mapCenter,
+                onSelectSpot: { spotID in
+                    guard let spot = appState.spots.first(where: { $0.id == spotID }) else {
+                        return
+                    }
+
+                    selectedSpot = spot
+                    appState.selectCandidate(spot)
+                }
+            )
+            .ignoresSafeArea()
+
+            VStack(spacing: 10) {
+                MainMapHeaderView(
+                    spotCount: appState.spots.count,
+                    isTmapConfigured: appState.apiKeys.tmap.isConfiguredForMapRuntime
+                )
+
+                Spacer()
+
+                if let selectedSpot {
+                    TourismSpotMapCard(
+                        spot: selectedSpot,
+                        onShowInfo: {
+                            showsInfoSheet = true
+                        },
+                        onStartNavigation: {
+                            appState.selectNavigationDestination(selectedSpot)
+                            showsARNavigation = true
+                        }
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 18)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                } else {
+                    MainMapEmptySelectionHint()
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 18)
+                }
+            }
+        }
+        .animation(.easeOut(duration: 0.18), value: selectedSpot?.id)
+        .sheet(isPresented: $showsInfoSheet) {
+            TourismSpotInfoPlaceholderView(spot: selectedSpot)
+        }
+        .fullScreenCover(isPresented: $showsARNavigation) {
+            ARExploreView()
+                .environmentObject(appState)
+        }
+    }
+}
+
+private struct MainMapHeaderView: View {
+    let spotCount: Int
+    let isTmapConfigured: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("ARBusan")
+                    .font(.title3.weight(.black))
+                Text("현재 위치 기준 1km 관광지 핀")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(isTmapConfigured ? Color.green : Color.red)
+                    .frame(width: 9, height: 9)
+                Text("TMAP")
+                    .font(.caption.weight(.semibold))
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+
+            Text("\(spotCount)개")
+                .font(.caption.weight(.bold))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
+    }
+}
+
+private struct MainMapEmptySelectionHint: View {
+    var body: some View {
+        Text("지도 핀을 선택하면 관광지 카드가 표시됩니다.")
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 8))
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct TourismSpotMapCard: View {
+    let spot: TourismSpot
+    let onShowInfo: () -> Void
+    let onStartNavigation: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.blue.opacity(0.85), Color.teal.opacity(0.78)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .overlay {
+                        Image(systemName: "photo")
+                            .font(.title2.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.9))
+                    }
+                    .frame(width: 78, height: 78)
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(spot.name)
+                        .font(.headline.weight(.black))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+
+                    Text(spot.category)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.blue)
+
+                    Text(spot.address)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            HStack(spacing: 10) {
+                Button(action: onShowInfo) {
+                    Label("정보보기", systemImage: "doc.text.magnifyingglass")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+
+                Button(action: onStartNavigation) {
+                    Label("길찾기", systemImage: "arrow.triangle.turn.up.right.diamond.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(14)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(.white.opacity(0.18), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.24), radius: 14, x: 0, y: 8)
+    }
+}
+
+private struct TourismSpotInfoPlaceholderView: View {
+    let spot: TourismSpot?
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(spot?.name ?? "관광지 정보")
+                    .font(.title2.weight(.black))
+
+                Text("1차 MVP에서는 상세 정보 창 전환만 구현합니다. 관광지 사진과 상세 설명은 TourAPI 이미지/상세 정보 연결 단계에서 채웁니다.")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+
+                if let spot {
+                    Divider()
+                    Text(spot.address)
+                        .font(.subheadline)
+                    Text(spot.notes)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+            }
+            .padding()
+            .navigationTitle("정보보기")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+}
+
+private struct TMAPNativeMapView: UIViewRepresentable {
+    let apiKey: String
+    let spots: [TourismSpot]
+    let selectedSpotID: TourismSpot.ID?
+    let center: CLLocationCoordinate2D
+    let onSelectSpot: (TourismSpot.ID) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onSelectSpot: onSelectSpot)
+    }
+
+    func makeUIView(context: Context) -> TMapView {
+        let mapView = TMapView(frame: .zero)
+        mapView.delegate = context.coordinator
+        mapView.backgroundColor = .systemBackground
+        mapView.isPanningEnable = true
+        mapView.isZoomEnable = true
+        mapView.isShowCompass = true
+        mapView.setAppName("ARBusan")
+        if apiKey.isConfiguredForMapRuntime {
+            mapView.setApiKey(apiKey)
+        }
+        mapView.setCenter(center)
+        mapView.setZoom(16)
+        context.coordinator.renderMarkers(
+            on: mapView,
+            spots: spots,
+            selectedSpotID: selectedSpotID,
+            center: center
+        )
+        return mapView
+    }
+
+    func updateUIView(_ mapView: TMapView, context: Context) {
+        context.coordinator.onSelectSpot = onSelectSpot
+        context.coordinator.renderMarkers(
+            on: mapView,
+            spots: spots,
+            selectedSpotID: selectedSpotID,
+            center: center
+        )
+    }
+
+    final class Coordinator: NSObject, TMapViewDelegate {
+        var onSelectSpot: (TourismSpot.ID) -> Void
+        private var lastSignature = ""
+        private var lastSpotLayoutSignature = ""
+        private var markers: [TMapMarker] = []
+
+        init(onSelectSpot: @escaping (TourismSpot.ID) -> Void) {
+            self.onSelectSpot = onSelectSpot
+        }
+
+        func renderMarkers(
+            on mapView: TMapView,
+            spots: [TourismSpot],
+            selectedSpotID: TourismSpot.ID?,
+            center: CLLocationCoordinate2D
+        ) {
+            let spotLayoutSignature = spots.map { "\($0.id):\($0.center.latitude):\($0.center.longitude)" }.joined(separator: "|")
+            let signature = "\(spotLayoutSignature)-\(selectedSpotID ?? "")"
+            guard lastSignature != signature else {
+                return
+            }
+
+            lastSignature = signature
+            let shouldFitBounds = lastSpotLayoutSignature != spotLayoutSignature
+            lastSpotLayoutSignature = spotLayoutSignature
+
+            markers.forEach { $0.map = nil }
+            markers.removeAll()
+
+            guard !spots.isEmpty else {
+                mapView.setCenter(center)
+                mapView.setZoom(16)
+                return
+            }
+
+            markers = spots.map { spot in
+                let marker = TMapMarker(position: spot.center)
+                marker.title = spot.name
+                marker.icon = Self.markerImage(isSelected: spot.id == selectedSpotID)
+                marker.isUseImage = true
+                marker.setCanShowCallout = true
+                marker.setTapCallback { [weak self] _ in
+                    self?.onSelectSpot(spot.id)
+                }
+                marker.map = mapView
+                return marker
+            }
+
+            if shouldFitBounds {
+                mapView.fitMapBoundsWithMarkers(
+                    markers,
+                    inset: UIEdgeInsets(top: 120, left: 40, bottom: 220, right: 40)
+                )
+            } else if let selectedSpot = spots.first(where: { $0.id == selectedSpotID }) {
+                mapView.animateTo(location: selectedSpot.center)
+            }
+        }
+
+        private static func markerImage(isSelected: Bool) -> UIImage {
+            let size = CGSize(width: 44, height: 56)
+            let fillColor = isSelected ? UIColor.systemRed : UIColor.systemBlue
+            return UIGraphicsImageRenderer(size: size).image { context in
+                let cgContext = context.cgContext
+                cgContext.setShadow(offset: CGSize(width: 0, height: 3), blur: 6, color: UIColor.black.withAlphaComponent(0.26).cgColor)
+
+                let pinPath = UIBezierPath()
+                pinPath.move(to: CGPoint(x: 22, y: 54))
+                pinPath.addCurve(to: CGPoint(x: 5, y: 21), controlPoint1: CGPoint(x: 14, y: 43), controlPoint2: CGPoint(x: 5, y: 34))
+                pinPath.addCurve(to: CGPoint(x: 22, y: 4), controlPoint1: CGPoint(x: 5, y: 11), controlPoint2: CGPoint(x: 12, y: 4))
+                pinPath.addCurve(to: CGPoint(x: 39, y: 21), controlPoint1: CGPoint(x: 32, y: 4), controlPoint2: CGPoint(x: 39, y: 11))
+                pinPath.addCurve(to: CGPoint(x: 22, y: 54), controlPoint1: CGPoint(x: 39, y: 34), controlPoint2: CGPoint(x: 30, y: 43))
+                pinPath.close()
+                fillColor.setFill()
+                pinPath.fill()
+
+                cgContext.setShadow(offset: .zero, blur: 0, color: nil)
+                UIColor.white.setFill()
+                UIBezierPath(ovalIn: CGRect(x: 15, y: 14, width: 14, height: 14)).fill()
+            }
+        }
+    }
+}
+
+private extension String {
+    var isConfiguredForMapRuntime: Bool {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmed.isEmpty && !trimmed.contains("$(") && !trimmed.contains("your_")
+    }
+}
 
 struct ARExploreView: View {
     @EnvironmentObject private var appState: AppState
