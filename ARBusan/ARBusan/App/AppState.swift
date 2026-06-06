@@ -54,6 +54,7 @@ struct RadarMarkerOverlay: Identifiable, Equatable {
     let normalizedX: Double
     let normalizedY: Double
     let isSelected: Bool
+    let isArrivalNearby: Bool
     let isBehind: Bool
 }
 
@@ -63,16 +64,34 @@ struct RouteArrowPathSnapshot: Equatable {
     let arrows: [RouteArrowSnapshot]
 }
 
+enum RouteTurnDirection: String, Equatable {
+    case left
+    case right
+
+    var displayName: String {
+        switch self {
+        case .left:
+            return "좌회전"
+        case .right:
+            return "우회전"
+        }
+    }
+}
+
 struct RouteArrowSnapshot: Identifiable, Equatable {
     let id: Int
     let position: SIMD3<Float>
     let yawRadians: Float
     let distanceFromOriginMeters: Double
+    let turnDirection: RouteTurnDirection
 }
 
 private struct NavigationGuidance {
     let title: String
     let detail: String
+    let systemImageName: String
+    let horizontalOffsetRatio: Double
+    let isArrivalNearby: Bool
 }
 
 struct DebugStatusRow: Identifiable, Equatable {
@@ -166,12 +185,18 @@ final class AppState: ObservableObject {
     @Published var radarDiagnostics = "반원형 레이더를 아직 계산하지 않았습니다."
     @Published var isNavigationModeEnabled = false
     @Published var navigationDestinationSpotID: TourismSpot.ID?
+    @Published var navigationSearchQuery = ""
+    @Published var navigationSearchResults: [TMAPPOISearchResult] = []
+    @Published var navigationSearchStatus = "목적지를 직접 입력해 TMAP 검색 결과로 길찾기를 시작할 수 있습니다."
     @Published var routeArrowPath: RouteArrowPathSnapshot?
     @Published var routeArrowDiagnostics = "길찾기 바닥 화살표 경로를 아직 계산하지 않았습니다."
     @Published var routeArrowComputationDiagnostics = "길찾기 화살표 계산 로그를 아직 만들지 않았습니다."
     @Published var routeArrowRenderDiagnostics = "길찾기 화살표 렌더 로그를 아직 받지 못했습니다."
     @Published var navigationGuidanceTitle = "목적지를 선택하세요"
     @Published var navigationGuidanceDetail = "TMAP 경로를 준비하면 다음 진행 방향을 표시합니다."
+    @Published var navigationGuidanceSystemImageName = "location.fill"
+    @Published var navigationGuidanceHorizontalOffsetRatio: Double = 0
+    @Published var navigationGuidanceIsArrivalNearby = false
     @Published var showsMatrixDebugMarker = FeatureFlags.enableLegacyMatrixDebugOverlay
     @Published var showsOnScreenCandidateDebugMarkers = FeatureFlags.enableLegacyOnScreenCandidateDebugMarkers
     @Published var shows3DGeospatialDebugMarker = FeatureFlags.enableLegacyGeospatial3DMarkers
@@ -230,10 +255,11 @@ final class AppState: ObservableObject {
     private let geospatial3DCreateRadiusMeters: CLLocationDistance = 120
     private let geospatial3DDeleteRadiusMeters: CLLocationDistance = 140
     private let maxActiveGeospatial3DAnchorCount = 3
-    private let routeArrowLookAheadMeters: CLLocationDistance = 50
-    private let routeArrowSpacingMeters: CLLocationDistance = 5
+    private let routeArrivalCompletionMeters: CLLocationDistance = 5
+    private let routeArrowLookAheadMeters: CLLocationDistance = 120
     private let routeArrowGroundYOffsetMeters: Float = -1.35
-    private let maxRouteArrowCount = 10
+    private let maxRouteArrowCount = 6
+    private let routeTurnMinimumAngleDegrees: Double = 35
     private let tmapRouteReuseDistanceMeters: CLLocationDistance = 50
     private let geospatial3DAnchorRefreshInterval: TimeInterval = 2.0
     private let stableOriginMaxAccuracyMeters: CLLocationAccuracy = 10
@@ -250,6 +276,7 @@ final class AppState: ObservableObject {
     private var polygonLookupNotFoundSpotIDs: Set<TourismSpot.ID> = []
     private var tmapRouteTasksBySpotID: [TourismSpot.ID: Task<Void, Never>] = [:]
     private var tmapRouteFailedSpotIDs: Set<TourismSpot.ID> = []
+    private var navigationSearchTask: Task<Void, Never>?
     private var navigationRouteTask: Task<Void, Never>?
     private var latestSceneSemanticsSnapshot: SceneSemanticsSnapshot?
     private var sceneSemanticsEvidenceBySpotID: [TourismSpot.ID: SceneSemanticsSpotEvidence] = [:]
@@ -460,8 +487,7 @@ final class AppState: ObservableObject {
             routeArrowPath = nil
             routeArrowDiagnostics = "길찾기 모드 꺼짐 / 목적지를 선택하면 화살표를 표시합니다."
             routeArrowComputationDiagnostics = "길찾기 모드 꺼짐 / 화살표 계산 안 함"
-            navigationGuidanceTitle = "길찾기 꺼짐"
-            navigationGuidanceDetail = "목적지를 선택하면 TMAP 경로 기준 방향 안내를 표시합니다."
+            setNavigationGuidance(title: "길찾기 꺼짐", detail: "목적지를 선택하면 TMAP 경로 기준 방향 안내를 표시합니다.")
             refreshRadarMarkerOverlays()
             refreshGeospatial3DAnchorRequestsIfPossible(force: true)
         }
@@ -476,12 +502,105 @@ final class AppState: ObservableObject {
         routeArrowPath = nil
         routeArrowDiagnostics = "\(spot.name) 길찾기 목적지 선택 / TMAP 경로를 준비합니다."
         routeArrowComputationDiagnostics = "\(spot.name) 목적지 선택 / 현재 위치 기준 TMAP route 준비"
-        navigationGuidanceTitle = "\(spot.name) 경로 준비 중"
-        navigationGuidanceDetail = "현재 위치에서 목적지까지의 TMAP 보행자 경로를 요청합니다."
+        setNavigationGuidance(title: "\(spot.name) 경로 준비 중", detail: "현재 위치에서 목적지까지의 TMAP 보행자 경로를 요청합니다.")
         refreshGeospatial3DAnchorRequestsIfPossible(force: true)
         refreshRadarMarkerOverlays()
         refreshRouteArrowPath()
         ensureNavigationRouteForDestination()
+    }
+
+    func searchNavigationDestinationFromInput() {
+        let keyword = navigationSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !keyword.isEmpty else {
+            navigationSearchStatus = "검색어를 입력하세요."
+            return
+        }
+
+        guard apiKeys.tmap.isRuntimeConfiguredAPIKey else {
+            navigationSearchStatus = "TMAP_API_KEY가 비어 있어 목적지를 검색할 수 없습니다."
+            return
+        }
+
+        navigationSearchTask?.cancel()
+        navigationSearchTask = nil
+        let origin = stableGeospatial3DOrigin ?? latestGeospatialLocationSnapshot ?? latestLocationSnapshot
+        navigationSearchStatus = "\"\(keyword)\" TMAP 목적지 검색 중..."
+        setNavigationGuidance(title: "목적지 검색 중", detail: "\"\(keyword)\" 검색 결과를 기반으로 길찾기를 준비합니다.")
+
+        navigationSearchTask = Task { @MainActor [weak self] in
+            guard let self else {
+                return
+            }
+
+            do {
+                let results = try await self.tmapClient.searchPOIs(
+                    keyword: keyword,
+                    near: origin?.coordinate
+                )
+                guard !Task.isCancelled else {
+                    return
+                }
+
+                self.navigationSearchTask = nil
+                self.navigationSearchResults = results
+                guard let firstResult = results.first else {
+                    self.navigationSearchStatus = "\"\(keyword)\" 검색 결과 없음"
+                    self.setNavigationGuidance(title: "검색 결과 없음", detail: "목적지 이름을 더 구체적으로 입력해 주세요.")
+                    return
+                }
+
+                self.navigationSearchStatus = "\"\(keyword)\" 검색 결과 \(results.count)개 / 첫 결과 \(firstResult.name)로 길찾기 시작"
+                self.selectNavigationSearchResult(firstResult)
+            } catch {
+                guard !Task.isCancelled else {
+                    return
+                }
+
+                self.navigationSearchTask = nil
+                self.navigationSearchResults = []
+                self.navigationSearchStatus = "\"\(keyword)\" 검색 실패: \(error.localizedDescription)"
+                self.setNavigationGuidance(title: "목적지 검색 실패", detail: error.localizedDescription)
+            }
+        }
+    }
+
+    func selectNavigationSearchResult(_ result: TMAPPOISearchResult) {
+        let spot = tourismSpot(from: result)
+        upsertNavigationSearchSpot(spot)
+        navigationSearchQuery = result.name
+        navigationSearchStatus = "\(result.name) 선택 / \(result.address) / \(result.coordinate.shortText)"
+        selectNavigationDestination(spot)
+    }
+
+    private func tourismSpot(from result: TMAPPOISearchResult) -> TourismSpot {
+        TourismSpot(
+            id: "tmap-\(result.id)",
+            name: result.name,
+            address: result.address,
+            districtName: "TMAP 검색",
+            category: "사용자 입력 목적지",
+            source: .tmap,
+            geometryKind: .point,
+            center: result.coordinate,
+            recognitionHints: [result.name],
+            notes: "사용자가 직접 입력한 TMAP POI 검색 결과입니다.",
+            preferredMarkerCoordinate: result.coordinate,
+            entranceCoordinate: result.coordinate
+        )
+    }
+
+    private func upsertNavigationSearchSpot(_ spot: TourismSpot) {
+        if let index = spots.firstIndex(where: { $0.id == spot.id }) {
+            spots[index] = spot
+        } else {
+            spots.insert(spot, at: 0)
+        }
+
+        if let loadedIndex = loadedTourismSpots.firstIndex(where: { $0.id == spot.id }) {
+            loadedTourismSpots[loadedIndex] = spot
+        } else {
+            loadedTourismSpots.insert(spot, at: 0)
+        }
     }
 
     func applyIndoorDebugScenario(_ scenario: IndoorDebugScenario) {
@@ -1381,8 +1500,7 @@ final class AppState: ObservableObject {
             routeArrowPath = nil
             routeArrowDiagnostics = "길찾기 모드 꺼짐 / 목적지를 선택하면 화살표를 표시합니다."
             routeArrowComputationDiagnostics = "길찾기 모드 꺼짐 / routeArrowPath nil"
-            navigationGuidanceTitle = "길찾기 꺼짐"
-            navigationGuidanceDetail = "목적지를 선택하면 TMAP 경로 기준 방향 안내를 표시합니다."
+            setNavigationGuidance(title: "길찾기 꺼짐", detail: "목적지를 선택하면 TMAP 경로 기준 방향 안내를 표시합니다.")
             return
         }
 
@@ -1390,8 +1508,7 @@ final class AppState: ObservableObject {
             routeArrowPath = nil
             routeArrowDiagnostics = "길찾기 화살표 숨김 / 목적지를 선택하세요."
             routeArrowComputationDiagnostics = "목적지 미선택 / routeArrowPath nil"
-            navigationGuidanceTitle = "목적지를 선택하세요"
-            navigationGuidanceDetail = "길찾기 모드에서 안내할 관광지/건물을 선택해야 합니다."
+            setNavigationGuidance(title: "목적지를 선택하세요", detail: "길찾기 모드에서 안내할 관광지/건물을 선택해야 합니다.")
             return
         }
 
@@ -1399,8 +1516,7 @@ final class AppState: ObservableObject {
             routeArrowPath = nil
             routeArrowDiagnostics = "길찾기 화살표 숨김 / 현재 위치 기준 없음"
             routeArrowComputationDiagnostics = "origin 없음 / routeArrowPath nil"
-            navigationGuidanceTitle = "현재 위치 대기"
-            navigationGuidanceDetail = "CoreLocation 또는 ARCore Geospatial 위치가 들어오면 방향 안내를 계산합니다."
+            setNavigationGuidance(title: "현재 위치 대기", detail: "CoreLocation 또는 ARCore Geospatial 위치가 들어오면 방향 안내를 계산합니다.")
             return
         }
 
@@ -1408,8 +1524,7 @@ final class AppState: ObservableObject {
             routeArrowPath = nil
             routeArrowDiagnostics = "길찾기 화살표 숨김 / 선택 목적지가 표시 후보 밖"
             routeArrowComputationDiagnostics = "선택 목적지가 spots 목록에 없음 / routeArrowPath nil"
-            navigationGuidanceTitle = "목적지 후보 없음"
-            navigationGuidanceDetail = "선택한 목적지가 현재 후보 목록에 없어 안내를 계산하지 못했습니다."
+            setNavigationGuidance(title: "목적지 후보 없음", detail: "선택한 목적지가 현재 후보 목록에 없어 안내를 계산하지 못했습니다.")
             return
         }
 
@@ -1417,20 +1532,28 @@ final class AppState: ObservableObject {
             routeArrowPath = nil
             routeArrowDiagnostics = "\(targetSpot.name) 길찾기 화살표 대기 / TMAP 경로 없음"
             routeArrowComputationDiagnostics = "\(targetSpot.name) TMAP route 캐시 없음 / routeArrowPath nil"
-            navigationGuidanceTitle = "\(targetSpot.name) 경로 대기"
-            navigationGuidanceDetail = "TMAP 보행자 경로 응답을 기다리는 중입니다."
+            setNavigationGuidance(title: "\(targetSpot.name) 경로 대기", detail: "TMAP 보행자 경로 응답을 기다리는 중입니다.")
+            return
+        }
+
+        let arrivalDistance = origin.coordinate.distance(to: route.arrivalCoordinate)
+        if arrivalDistance <= routeArrivalCompletionMeters {
+            routeArrowPath = nil
+            routeArrowDiagnostics = "\(targetSpot.name) 도착 완료 / TMAP 도착 좌표 \(Int(arrivalDistance))m 이내 / 길안내 종료"
+            routeArrowComputationDiagnostics = "\(targetSpot.name) 도착 완료 / AR 화살표 제거 / 도착 핀 상태로 전환"
+            updateNavigationGuidance(for: route, targetSpot: targetSpot, origin: origin)
             return
         }
 
         let arrows = routeArrowSnapshots(for: route, from: origin)
         guard !arrows.isEmpty else {
             routeArrowPath = nil
-            routeArrowDiagnostics = "\(targetSpot.name) 길찾기 화살표 숨김 / 표시 가능한 앞쪽 경로 좌표 없음"
+            routeArrowDiagnostics = "\(targetSpot.name) 회전 지점 화살표 없음 / 앞쪽 \(Int(routeArrowLookAheadMeters))m 안에 큰 좌우 회전 없음"
             let nearestDistance = route.routeCoordinates
                 .map { origin.coordinate.distance(to: $0) }
                 .min()
             let nearestText = nearestDistance.map { "\(Int($0))m" } ?? "없음"
-            routeArrowComputationDiagnostics = "\(targetSpot.name) route 좌표 \(route.routeCoordinates.count)개지만 샘플 0개 / 앞쪽 \(Int(routeArrowLookAheadMeters))m 안 좌표 부족 가능 / origin \(origin.coordinate.shortText) / route 최근접 \(nearestText)"
+            routeArrowComputationDiagnostics = "\(targetSpot.name) route 좌표 \(route.routeCoordinates.count)개 / 앞쪽 \(Int(routeArrowLookAheadMeters))m 안 \(Int(routeTurnMinimumAngleDegrees))도 이상 좌우 회전 없음 / origin \(origin.coordinate.shortText) / route 최근접 \(nearestText)"
             updateNavigationGuidance(for: route, targetSpot: targetSpot, origin: origin)
             return
         }
@@ -1440,11 +1563,11 @@ final class AppState: ObservableObject {
             spotName: targetSpot.name,
             arrows: arrows
         )
-        routeArrowDiagnostics = "\(targetSpot.name) 길찾기 화살표 \(arrows.count)개 / 앞쪽 \(Int(routeArrowLookAheadMeters))m / 간격 \(Int(routeArrowSpacingMeters))m"
+        routeArrowDiagnostics = "\(targetSpot.name) 회전 지점 화살표 \(arrows.count)개 / 앞쪽 \(Int(routeArrowLookAheadMeters))m / \(Int(routeTurnMinimumAngleDegrees))도 이상 꺾임"
         let first = arrows.first
-        let firstText = first.map { "첫 화살표 pos x \(String(format: "%.1f", $0.position.x)) y \(String(format: "%.1f", $0.position.y)) z \(String(format: "%.1f", $0.position.z)) / yaw \(Int(Double($0.yawRadians).radiansToDegrees))도" } ?? "첫 화살표 없음"
+        let firstText = first.map { "첫 회전 \(String(format: "%.0f", $0.distanceFromOriginMeters))m / \($0.turnDirection.displayName) / pos x \(String(format: "%.1f", $0.position.x)) y \(String(format: "%.1f", $0.position.y)) z \(String(format: "%.1f", $0.position.z)) / yaw \(Int(Double($0.yawRadians).radiansToDegrees))도" } ?? "첫 회전 화살표 없음"
         let routeLength = routePolylineLengthMeters(route.routeCoordinates)
-        routeArrowComputationDiagnostics = "\(targetSpot.name) route 좌표 \(route.routeCoordinates.count)개 / 경로 길이 \(Int(routeLength))m -> AR 화살표 \(arrows.count)개 생성 / origin \(origin.source.rawValue) \(origin.coordinate.shortText) / \(firstText)"
+        routeArrowComputationDiagnostics = "\(targetSpot.name) route 좌표 \(route.routeCoordinates.count)개 / 경로 길이 \(Int(routeLength))m -> 회전 지점 AR 화살표 \(arrows.count)개 생성 / origin \(origin.source.rawValue) \(origin.coordinate.shortText) / \(firstText)"
         updateNavigationGuidance(for: route, targetSpot: targetSpot, origin: origin)
     }
 
@@ -1454,8 +1577,32 @@ final class AppState: ObservableObject {
         origin: LocationSnapshot
     ) {
         let guidance = navigationGuidance(for: route, targetSpot: targetSpot, origin: origin)
+        setNavigationGuidance(guidance)
+    }
+
+    private func setNavigationGuidance(_ guidance: NavigationGuidance) {
         navigationGuidanceTitle = guidance.title
         navigationGuidanceDetail = guidance.detail
+        navigationGuidanceSystemImageName = guidance.systemImageName
+        navigationGuidanceHorizontalOffsetRatio = guidance.horizontalOffsetRatio
+        navigationGuidanceIsArrivalNearby = guidance.isArrivalNearby
+    }
+
+    private func setNavigationGuidance(
+        title: String,
+        detail: String,
+        systemImageName: String = "location.fill",
+        horizontalOffsetRatio: Double = 0
+    ) {
+        setNavigationGuidance(
+        NavigationGuidance(
+            title: title,
+            detail: detail,
+            systemImageName: systemImageName,
+            horizontalOffsetRatio: horizontalOffsetRatio,
+            isArrivalNearby: false
+        )
+        )
     }
 
     private func navigationGuidance(
@@ -1464,10 +1611,13 @@ final class AppState: ObservableObject {
         origin: LocationSnapshot
     ) -> NavigationGuidance {
         let arrivalDistance = origin.coordinate.distance(to: route.arrivalCoordinate)
-        if arrivalDistance <= 12 {
+        if arrivalDistance <= routeArrivalCompletionMeters {
             return NavigationGuidance(
-                title: "\(targetSpot.name) 도착 지점 근처",
-                detail: "TMAP 마지막 도착 좌표까지 약 \(Int(arrivalDistance))m 남았습니다."
+                title: "\(targetSpot.name) 도착",
+                detail: "도착 좌표 \(Int(routeArrivalCompletionMeters))m 이내입니다. 길안내를 종료하고 도착 핀을 표시합니다.",
+                systemImageName: "mappin.circle.fill",
+                horizontalOffsetRatio: 0,
+                isArrivalNearby: true
             )
         }
 
@@ -1478,7 +1628,10 @@ final class AppState: ObservableObject {
             let bearing = origin.coordinate.bearing(to: route.arrivalCoordinate)
             return NavigationGuidance(
                 title: "\(targetSpot.name) 방향으로 이동",
-                detail: "경로 좌표가 부족해 도착 좌표 방향각 \(Int(bearing))도를 기준으로 안내합니다."
+                detail: "경로 좌표가 부족해 도착 좌표 방향각 \(Int(bearing))도를 기준으로 안내합니다.",
+                systemImageName: "location.north.fill",
+                horizontalOffsetRatio: 0,
+                isArrivalNearby: false
             )
         }
 
@@ -1491,12 +1644,15 @@ final class AppState: ObservableObject {
             routeCoordinates: route.routeCoordinates,
             fallbackDestination: route.arrivalCoordinate
         )
-        let action = navigationActionText(forSignedDelta: signedDelta)
+        let visualCue = navigationVisualCue(forSignedDelta: signedDelta)
         let remainingText = remainingDistance.map { "\(Int($0))m" } ?? "\(Int(arrivalDistance))m"
 
         return NavigationGuidance(
-            title: action,
-            detail: "\(targetSpot.name)까지 약 \(remainingText) / 다음 기준점 \(Int(distanceToNext))m / heading \(Int(heading))도 -> 경로 \(Int(targetBearing))도 / 차이 \(Int(signedDelta))도"
+            title: visualCue.title,
+            detail: "\(targetSpot.name)까지 약 \(remainingText) / 다음 기준점 \(Int(distanceToNext))m / heading \(Int(heading))도 -> 경로 \(Int(targetBearing))도 / 차이 \(Int(signedDelta))도",
+            systemImageName: visualCue.systemImageName,
+            horizontalOffsetRatio: visualCue.horizontalOffsetRatio,
+            isArrivalNearby: false
         )
     }
 
@@ -1547,18 +1703,18 @@ final class AppState: ObservableObject {
         return distance
     }
 
-    private func navigationActionText(forSignedDelta signedDelta: Double) -> String {
+    private func navigationVisualCue(forSignedDelta signedDelta: Double) -> (title: String, systemImageName: String, horizontalOffsetRatio: Double) {
         switch signedDelta {
         case -180 ..< -120:
-            return "뒤쪽 왼편으로 돌아보세요"
+            return ("뒤쪽 왼편으로 돌아보세요", "arrow.uturn.left", -0.34)
         case -120 ..< -35:
-            return "왼쪽으로 이동하세요"
+            return ("왼쪽으로 이동하세요", "arrow.left", -0.28)
         case -35 ... 35:
-            return "계속 직진하세요"
+            return ("계속 직진하세요", "arrow.up", 0)
         case 35 ... 120:
-            return "오른쪽으로 이동하세요"
+            return ("오른쪽으로 이동하세요", "arrow.right", 0.28)
         default:
-            return "뒤쪽 오른편으로 돌아보세요"
+            return ("뒤쪽 오른편으로 돌아보세요", "arrow.uturn.right", 0.34)
         }
     }
 
@@ -1582,47 +1738,50 @@ final class AppState: ObservableObject {
         }
 
         var arrows: [RouteArrowSnapshot] = []
-        var nextSampleDistance = routeArrowSpacingMeters
         var traveledDistance: CLLocationDistance = 0
 
-        for index in 1..<enuPoints.count {
+        for index in 1..<(enuPoints.count - 1) {
             let start = enuPoints[index - 1]
-            let end = enuPoints[index]
-            let deltaEast = end.eastMeters - start.eastMeters
-            let deltaNorth = end.northMeters - start.northMeters
-            let segmentLength = hypot(deltaEast, deltaNorth)
+            let turn = enuPoints[index]
+            let end = enuPoints[index + 1]
+            let incomingEast = turn.eastMeters - start.eastMeters
+            let incomingNorth = turn.northMeters - start.northMeters
+            let outgoingEast = end.eastMeters - turn.eastMeters
+            let outgoingNorth = end.northMeters - turn.northMeters
+            let incomingLength = hypot(incomingEast, incomingNorth)
+            let outgoingLength = hypot(outgoingEast, outgoingNorth)
 
-            guard segmentLength > 0.5 else {
+            guard incomingLength > 1.0, outgoingLength > 1.0 else {
                 continue
             }
 
-            while nextSampleDistance <= traveledDistance + segmentLength,
-                  nextSampleDistance <= routeArrowLookAheadMeters,
-                  arrows.count < maxRouteArrowCount {
-                let ratio = (nextSampleDistance - traveledDistance) / segmentLength
-                let east = start.eastMeters + deltaEast * ratio
-                let north = start.northMeters + deltaNorth * ratio
-                let yaw = Float(atan2(deltaEast, deltaNorth))
-                let position = SIMD3<Float>(
-                    Float(east),
-                    routeArrowGroundYOffsetMeters,
-                    Float(-north)
-                )
-                arrows.append(
-                    RouteArrowSnapshot(
-                        id: arrows.count,
-                        position: position,
-                        yawRadians: yaw,
-                        distanceFromOriginMeters: nextSampleDistance
-                    )
-                )
-                nextSampleDistance += routeArrowSpacingMeters
-            }
-
-            traveledDistance += segmentLength
+            traveledDistance += incomingLength
             if traveledDistance > routeArrowLookAheadMeters || arrows.count >= maxRouteArrowCount {
                 break
             }
+
+            let incomingBearing = atan2(incomingEast, incomingNorth).radiansToDegrees.normalizedDegrees
+            let outgoingBearing = atan2(outgoingEast, outgoingNorth).radiansToDegrees.normalizedDegrees
+            let signedTurn = incomingBearing.signedAngularDifference(to: outgoingBearing)
+            guard abs(signedTurn) >= routeTurnMinimumAngleDegrees else {
+                continue
+            }
+
+            let yaw = Float(atan2(incomingEast, incomingNorth))
+            let position = SIMD3<Float>(
+                Float(turn.eastMeters),
+                routeArrowGroundYOffsetMeters,
+                Float(-turn.northMeters)
+            )
+            arrows.append(
+                RouteArrowSnapshot(
+                    id: arrows.count,
+                    position: position,
+                    yawRadians: yaw,
+                    distanceFromOriginMeters: traveledDistance,
+                    turnDirection: signedTurn > 0 ? .right : .left
+                )
+            )
         }
 
         return arrows
@@ -1785,6 +1944,7 @@ final class AppState: ObservableObject {
                     normalizedX: normalizedX.clamped(to: 0.06...0.94),
                     normalizedY: normalizedY.clamped(to: 0.08...0.96),
                     isSelected: spot.id == selectedSpotID,
+                    isArrivalNearby: spot.id == selectedSpotID && distance <= routeArrivalCompletionMeters,
                     isBehind: isBehind
                 ),
                 distance

@@ -13,6 +13,7 @@ final class ARSessionViewController: UIViewController {
     private struct RouteArrowRenderNode {
         let anchorEntity: AnchorEntity
         let arrowEntities: [Entity]
+        let turnDirections: [RouteTurnDirection]
     }
 
     private var arView: ARView!
@@ -112,13 +113,14 @@ final class ARSessionViewController: UIViewController {
         }
 
         if let routeArrowNode,
-           routeArrowNode.arrowEntities.count == path.arrows.count {
+           routeArrowNode.arrowEntities.count == path.arrows.count,
+           routeArrowNode.turnDirections == path.arrows.map(\.turnDirection) {
             for (arrow, entity) in zip(path.arrows, routeArrowNode.arrowEntities) {
                 entity.position = routeArrowPosition(from: arrow)
                 entity.orientation = simd_quatf(angle: arrow.yawRadians, axis: SIMD3<Float>(0, 1, 0))
             }
-            let groundText = detectedGroundY.map { "groundY \(String(format: "%.2f", $0))" } ?? "groundY 미감지"
-            onRouteArrowRenderStatusUpdated?("\(path.spotName) RealityKit 화살표 업데이트 / \(path.arrows.count)개 / \(groundText)")
+            let heightText = routeArrowHeightText()
+            onRouteArrowRenderStatusUpdated?("\(path.spotName) RealityKit 회전 화살표 업데이트 / \(path.arrows.count)개 / \(heightText)")
             return
         }
 
@@ -128,44 +130,84 @@ final class ARSessionViewController: UIViewController {
 
         let anchor = AnchorEntity(world: matrix_identity_float4x4)
         let arrows = path.arrows.map { snapshot in
-            let arrow = makeRouteArrowEntity()
+            let arrow = makeRouteArrowEntity(turnDirection: snapshot.turnDirection)
             arrow.position = routeArrowPosition(from: snapshot)
             arrow.orientation = simd_quatf(angle: snapshot.yawRadians, axis: SIMD3<Float>(0, 1, 0))
             anchor.addChild(arrow)
             return arrow
         }
-        routeArrowNode = RouteArrowRenderNode(anchorEntity: anchor, arrowEntities: arrows)
+        routeArrowNode = RouteArrowRenderNode(
+            anchorEntity: anchor,
+            arrowEntities: arrows,
+            turnDirections: path.arrows.map(\.turnDirection)
+        )
         arView.scene.addAnchor(anchor)
-        let groundText = detectedGroundY.map { "groundY \(String(format: "%.2f", $0))" } ?? "groundY 미감지"
-        onRouteArrowRenderStatusUpdated?("\(path.spotName) RealityKit 화살표 생성 / \(arrows.count)개 / \(groundText)")
+        let heightText = routeArrowHeightText()
+        onRouteArrowRenderStatusUpdated?("\(path.spotName) RealityKit 회전 화살표 생성 / \(arrows.count)개 / \(heightText)")
+    }
+
+    private func routeArrowHeightText() -> String {
+        if let cameraTransform = arView.session.currentFrame?.camera.transform {
+            return "기기 높이 y \(String(format: "%.2f", cameraTransform.columns.3.y))"
+        }
+        if let detectedGroundY {
+            return "기기 높이 대체값 groundY+1.5 \(String(format: "%.2f", detectedGroundY + 1.5))"
+        }
+        return "기기 높이 대기"
     }
 
     private func routeArrowPosition(from snapshot: RouteArrowSnapshot) -> SIMD3<Float> {
         var position = snapshot.position
-        if let detectedGroundY {
-            position.y = detectedGroundY + 0.035
+        if let cameraTransform = arView.session.currentFrame?.camera.transform {
+            position.y = cameraTransform.columns.3.y
+        } else if let detectedGroundY {
+            position.y = detectedGroundY + 1.5
         }
         return position
     }
 
-    private func makeRouteArrowEntity() -> Entity {
+    private func makeRouteArrowEntity(turnDirection: RouteTurnDirection) -> Entity {
         let root = Entity()
-        let material = SimpleMaterial(color: .systemCyan.withAlphaComponent(0.86), roughness: 0.35, isMetallic: false)
+        let isRightTurn = turnDirection == .right
+        let turnSign: Float = isRightTurn ? 1 : -1
+        let material = SimpleMaterial(color: .systemBlue.withAlphaComponent(0.96), roughness: 0.14, isMetallic: false)
+        let glowMaterial = SimpleMaterial(color: .systemBlue.withAlphaComponent(0.72), roughness: 0.1, isMetallic: false)
 
-        let shaft = ModelEntity(
-            mesh: .generateBox(size: SIMD3<Float>(0.14, 0.035, 0.55)),
+        let incomingShaft = ModelEntity(
+            mesh: .generateBox(size: SIMD3<Float>(0.42, 0.14, 1.75)),
             materials: [material]
         )
-        shaft.position = SIMD3<Float>(0, 0, 0.16)
+        incomingShaft.position = SIMD3<Float>(0, 0, 0.48)
 
-        let head = ModelEntity(
-            mesh: .generateBox(size: SIMD3<Float>(0.34, 0.04, 0.24)),
+        let turnShaft = ModelEntity(
+            mesh: .generateBox(size: SIMD3<Float>(1.75, 0.16, 0.42)),
             materials: [material]
         )
-        head.position = SIMD3<Float>(0, 0, -0.22)
+        turnShaft.position = SIMD3<Float>(turnSign * 0.76, 0.02, -0.68)
 
-        root.addChild(shaft)
-        root.addChild(head)
+        let arrowHead = ModelEntity(
+            mesh: .generateBox(size: SIMD3<Float>(0.92, 0.2, 0.88)),
+            materials: [material]
+        )
+        arrowHead.position = SIMD3<Float>(turnSign * 1.72, 0.04, -0.68)
+
+        let dot = ModelEntity(
+            mesh: .generateSphere(radius: 0.42),
+            materials: [glowMaterial]
+        )
+        dot.position = SIMD3<Float>(0, 0.08, -0.68)
+
+        let base = ModelEntity(
+            mesh: .generateBox(size: SIMD3<Float>(2.7, 0.06, 2.2)),
+            materials: [glowMaterial]
+        )
+        base.position = SIMD3<Float>(turnSign * 0.66, -0.08, -0.24)
+
+        root.addChild(base)
+        root.addChild(incomingShaft)
+        root.addChild(turnShaft)
+        root.addChild(arrowHead)
+        root.addChild(dot)
         return root
     }
 

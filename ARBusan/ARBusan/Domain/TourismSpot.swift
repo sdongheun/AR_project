@@ -5,6 +5,7 @@ struct TourismSpot: Identifiable, Hashable {
     enum Source: String, Hashable {
         case tourAPI
         case mock
+        case tmap
     }
 
     enum GeometryKind: String, Hashable {

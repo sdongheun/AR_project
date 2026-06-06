@@ -64,7 +64,7 @@ struct MVPRecognitionControlView: View {
             if FeatureFlags.enableNavigationRouteControls {
                 RecognitionSignalSection(
                     title: "길찾기",
-                    caption: "목적지를 선택하면 TMAP 보행자 경로와 도착 좌표를 기준으로 AR 안내를 준비합니다."
+                    caption: "목적지를 직접 입력하면 TMAP 검색 결과를 기반으로 보행자 경로와 도착 좌표를 준비합니다."
                 ) {
                     Toggle(
                         "길찾기 모드",
@@ -76,8 +76,39 @@ struct MVPRecognitionControlView: View {
                     .font(.caption)
 
                     if appState.isNavigationModeEnabled {
+                        HStack(spacing: 8) {
+                            TextField("예: 투썸플레이스, 신세계백화점 센텀시티점", text: $appState.navigationSearchQuery)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.caption)
+                                .submitLabel(.search)
+                                .onSubmit {
+                                    appState.searchNavigationDestinationFromInput()
+                                }
+
+                            Button("검색") {
+                                appState.searchNavigationDestinationFromInput()
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .font(.caption.weight(.semibold))
+                        }
+
+                        Text(appState.navigationSearchStatus)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(nil)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        if !appState.navigationSearchResults.isEmpty {
+                            TMAPSearchResultListView(
+                                results: Array(appState.navigationSearchResults.prefix(3)),
+                                selectedSpotID: appState.navigationDestinationSpotID
+                            ) { result in
+                                appState.selectNavigationSearchResult(result)
+                            }
+                        }
+
                         IndoorDebugSpotSelector(
-                            title: "목적지",
+                            title: "목업/후보에서 선택",
                             spots: appState.spots,
                             selectedSpotID: appState.navigationDestinationSpotID,
                             isExpanded: $showsNavigationDestinationList
@@ -415,6 +446,57 @@ private struct DebugRowsBlock: View {
                 }
             }
         }
+    }
+}
+
+private struct TMAPSearchResultListView: View {
+    let results: [TMAPPOISearchResult]
+    let selectedSpotID: TourismSpot.ID?
+    let onSelect: (TMAPPOISearchResult) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("TMAP 검색 결과")
+                .font(.caption.weight(.semibold))
+
+            ForEach(results) { result in
+                TMAPSearchResultRowView(
+                    result: result,
+                    isSelected: "tmap-\(result.id)" == selectedSpotID
+                ) {
+                    onSelect(result)
+                }
+            }
+        }
+    }
+}
+
+private struct TMAPSearchResultRowView: View {
+    let result: TMAPPOISearchResult
+    let isSelected: Bool
+    let onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(result.name)
+                    .font(.caption.weight(.semibold))
+                Text(result.address)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Text(coordinateText)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.bordered)
+        .tint(isSelected ? .blue : .secondary)
+    }
+
+    private var coordinateText: String {
+        "\(String(format: "%.6f", result.coordinate.latitude)), \(String(format: "%.6f", result.coordinate.longitude))"
     }
 }
 

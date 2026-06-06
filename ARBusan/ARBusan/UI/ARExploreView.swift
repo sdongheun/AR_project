@@ -7,6 +7,18 @@ struct ARExploreView: View {
     var body: some View {
         GeometryReader { geometry in
             let bottomPanelHeight = min(430, geometry.size.height * 0.48)
+            let guidanceWidth = min(geometry.size.width - 48, 360)
+            let guidanceCenterX = min(
+                max(
+                    geometry.size.width / 2 + appState.navigationGuidanceHorizontalOffsetRatio * geometry.size.width,
+                    guidanceWidth / 2 + 16
+                ),
+                geometry.size.width - guidanceWidth / 2 - 16
+            )
+            let guidanceCenterY = max(
+                116,
+                min(geometry.size.height * 0.22, geometry.size.height - bottomPanelHeight - 120)
+            )
             ZStack(alignment: .bottom) {
                 ARViewContainer()
                     .frame(width: geometry.size.width, height: geometry.size.height)
@@ -55,6 +67,20 @@ struct ARExploreView: View {
                         )
                         .allowsHitTesting(false)
                         .animation(.easeOut(duration: 0.16), value: marker)
+                }
+
+                if appState.isNavigationModeEnabled {
+                    NavigationARGuidanceOverlay(
+                        title: appState.navigationGuidanceTitle,
+                        detail: appState.navigationGuidanceDetail,
+                        systemImageName: appState.navigationGuidanceSystemImageName,
+                        isArrivalNearby: appState.navigationGuidanceIsArrivalNearby
+                    )
+                    .frame(width: guidanceWidth)
+                    .position(x: guidanceCenterX, y: guidanceCenterY)
+                    .animation(.easeOut(duration: 0.18), value: appState.navigationGuidanceTitle)
+                    .animation(.easeOut(duration: 0.18), value: appState.navigationGuidanceHorizontalOffsetRatio)
+                    .allowsHitTesting(false)
                 }
 
                 if !appState.radarMarkerOverlays.isEmpty {
@@ -146,6 +172,45 @@ struct ARExploreView: View {
     }
 }
 
+private struct NavigationARGuidanceOverlay: View {
+    let title: String
+    let detail: String
+    let systemImageName: String
+    let isArrivalNearby: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImageName)
+                .font(.title.weight(.black))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .background(.white.opacity(0.18), in: RoundedRectangle(cornerRadius: 8))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.title3.weight(.black))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+
+                Text(detail)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.86))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background((isArrivalNearby ? Color.green : Color.blue).opacity(0.92), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(.white.opacity(0.35), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.28), radius: 10, x: 0, y: 5)
+    }
+}
+
 private struct RadarOverlayView: View {
     let markers: [RadarMarkerOverlay]
     let onSelect: (TourismSpot.ID) -> Void
@@ -229,13 +294,20 @@ private struct RadarMarkerDotView: View {
     var body: some View {
         VStack(spacing: 2) {
             Circle()
-                .fill(marker.isSelected ? .blue : .red)
-                .frame(width: marker.isSelected ? 13 : 10, height: marker.isSelected ? 13 : 10)
+                .fill(marker.isArrivalNearby ? .green : marker.isSelected ? .blue : .red)
+                .frame(width: marker.isArrivalNearby ? 17 : marker.isSelected ? 13 : 10, height: marker.isArrivalNearby ? 17 : marker.isSelected ? 13 : 10)
                 .overlay(
                     Circle()
                         .stroke(.white.opacity(marker.isSelected ? 0.95 : 0.75), lineWidth: 1)
                 )
                 .opacity(marker.isBehind ? 0.55 : 1)
+                .overlay {
+                    if marker.isArrivalNearby {
+                        Image(systemName: "checkmark")
+                            .font(.caption2.weight(.black))
+                            .foregroundStyle(.white)
+                    }
+                }
 
             Text(marker.shortTitle)
                 .font(.caption2.weight(.semibold))
@@ -248,7 +320,7 @@ private struct RadarMarkerDotView: View {
         .foregroundStyle(.white)
         .padding(.horizontal, 5)
         .padding(.vertical, 3)
-        .background(.black.opacity(marker.isSelected ? 0.58 : 0.34), in: RoundedRectangle(cornerRadius: 6))
+        .background((marker.isArrivalNearby ? Color.green : Color.black).opacity(marker.isSelected ? 0.62 : 0.34), in: RoundedRectangle(cornerRadius: 6))
     }
 }
 
@@ -599,6 +671,8 @@ private extension TourismSpot.Source {
             return "TourAPI"
         case .mock:
             return "목업 fallback"
+        case .tmap:
+            return "TMAP 검색"
         }
     }
 }
