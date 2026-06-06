@@ -79,6 +79,7 @@ struct MainMapHomeView: View {
         }
         .task {
             appState.startMainMapLocationUpdates()
+            await appState.loadTourAPISpots()
         }
     }
 }
@@ -92,7 +93,7 @@ private struct MainMapHeaderView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("ARBusan")
                     .font(.title3.weight(.black))
-                Text("현재 위치 기준 1km 관광지 핀")
+                Text("현재 위치 기준 3km 관광지 핀")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -320,7 +321,7 @@ private struct TMAPNativeMapView: UIViewRepresentable {
             markers = spots.map { spot in
                 let marker = TMapMarker(position: spot.center)
                 marker.title = spot.name
-                marker.icon = Self.markerImage(isSelected: spot.id == selectedSpotID)
+                marker.icon = Self.markerImage(source: spot.source, isSelected: spot.id == selectedSpotID)
                 marker.isUseImage = true
                 marker.setCanShowCallout = true
                 marker.setTapCallback { [weak self] _ in
@@ -412,9 +413,21 @@ private struct TMAPNativeMapView: UIViewRepresentable {
             }
         }
 
-        private static func markerImage(isSelected: Bool) -> UIImage {
+        private static func markerImage(source: TourismSpot.Source, isSelected: Bool) -> UIImage {
             let size = CGSize(width: 44, height: 56)
-            let fillColor = isSelected ? UIColor.systemRed : UIColor.systemBlue
+            let fillColor: UIColor
+            if isSelected {
+                fillColor = .systemRed
+            } else {
+                switch source {
+                case .mock:
+                    fillColor = .systemOrange
+                case .tourAPI:
+                    fillColor = .systemGreen
+                case .tmap:
+                    fillColor = .systemPurple
+                }
+            }
             return UIGraphicsImageRenderer(size: size).image { context in
                 let cgContext = context.cgContext
                 cgContext.setShadow(offset: CGSize(width: 0, height: 3), blur: 6, color: UIColor.black.withAlphaComponent(0.26).cgColor)
@@ -450,30 +463,32 @@ struct ARExploreView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let bottomPanelHeight = min(430, geometry.size.height * 0.48)
-            let guidanceWidth = min(geometry.size.width - 48, 360)
+            let safeWidth = max(geometry.size.width, 1)
+            let safeHeight = max(geometry.size.height, 1)
+            let bottomPanelHeight = min(430, safeHeight * 0.48)
+            let guidanceWidth = max(1, min(safeWidth - 48, 360))
             let guidanceCenterX = min(
                 max(
-                    geometry.size.width / 2 + appState.navigationGuidanceHorizontalOffsetRatio * geometry.size.width,
+                    safeWidth / 2 + appState.navigationGuidanceHorizontalOffsetRatio * safeWidth,
                     guidanceWidth / 2 + 16
                 ),
-                geometry.size.width - guidanceWidth / 2 - 16
+                safeWidth - guidanceWidth / 2 - 16
             )
             let guidanceCenterY = max(
                 116,
-                min(geometry.size.height * 0.22, geometry.size.height - bottomPanelHeight - 120)
+                min(safeHeight * 0.22, safeHeight - bottomPanelHeight - 120)
             )
             ZStack(alignment: .bottom) {
                 ARViewContainer()
-                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .frame(width: safeWidth, height: safeHeight)
                     .ignoresSafeArea()
 
-                if !FeatureFlags.useARMapMVPDirection, let label = appState.arLabelOverlay {
-                    ARSpotLabelView(label: label)
-                        .position(
-                            x: label.normalizedX * geometry.size.width,
-                            y: label.normalizedY * geometry.size.height
-                        )
+	                if !FeatureFlags.useARMapMVPDirection, let label = appState.arLabelOverlay {
+		                    ARSpotLabelView(label: label)
+		                        .position(
+		                            x: label.normalizedX.screenCoordinate(in: safeWidth),
+		                            y: label.normalizedY.screenCoordinate(in: safeHeight)
+		                        )
                         .allowsHitTesting(false)
                         .animation(.easeOut(duration: 0.18), value: label)
                 }
@@ -481,11 +496,11 @@ struct ARExploreView: View {
                 if FeatureFlags.enableLegacyMatrixDebugOverlay,
                    appState.showsMatrixDebugMarker,
                    let debugOverlay = appState.matrixProjectionDebugOverlay {
-                    MatrixProjectionDebugMarkerView(overlay: debugOverlay)
-                        .position(
-                            x: debugOverlay.normalizedX * geometry.size.width,
-                            y: debugOverlay.normalizedY * geometry.size.height
-                        )
+		                    MatrixProjectionDebugMarkerView(overlay: debugOverlay)
+		                        .position(
+		                            x: debugOverlay.normalizedX.screenCoordinate(in: safeWidth),
+		                            y: debugOverlay.normalizedY.screenCoordinate(in: safeHeight)
+		                        )
                         .allowsHitTesting(false)
                         .animation(.easeOut(duration: 0.12), value: debugOverlay)
                 }
@@ -493,22 +508,22 @@ struct ARExploreView: View {
                 if FeatureFlags.enableLegacyOnScreenCandidateDebugMarkers,
                    appState.showsOnScreenCandidateDebugMarkers {
                     ForEach(appState.onScreenCandidateMarkerOverlays) { marker in
-                        OnScreenCandidateMarkerView(marker: marker)
-                            .position(
-                                x: marker.normalizedX * geometry.size.width,
-                                y: marker.normalizedY * geometry.size.height
-                            )
+		                        OnScreenCandidateMarkerView(marker: marker)
+		                            .position(
+		                                x: marker.normalizedX.screenCoordinate(in: safeWidth),
+		                                y: marker.normalizedY.screenCoordinate(in: safeHeight)
+		                            )
                             .allowsHitTesting(false)
                             .animation(.easeOut(duration: 0.14), value: marker)
                     }
                 }
 
                 ForEach(appState.edgeMarkerOverlays) { marker in
-                    EdgeMarkerView(marker: marker)
-                        .position(
-                            x: marker.normalizedX * geometry.size.width,
-                            y: marker.normalizedY * geometry.size.height
-                        )
+		                    EdgeMarkerView(marker: marker)
+		                        .position(
+		                            x: marker.normalizedX.screenCoordinate(in: safeWidth),
+		                            y: marker.normalizedY.screenCoordinate(in: safeHeight)
+		                        )
                         .allowsHitTesting(false)
                         .animation(.easeOut(duration: 0.16), value: marker)
                 }
@@ -533,7 +548,7 @@ struct ARExploreView: View {
                             appState.selectCandidate(spot)
                         }
                     }
-                    .frame(width: min(geometry.size.width - 32, 360), height: 150)
+                    .frame(width: max(1, min(safeWidth - 32, 360)), height: 150)
                     .padding(.bottom, bottomPanelHeight + 8)
                     .transition(.opacity)
                 }
@@ -603,9 +618,9 @@ struct ARExploreView: View {
                         .buttonStyle(.bordered)
                     }
                     .padding()
-                    .frame(width: geometry.size.width, alignment: .leading)
+                    .frame(width: safeWidth, alignment: .leading)
                 }
-                .frame(width: geometry.size.width)
+                .frame(width: safeWidth)
                 .frame(maxHeight: bottomPanelHeight)
                 .background(.regularMaterial)
             }
@@ -702,10 +717,10 @@ private struct RadarOverlayView: View {
                         RadarMarkerDotView(marker: marker)
                     }
                     .buttonStyle(.plain)
-                    .position(
-                        x: marker.normalizedX * geometry.size.width,
-                        y: marker.normalizedY * geometry.size.height
-                    )
+	                    .position(
+	                        x: marker.normalizedX.screenCoordinate(in: geometry.size.width),
+	                        y: marker.normalizedY.screenCoordinate(in: geometry.size.height)
+	                    )
                 }
             }
         }
@@ -1105,6 +1120,17 @@ private struct TourismDataStatusView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
+    }
+}
+
+private extension Double {
+    func screenCoordinate(in length: CGFloat) -> CGFloat {
+        guard isFinite, length.isFinite, length > 0 else {
+            return 0
+        }
+
+        let clamped = min(max(self, 0), 1)
+        return CGFloat(clamped) * length
     }
 }
 

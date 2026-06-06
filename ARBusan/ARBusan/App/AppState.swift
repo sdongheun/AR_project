@@ -242,7 +242,7 @@ final class AppState: ObservableObject {
     private let tourAPIClient: any TourAPIClient
     private let vworldClient: any VWorldClient
     private let tmapClient: any TMAPClient
-    private let nearbySpotRadiusMeters: CLLocationDistance = 1_000
+    private let nearbySpotRadiusMeters: CLLocationDistance = 3_000
     private let headingInstabilityThresholdDegrees: Double = 12
     private let projectionHorizontalFOVDegrees: Double = 60
     private let projectionVerticalFOVDegrees: Double = 45
@@ -308,7 +308,10 @@ final class AppState: ObservableObject {
         self.recognitionPipeline = recognitionPipeline
         self.cameraDirectionCandidateProvider = cameraDirectionCandidateProvider
         self.apiKeys = apiKeys
-        self.tourAPIClient = tourAPIClient ?? MockTourAPIClient()
+        self.tourAPIClient = tourAPIClient ?? LocalGovernmentHubTourAPIClient(
+            apiKey: apiKeys.tourAPI,
+            requests: [TourAPIAreaRequests.gimhae]
+        )
         self.vworldClient = vworldClient ?? VWorldDataAPIClient(apiKey: apiKeys.vworld)
         self.tmapClient = tmapClient ?? SKOpenAPITMAPClient(apiKey: apiKeys.tmap)
         self.loadedTourismSpots = spots
@@ -380,8 +383,24 @@ final class AppState: ObservableObject {
     }
 
     func loadTourAPISpots() async {
-        tourismDataStatus = "TourAPI는 현재 비활성화되어 있습니다. 테스트 목업 건물 후보를 유지합니다."
-        applyMockSpots()
+        tourismDataStatus = "TourAPI 김해 후보와 테스트 목업 건물을 불러오는 중입니다."
+
+        do {
+            let fetchedSpots = try await tourAPIClient.fetchTourismSpots()
+            let mergedSpots = (fetchedSpots + MockTourismSpots.testBuildings).deduplicatedByID()
+            guard !mergedSpots.isEmpty else {
+                useMockFallback(reason: "TourAPI 응답과 목업 후보가 모두 비어 있습니다.")
+                return
+            }
+
+            loadedTourismSpots = mergedSpots
+            clearManualSpatialSelections()
+            applyNearbySpotFilter()
+            updateCameraDirectionCandidate()
+            runRecognition()
+        } catch {
+            useMockFallback(reason: "TourAPI 김해 후보 로딩 실패: \(error.localizedDescription)")
+        }
     }
 
     func enableTourAPILoadingForLater() async {
@@ -4117,6 +4136,13 @@ private extension RecognitionResult {
 private extension [TourismSpot] {
     var isMockFallback: Bool {
         !isEmpty && allSatisfy { $0.source == .mock }
+    }
+
+    func deduplicatedByID() -> [TourismSpot] {
+        var seenIDs: Set<TourismSpot.ID> = []
+        return filter { spot in
+            seenIDs.insert(spot.id).inserted
+        }
     }
 }
 
