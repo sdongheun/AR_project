@@ -374,6 +374,11 @@ final class AppState: ObservableObject {
         applyMockSpots()
     }
 
+    func startMainMapLocationUpdates() {
+        geospatialSessionManager.requestLocationPermission()
+        geospatialSessionManager.startLocationUpdates()
+    }
+
     func loadTourAPISpots() async {
         tourismDataStatus = "TourAPI는 현재 비활성화되어 있습니다. 테스트 목업 건물 후보를 유지합니다."
         applyMockSpots()

@@ -18,7 +18,13 @@
 | [`planning/AR_TECH_ROADMAP.md`](planning/AR_TECH_ROADMAP.md) | AR 기술 판단, 처리 흐름, 작업 순서 | 참고/보류 판단 |
 | [`planning/NATIVE_TRANSITION.md`](planning/NATIVE_TRANSITION.md) | React Native에서 Swift 네이티브로 전환한 배경과 초기 세팅 기록 | 보관/참고 |
 
-## 3. AR Label
+## 3. Map
+
+| 문서 | 역할 | 상태 |
+| --- | --- | --- |
+| [`map/MAIN_2D_MAP_PLAN.md`](map/MAIN_2D_MAP_PLAN.md) | 메인 화면 2D 지도, 현재 위치, 관광지 마커, 하단 카드 작업 체크리스트 | 활성 |
+
+## 4. AR Label
 
 | 문서 | 역할 | 상태 |
 | --- | --- | --- |
@@ -26,7 +32,7 @@
 | [`ar-label/3D_LABEL_OPTIMIZATION_PLAN.md`](ar-label/3D_LABEL_OPTIMIZATION_PLAN.md) | 3D 라벨 흔들림, stable origin, WGS84 anchor 최적화 | 보류/참고 |
 | [`ar-label/EDGE_MARKER_RULES.md`](ar-label/EDGE_MARKER_RULES.md) | 화면 안/밖 2D marker, edge marker 규칙 | 참고 |
 
-## 4. Testing
+## 5. Testing
 
 | 문서 | 역할 | 상태 |
 | --- | --- | --- |
@@ -34,23 +40,23 @@
 | [`testing/TEST_RESULTS.md`](testing/TEST_RESULTS.md) | 사용자가 현장에서 확인한 테스트 결과 기록 | 활성 |
 | [`testing/3D_LABEL_STABILITY_TESTS.md`](testing/3D_LABEL_STABILITY_TESTS.md) | 3D 라벨 장기 안정화 테스트 시나리오 | 후속 |
 
-## 5. Archive
+## 6. Archive
 
 | 문서 | 역할 | 상태 |
 | --- | --- | --- |
 | [`archive/DISABLED_FEATURES.md`](archive/DISABLED_FEATURES.md) | 발열/성능 문제로 현재 꺼둔 기능 기록 | 참고 |
 
-## 6. 문서 관리 규칙
+## 7. 문서 관리 규칙
 
 - 새 작업을 시작할 때는 `ARBusan_PROJECT_STATUS.md`와 이 문서만 먼저 읽는다.
 - 구현 방향이 바뀌면 해당 세부 문서와 `ARBusan_PROJECT_STATUS.md`의 다음 작업만 갱신한다.
 - 테스트 결과는 `testing/TEST_RESULTS.md`에만 남긴다.
-- 새 문서는 `planning`, `ar-label`, `testing`, `archive` 중 하나에만 만든다.
+- 새 문서는 `planning`, `map`, `ar-label`, `testing`, `archive` 중 하나에만 만든다.
 - 한 파일은 가능한 200줄 내외를 목표로 한다.
 - 200줄을 넘는 파일은 바로 삭제/축약하지 않고, 줄일 후보와 이유를 사용자에게 먼저 설명한다.
 - 오래된 내용도 임의 삭제하지 않는다. 필요하면 `archive` 이동을 먼저 제안한다.
 
-## 7. 줄 수 점검 기준
+## 8. 줄 수 점검 기준
 
 - 200줄 이하: 유지
 - 200~260줄: 당장 문제는 아니지만 다음 정리 때 축약 후보

@@ -28,6 +28,7 @@ struct MainMapHomeView: View {
                 spots: appState.spots,
                 selectedSpotID: selectedSpot?.id,
                 center: mapCenter,
+                currentLocation: appState.latestCoreLocationSnapshot?.coordinate ?? appState.latestLocationSnapshot?.coordinate,
                 onSelectSpot: { spotID in
                     guard let spot = appState.spots.first(where: { $0.id == spotID }) else {
                         return
@@ -75,6 +76,9 @@ struct MainMapHomeView: View {
         .fullScreenCover(isPresented: $showsARNavigation) {
             ARExploreView()
                 .environmentObject(appState)
+        }
+        .task {
+            appState.startMainMapLocationUpdates()
         }
     }
 }
@@ -231,6 +235,7 @@ private struct TMAPNativeMapView: UIViewRepresentable {
     let spots: [TourismSpot]
     let selectedSpotID: TourismSpot.ID?
     let center: CLLocationCoordinate2D
+    let currentLocation: CLLocationCoordinate2D?
     let onSelectSpot: (TourismSpot.ID) -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -254,7 +259,8 @@ private struct TMAPNativeMapView: UIViewRepresentable {
             on: mapView,
             spots: spots,
             selectedSpotID: selectedSpotID,
-            center: center
+            center: center,
+            currentLocation: currentLocation
         )
         return mapView
     }
@@ -265,7 +271,8 @@ private struct TMAPNativeMapView: UIViewRepresentable {
             on: mapView,
             spots: spots,
             selectedSpotID: selectedSpotID,
-            center: center
+            center: center,
+            currentLocation: currentLocation
         )
     }
 
@@ -274,6 +281,9 @@ private struct TMAPNativeMapView: UIViewRepresentable {
         private var lastSignature = ""
         private var lastSpotLayoutSignature = ""
         private var markers: [TMapMarker] = []
+        private var currentLocationMarker: TMapMarker?
+        private var latestCurrentLocation: CLLocationCoordinate2D?
+        private var hasCenteredOnCurrentLocation = false
 
         init(onSelectSpot: @escaping (TourismSpot.ID) -> Void) {
             self.onSelectSpot = onSelectSpot
@@ -283,10 +293,12 @@ private struct TMAPNativeMapView: UIViewRepresentable {
             on mapView: TMapView,
             spots: [TourismSpot],
             selectedSpotID: TourismSpot.ID?,
-            center: CLLocationCoordinate2D
+            center: CLLocationCoordinate2D,
+            currentLocation: CLLocationCoordinate2D?
         ) {
             let spotLayoutSignature = spots.map { "\($0.id):\($0.center.latitude):\($0.center.longitude)" }.joined(separator: "|")
-            let signature = "\(spotLayoutSignature)-\(selectedSpotID ?? "")"
+            let currentLocationSignature = currentLocation.map { "\($0.latitude):\($0.longitude)" } ?? "none"
+            let signature = "\(spotLayoutSignature)-\(selectedSpotID ?? "")-\(currentLocationSignature)"
             guard lastSignature != signature else {
                 return
             }
@@ -294,6 +306,7 @@ private struct TMAPNativeMapView: UIViewRepresentable {
             lastSignature = signature
             let shouldFitBounds = lastSpotLayoutSignature != spotLayoutSignature
             lastSpotLayoutSignature = spotLayoutSignature
+            updateCurrentLocationMarker(on: mapView, currentLocation: currentLocation)
 
             markers.forEach { $0.map = nil }
             markers.removeAll()
@@ -317,13 +330,85 @@ private struct TMAPNativeMapView: UIViewRepresentable {
                 return marker
             }
 
-            if shouldFitBounds {
+            if let currentLocation, !hasCenteredOnCurrentLocation {
+                centerOnCurrentLocationIfNeeded(mapView)
+            } else if shouldFitBounds, hasCenteredOnCurrentLocation || currentLocation == nil && markers.count > 1 {
                 mapView.fitMapBoundsWithMarkers(
                     markers,
                     inset: UIEdgeInsets(top: 120, left: 40, bottom: 220, right: 40)
                 )
             } else if let selectedSpot = spots.first(where: { $0.id == selectedSpotID }) {
                 mapView.animateTo(location: selectedSpot.center)
+            }
+        }
+
+        private func updateCurrentLocationMarker(on mapView: TMapView, currentLocation: CLLocationCoordinate2D?) {
+            guard let currentLocation else {
+                currentLocationMarker?.map = nil
+                currentLocationMarker = nil
+                latestCurrentLocation = nil
+                hasCenteredOnCurrentLocation = false
+                return
+            }
+
+            latestCurrentLocation = currentLocation
+            if let currentLocationMarker {
+                currentLocationMarker.position = currentLocation
+                currentLocationMarker.map = mapView
+            } else {
+                let marker = TMapMarker(position: currentLocation)
+                marker.title = "내 위치"
+                marker.icon = Self.currentLocationImage()
+                marker.isUseImage = true
+                marker.setCanShowCallout = true
+                marker.map = mapView
+                currentLocationMarker = marker
+            }
+        }
+
+        private func centerOnCurrentLocationIfNeeded(_ mapView: TMapView) {
+            guard let latestCurrentLocation, !hasCenteredOnCurrentLocation else {
+                return
+            }
+
+            hasCenteredOnCurrentLocation = true
+            mapView.setCenter(latestCurrentLocation)
+            mapView.setZoom(17)
+            mapView.animateTo(location: latestCurrentLocation)
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self, weak mapView] in
+                guard let self, let mapView, let latestCurrentLocation = self.latestCurrentLocation else {
+                    return
+                }
+                mapView.setCenter(latestCurrentLocation)
+                mapView.setZoom(17)
+            }
+        }
+
+        func mapViewDidFinishLoadingMap() {
+            if let mapView = currentLocationMarker?.map {
+                centerOnCurrentLocationIfNeeded(mapView)
+            }
+        }
+
+        func SKTMapApikeySucceed() {
+            if let mapView = currentLocationMarker?.map {
+                centerOnCurrentLocationIfNeeded(mapView)
+            }
+        }
+
+        private static func currentLocationImage() -> UIImage {
+            let size = CGSize(width: 34, height: 34)
+            return UIGraphicsImageRenderer(size: size).image { context in
+                let cgContext = context.cgContext
+                cgContext.setShadow(offset: CGSize(width: 0, height: 2), blur: 5, color: UIColor.black.withAlphaComponent(0.24).cgColor)
+                UIColor.systemBlue.withAlphaComponent(0.22).setFill()
+                UIBezierPath(ovalIn: CGRect(x: 1, y: 1, width: 32, height: 32)).fill()
+                cgContext.setShadow(offset: .zero, blur: 0, color: nil)
+                UIColor.systemBlue.setFill()
+                UIBezierPath(ovalIn: CGRect(x: 8, y: 8, width: 18, height: 18)).fill()
+                UIColor.white.setStroke()
+                UIBezierPath(ovalIn: CGRect(x: 8, y: 8, width: 18, height: 18)).stroke()
             }
         }
 
