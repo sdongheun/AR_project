@@ -29,6 +29,7 @@ struct MainMapHomeView: View {
                 selectedSpotID: selectedSpot?.id,
                 center: mapCenter,
                 currentLocation: appState.latestCoreLocationSnapshot?.coordinate ?? appState.latestLocationSnapshot?.coordinate,
+                currentHeadingDegrees: appState.cameraHeadingDegrees,
                 onSelectSpot: { spotID in
                     guard let spot = appState.spots.first(where: { $0.id == spotID }) else {
                         return
@@ -74,7 +75,10 @@ struct MainMapHomeView: View {
             TourismSpotInfoPlaceholderView(spot: selectedSpot)
         }
         .fullScreenCover(isPresented: $showsARNavigation) {
-            ARExploreView()
+            ARExploreView {
+                appState.setNavigationModeEnabled(false)
+                showsARNavigation = false
+            }
                 .environmentObject(appState)
         }
         .task {
@@ -237,57 +241,92 @@ private struct TMAPNativeMapView: UIViewRepresentable {
     let selectedSpotID: TourismSpot.ID?
     let center: CLLocationCoordinate2D
     let currentLocation: CLLocationCoordinate2D?
+    var currentHeadingDegrees: Double?
+    var routeCoordinates: [CLLocationCoordinate2D] = []
+    var destinationCoordinate: CLLocationCoordinate2D?
+    var isInteractionEnabled = true
+    var zoomLevel: Int = 16
+    var mapInsets = UIEdgeInsets(top: 120, left: 40, bottom: 220, right: 40)
     let onSelectSpot: (TourismSpot.ID) -> Void
+    var onTapMap: ((CLLocationCoordinate2D) -> Void)?
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onSelectSpot: onSelectSpot)
+        Coordinator(onSelectSpot: onSelectSpot, onTapMap: onTapMap)
     }
 
     func makeUIView(context: Context) -> TMapView {
         let mapView = TMapView(frame: .zero)
         mapView.delegate = context.coordinator
         mapView.backgroundColor = .systemBackground
-        mapView.isPanningEnable = true
-        mapView.isZoomEnable = true
+        mapView.isPanningEnable = isInteractionEnabled
+        mapView.isZoomEnable = isInteractionEnabled
+        mapView.isUserInteractionEnabled = isInteractionEnabled
         mapView.isShowCompass = true
         mapView.setAppName("ARBusan")
         if apiKey.isConfiguredForMapRuntime {
             mapView.setApiKey(apiKey)
         }
         mapView.setCenter(center)
-        mapView.setZoom(16)
+        mapView.setZoom(zoomLevel)
         context.coordinator.renderMarkers(
             on: mapView,
             spots: spots,
             selectedSpotID: selectedSpotID,
             center: center,
-            currentLocation: currentLocation
+            currentLocation: currentLocation,
+            currentHeadingDegrees: currentHeadingDegrees,
+            routeCoordinates: routeCoordinates,
+            destinationCoordinate: destinationCoordinate,
+            zoomLevel: zoomLevel,
+            mapInsets: mapInsets
         )
         return mapView
     }
 
     func updateUIView(_ mapView: TMapView, context: Context) {
+        mapView.isPanningEnable = isInteractionEnabled
+        mapView.isZoomEnable = isInteractionEnabled
+        mapView.isUserInteractionEnabled = isInteractionEnabled
         context.coordinator.onSelectSpot = onSelectSpot
+        context.coordinator.onTapMap = onTapMap
         context.coordinator.renderMarkers(
             on: mapView,
             spots: spots,
             selectedSpotID: selectedSpotID,
             center: center,
-            currentLocation: currentLocation
+            currentLocation: currentLocation,
+            currentHeadingDegrees: currentHeadingDegrees,
+            routeCoordinates: routeCoordinates,
+            destinationCoordinate: destinationCoordinate,
+            zoomLevel: zoomLevel,
+            mapInsets: mapInsets
         )
     }
 
     final class Coordinator: NSObject, TMapViewDelegate {
         var onSelectSpot: (TourismSpot.ID) -> Void
+        var onTapMap: ((CLLocationCoordinate2D) -> Void)?
         private var lastSignature = ""
         private var lastSpotLayoutSignature = ""
         private var markers: [TMapMarker] = []
         private var currentLocationMarker: TMapMarker?
+        private var destinationMarker: TMapMarker?
+        private var routePolyline: TMapPolyline?
         private var latestCurrentLocation: CLLocationCoordinate2D?
         private var hasCenteredOnCurrentLocation = false
+        private var hasFitRouteBounds = false
+        private var userDidInteractWithMap = false
+        private var lastRouteBoundsSignature = ""
+        private var lastRouteOverlaySignature = ""
+        private var lastMapTapCoordinate: CLLocationCoordinate2D?
+        private var lastMapTapAt: Date?
 
-        init(onSelectSpot: @escaping (TourismSpot.ID) -> Void) {
+        init(
+            onSelectSpot: @escaping (TourismSpot.ID) -> Void,
+            onTapMap: ((CLLocationCoordinate2D) -> Void)?
+        ) {
             self.onSelectSpot = onSelectSpot
+            self.onTapMap = onTapMap
         }
 
         func renderMarkers(
@@ -295,26 +334,45 @@ private struct TMAPNativeMapView: UIViewRepresentable {
             spots: [TourismSpot],
             selectedSpotID: TourismSpot.ID?,
             center: CLLocationCoordinate2D,
-            currentLocation: CLLocationCoordinate2D?
+            currentLocation: CLLocationCoordinate2D?,
+            currentHeadingDegrees: Double?,
+            routeCoordinates: [CLLocationCoordinate2D],
+            destinationCoordinate: CLLocationCoordinate2D?,
+            zoomLevel: Int,
+            mapInsets: UIEdgeInsets
         ) {
             let spotLayoutSignature = spots.map { "\($0.id):\($0.center.latitude):\($0.center.longitude)" }.joined(separator: "|")
             let currentLocationSignature = currentLocation.map { "\($0.latitude):\($0.longitude)" } ?? "none"
-            let signature = "\(spotLayoutSignature)-\(selectedSpotID ?? "")-\(currentLocationSignature)"
+            let headingSignature = currentHeadingDegrees.map { "\(Int($0.rounded()))" } ?? "none"
+            let routeSignature = routeCoordinates.map { "\($0.latitude):\($0.longitude)" }.joined(separator: "|")
+            let destinationSignature = destinationCoordinate.map { "\($0.latitude):\($0.longitude)" } ?? "none"
+            let signature = "\(spotLayoutSignature)-\(selectedSpotID ?? "")-\(currentLocationSignature)-\(headingSignature)-\(routeSignature)-\(destinationSignature)-\(zoomLevel)"
             guard lastSignature != signature else {
                 return
             }
 
             lastSignature = signature
+            let routeBoundsSignature = "\(routeSignature)-\(destinationSignature)"
+            if lastRouteBoundsSignature != routeBoundsSignature {
+                lastRouteBoundsSignature = routeBoundsSignature
+                hasFitRouteBounds = false
+                userDidInteractWithMap = false
+            }
             let shouldFitBounds = lastSpotLayoutSignature != spotLayoutSignature
             lastSpotLayoutSignature = spotLayoutSignature
-            updateCurrentLocationMarker(on: mapView, currentLocation: currentLocation)
+            updateCurrentLocationMarker(on: mapView, currentLocation: currentLocation, headingDegrees: currentHeadingDegrees)
+            updateRouteOverlay(
+                on: mapView,
+                routeCoordinates: routeCoordinates,
+                destinationCoordinate: destinationCoordinate
+            )
 
             markers.forEach { $0.map = nil }
             markers.removeAll()
 
-            guard !spots.isEmpty else {
+            if spots.isEmpty, routeCoordinates.isEmpty {
                 mapView.setCenter(center)
-                mapView.setZoom(16)
+                mapView.setZoom(zoomLevel)
                 return
             }
 
@@ -331,19 +389,28 @@ private struct TMAPNativeMapView: UIViewRepresentable {
                 return marker
             }
 
-            if let currentLocation, !hasCenteredOnCurrentLocation {
+            if currentLocation != nil, !hasCenteredOnCurrentLocation {
                 centerOnCurrentLocationIfNeeded(mapView)
-            } else if shouldFitBounds, hasCenteredOnCurrentLocation || currentLocation == nil && markers.count > 1 {
-                mapView.fitMapBoundsWithMarkers(
-                    markers,
-                    inset: UIEdgeInsets(top: 120, left: 40, bottom: 220, right: 40)
-                )
-            } else if let selectedSpot = spots.first(where: { $0.id == selectedSpotID }) {
+            } else if !routeCoordinates.isEmpty, !hasFitRouteBounds, !userDidInteractWithMap {
+                hasFitRouteBounds = true
+                fitRouteBounds(on: mapView, routeCoordinates: routeCoordinates, destinationCoordinate: destinationCoordinate, currentLocation: currentLocation, insets: mapInsets)
+            } else if routeCoordinates.isEmpty,
+                      !userDidInteractWithMap,
+                      shouldFitBounds,
+                      hasCenteredOnCurrentLocation || currentLocation == nil && markers.count > 1 {
+                mapView.fitMapBoundsWithMarkers(markers, inset: mapInsets)
+            } else if routeCoordinates.isEmpty,
+                      !userDidInteractWithMap,
+                      let selectedSpot = spots.first(where: { $0.id == selectedSpotID }) {
                 mapView.animateTo(location: selectedSpot.center)
             }
         }
 
-        private func updateCurrentLocationMarker(on mapView: TMapView, currentLocation: CLLocationCoordinate2D?) {
+        private func updateCurrentLocationMarker(
+            on mapView: TMapView,
+            currentLocation: CLLocationCoordinate2D?,
+            headingDegrees: Double?
+        ) {
             guard let currentLocation else {
                 currentLocationMarker?.map = nil
                 currentLocationMarker = nil
@@ -355,15 +422,85 @@ private struct TMAPNativeMapView: UIViewRepresentable {
             latestCurrentLocation = currentLocation
             if let currentLocationMarker {
                 currentLocationMarker.position = currentLocation
+                currentLocationMarker.icon = Self.currentLocationImage(headingDegrees: headingDegrees)
                 currentLocationMarker.map = mapView
             } else {
                 let marker = TMapMarker(position: currentLocation)
                 marker.title = "내 위치"
-                marker.icon = Self.currentLocationImage()
+                marker.icon = Self.currentLocationImage(headingDegrees: headingDegrees)
                 marker.isUseImage = true
                 marker.setCanShowCallout = true
                 marker.map = mapView
                 currentLocationMarker = marker
+            }
+        }
+
+        private func updateRouteOverlay(
+            on mapView: TMapView,
+            routeCoordinates: [CLLocationCoordinate2D],
+            destinationCoordinate: CLLocationCoordinate2D?
+        ) {
+            let routeSignature = routeCoordinates.map { "\($0.latitude):\($0.longitude)" }.joined(separator: "|")
+            let destinationSignature = destinationCoordinate.map { "\($0.latitude):\($0.longitude)" } ?? "none"
+            let overlaySignature = "\(routeSignature)-\(destinationSignature)"
+            if lastRouteOverlaySignature == overlaySignature {
+                routePolyline?.map = mapView
+                destinationMarker?.map = mapView
+                return
+            }
+
+            lastRouteOverlaySignature = overlaySignature
+            routePolyline?.map = nil
+            routePolyline = nil
+            destinationMarker?.map = nil
+            destinationMarker = nil
+
+            if routeCoordinates.count >= 2 {
+                let polyline = TMapPolyline(coordinates: routeCoordinates)
+                polyline.strokeColor = UIColor.systemBlue
+                polyline.strokeWidth = 7
+                polyline.opacity = 0.92
+                polyline.showPriority = 1_000
+                polyline.map = mapView
+                routePolyline = polyline
+            }
+
+            if let destinationCoordinate {
+                let marker = TMapMarker(position: destinationCoordinate)
+                marker.title = "도착"
+                marker.icon = Self.destinationImage()
+                marker.isUseImage = true
+                marker.setCanShowCallout = true
+                marker.map = mapView
+                destinationMarker = marker
+            }
+        }
+
+        private func fitRouteBounds(
+            on mapView: TMapView,
+            routeCoordinates: [CLLocationCoordinate2D],
+            destinationCoordinate: CLLocationCoordinate2D?,
+            currentLocation: CLLocationCoordinate2D?,
+            insets: UIEdgeInsets
+        ) {
+            var fitMarkers: [TMapMarker] = []
+            if let currentLocationMarker {
+                fitMarkers.append(currentLocationMarker)
+            } else if let currentLocation {
+                fitMarkers.append(TMapMarker(position: currentLocation))
+            }
+            if let destinationMarker {
+                fitMarkers.append(destinationMarker)
+            } else if let destinationCoordinate {
+                fitMarkers.append(TMapMarker(position: destinationCoordinate))
+            }
+
+            if fitMarkers.count >= 2 {
+                mapView.fitMapBoundsWithMarkers(fitMarkers, inset: insets)
+            } else if let routePolyline {
+                mapView.fitMapBoundsWithPolylines([routePolyline], inset: insets)
+            } else if let first = routeCoordinates.first {
+                mapView.setCenter(first)
             }
         }
 
@@ -392,24 +529,90 @@ private struct TMAPNativeMapView: UIViewRepresentable {
             }
         }
 
+        func mapViewWillStartPan(_ mapView: TMapView) {
+            userDidInteractWithMap = true
+        }
+
+        func mapView(_ mapView: TMapView, singleTapOnMap location: CLLocationCoordinate2D) {
+            handleMapTap(location)
+        }
+
+        func mapView(_ mapView: TMapView, singleTapOnMapWithoutTMapShape location: CLLocationCoordinate2D) {
+            handleMapTap(location)
+        }
+
+        private func handleMapTap(_ location: CLLocationCoordinate2D) {
+            userDidInteractWithMap = true
+
+            let now = Date()
+            if let lastMapTapAt,
+               let lastMapTapCoordinate,
+               now.timeIntervalSince(lastMapTapAt) < 0.2,
+               Self.distance(from: lastMapTapCoordinate, to: location) < 0.5 {
+                return
+            }
+
+            lastMapTapAt = now
+            lastMapTapCoordinate = location
+            onTapMap?(location)
+        }
+
+        private static func distance(
+            from origin: CLLocationCoordinate2D,
+            to destination: CLLocationCoordinate2D
+        ) -> CLLocationDistance {
+            CLLocation(latitude: origin.latitude, longitude: origin.longitude)
+                .distance(from: CLLocation(latitude: destination.latitude, longitude: destination.longitude))
+        }
+
+        func mapViewWillPinchIn(_ mapView: TMapView) {
+            userDidInteractWithMap = true
+        }
+
+        func mapViewWillPinchOut(_ mapView: TMapView) {
+            userDidInteractWithMap = true
+        }
+
         func SKTMapApikeySucceed() {
             if let mapView = currentLocationMarker?.map {
                 centerOnCurrentLocationIfNeeded(mapView)
             }
         }
 
-        private static func currentLocationImage() -> UIImage {
-            let size = CGSize(width: 34, height: 34)
+        private static func currentLocationImage(headingDegrees: Double?) -> UIImage {
+            let size = CGSize(width: 54, height: 54)
+            let baseImage = UIGraphicsImageRenderer(size: size).image { context in
+                let cgContext = context.cgContext
+                cgContext.translateBy(x: size.width / 2, y: size.height / 2)
+
+                cgContext.setShadow(offset: CGSize(width: 0, height: 2), blur: 6, color: UIColor.black.withAlphaComponent(0.28).cgColor)
+                UIColor.systemBlue.withAlphaComponent(0.22).setFill()
+                UIBezierPath(ovalIn: CGRect(x: -19, y: -19, width: 38, height: 38)).fill()
+
+                cgContext.setShadow(offset: .zero, blur: 0, color: nil)
+                UIColor.systemBlue.withAlphaComponent(0.24).setFill()
+                let directionCone = UIBezierPath()
+                directionCone.move(to: CGPoint(x: 0, y: -26))
+                directionCone.addLine(to: CGPoint(x: 12, y: -7))
+                directionCone.addQuadCurve(to: CGPoint(x: -12, y: -7), controlPoint: CGPoint(x: 0, y: -2))
+                directionCone.close()
+                directionCone.fill()
+
+                UIColor.systemBlue.setFill()
+                UIBezierPath(ovalIn: CGRect(x: -10, y: -10, width: 20, height: 20)).fill()
+                UIColor.white.setStroke()
+                UIBezierPath(ovalIn: CGRect(x: -10, y: -10, width: 20, height: 20)).stroke()
+            }
+
+            guard let headingDegrees else {
+                return baseImage
+            }
+
             return UIGraphicsImageRenderer(size: size).image { context in
                 let cgContext = context.cgContext
-                cgContext.setShadow(offset: CGSize(width: 0, height: 2), blur: 5, color: UIColor.black.withAlphaComponent(0.24).cgColor)
-                UIColor.systemBlue.withAlphaComponent(0.22).setFill()
-                UIBezierPath(ovalIn: CGRect(x: 1, y: 1, width: 32, height: 32)).fill()
-                cgContext.setShadow(offset: .zero, blur: 0, color: nil)
-                UIColor.systemBlue.setFill()
-                UIBezierPath(ovalIn: CGRect(x: 8, y: 8, width: 18, height: 18)).fill()
-                UIColor.white.setStroke()
-                UIBezierPath(ovalIn: CGRect(x: 8, y: 8, width: 18, height: 18)).stroke()
+                cgContext.translateBy(x: size.width / 2, y: size.height / 2)
+                cgContext.rotate(by: CGFloat(headingDegrees * .pi / 180))
+                baseImage.draw(in: CGRect(x: -size.width / 2, y: -size.height / 2, width: size.width, height: size.height))
             }
         }
 
@@ -447,6 +650,25 @@ private struct TMAPNativeMapView: UIViewRepresentable {
                 UIBezierPath(ovalIn: CGRect(x: 15, y: 14, width: 14, height: 14)).fill()
             }
         }
+
+        private static func destinationImage() -> UIImage {
+            let size = CGSize(width: 42, height: 42)
+            return UIGraphicsImageRenderer(size: size).image { context in
+                let cgContext = context.cgContext
+                cgContext.setShadow(offset: CGSize(width: 0, height: 2), blur: 5, color: UIColor.black.withAlphaComponent(0.26).cgColor)
+                UIColor.systemRed.setFill()
+                UIBezierPath(ovalIn: CGRect(x: 3, y: 3, width: 36, height: 36)).fill()
+                cgContext.setShadow(offset: .zero, blur: 0, color: nil)
+                UIColor.white.setFill()
+                let path = UIBezierPath()
+                path.move(to: CGPoint(x: 21, y: 10))
+                path.addLine(to: CGPoint(x: 26, y: 20))
+                path.addLine(to: CGPoint(x: 21, y: 32))
+                path.addLine(to: CGPoint(x: 16, y: 20))
+                path.close()
+                path.fill()
+            }
+        }
     }
 }
 
@@ -460,12 +682,16 @@ private extension String {
 struct ARExploreView: View {
     @EnvironmentObject private var appState: AppState
     @State private var showsCollection = false
+    @State private var showsIndoorNavigationDebug = false
+    var onClose: (() -> Void)?
 
     var body: some View {
         GeometryReader { geometry in
             let safeWidth = max(geometry.size.width, 1)
             let safeHeight = max(geometry.size.height, 1)
-            let bottomPanelHeight = min(430, safeHeight * 0.48)
+            let isLogPanelVisible = appState.showsFullDebugLogs
+            let bottomPanelHeight = isLogPanelVisible ? min(430, safeHeight * 0.48) : 0
+            let navigationMapHeight = max(180, safeHeight / 3)
             let guidanceWidth = max(1, min(safeWidth - 48, 360))
             let guidanceCenterX = min(
                 max(
@@ -482,6 +708,52 @@ struct ARExploreView: View {
                 ARViewContainer()
                     .frame(width: safeWidth, height: safeHeight)
                     .ignoresSafeArea()
+
+                VStack {
+	                    HStack {
+                            if appState.isNavigationModeEnabled {
+                                Button {
+                                    appState.setIndoorDebugModeEnabled(false)
+                                    onClose?()
+                                } label: {
+                                    Label("지도 복귀", systemImage: "chevron.left")
+                                        .font(.caption.weight(.bold))
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 11)
+                                        .padding(.vertical, 8)
+                                        .background(.black.opacity(0.62), in: RoundedRectangle(cornerRadius: 8))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 8)
+                                                .stroke(.white.opacity(0.28), lineWidth: 1)
+                                        )
+                                }
+                                .padding(.leading, 14)
+                                .padding(.top, 14)
+                            }
+	                        DebugLogToggleButton(isExpanded: $appState.showsFullDebugLogs)
+	                            .padding(.leading, appState.isNavigationModeEnabled ? 0 : 14)
+	                            .padding(.top, 14)
+                            if appState.isNavigationModeEnabled {
+                                Button {
+                                    withAnimation(.easeOut(duration: 0.18)) {
+                                        showsIndoorNavigationDebug.toggle()
+                                    }
+                                } label: {
+                                    Label("실내 테스트", systemImage: "slider.horizontal.3")
+                                        .font(.caption.weight(.semibold))
+                                        .padding(.horizontal, 11)
+                                        .padding(.vertical, 9)
+                                        .background(.black.opacity(0.58), in: Capsule())
+                                        .foregroundStyle(.white)
+                                }
+                                .padding(.top, 14)
+                            }
+	                        Spacer()
+	                    }
+	                    Spacer()
+	                }
+                .frame(width: safeWidth, height: safeHeight)
+                .allowsHitTesting(true)
 
 	                if !FeatureFlags.useARMapMVPDirection, let label = appState.arLabelOverlay {
 		                    ARSpotLabelView(label: label)
@@ -528,8 +800,8 @@ struct ARExploreView: View {
                         .animation(.easeOut(duration: 0.16), value: marker)
                 }
 
-                if appState.isNavigationModeEnabled {
-                    NavigationARGuidanceOverlay(
+	                if appState.isNavigationModeEnabled {
+	                    NavigationARGuidanceOverlay(
                         title: appState.navigationGuidanceTitle,
                         detail: appState.navigationGuidanceDetail,
                         systemImageName: appState.navigationGuidanceSystemImageName,
@@ -539,10 +811,22 @@ struct ARExploreView: View {
                     .position(x: guidanceCenterX, y: guidanceCenterY)
                     .animation(.easeOut(duration: 0.18), value: appState.navigationGuidanceTitle)
                     .animation(.easeOut(duration: 0.18), value: appState.navigationGuidanceHorizontalOffsetRatio)
-                    .allowsHitTesting(false)
+	                    .allowsHitTesting(false)
+	                }
+
+                if appState.isNavigationModeEnabled, showsIndoorNavigationDebug {
+                    IndoorNavigationDebugPanel {
+                        withAnimation(.easeOut(duration: 0.18)) {
+                            showsIndoorNavigationDebug = false
+                        }
+                    }
+                        .environmentObject(appState)
+                        .frame(width: max(1, min(safeWidth - 28, 390)))
+                        .position(x: safeWidth / 2, y: 128)
+                        .transition(.move(edge: .top).combined(with: .opacity))
                 }
 
-                if !appState.radarMarkerOverlays.isEmpty {
+                if isLogPanelVisible, !appState.radarMarkerOverlays.isEmpty {
                     RadarOverlayView(markers: appState.radarMarkerOverlays) { markerID in
                         if let spot = appState.spots.first(where: { $0.id == markerID }) {
                             appState.selectCandidate(spot)
@@ -553,46 +837,45 @@ struct ARExploreView: View {
                     .transition(.opacity)
                 }
 
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 14) {
-                        APIKeyStatusView(statuses: appState.apiKeys.statuses)
-                        if FeatureFlags.showCompactDebugDashboard {
-                            DebugDashboardView(
-                                overviewRows: appState.debugOverviewRows,
-                                locationRows: appState.locationDebugRows,
-                                dataRows: appState.dataDebugRows,
-                                displayRows: appState.displayDebugRows,
-                                anchorRows: appState.anchorDebugRows
-                            )
-                        }
-                        if appState.showsFullDebugLogs {
+                if appState.isNavigationModeEnabled, !isLogPanelVisible {
+                    NavigationRouteMiniMapView(
+                        height: navigationMapHeight,
+                        allowsIndoorMapTap: showsIndoorNavigationDebug || appState.isIndoorDebugModeEnabled
+                    )
+                        .environmentObject(appState)
+                        .frame(width: safeWidth, height: navigationMapHeight)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+
+                if isLogPanelVisible {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 14) {
+                            APIKeyStatusView(statuses: appState.apiKeys.statuses)
+                            if FeatureFlags.showCompactDebugDashboard {
+                                DebugDashboardView(
+                                    overviewRows: appState.debugOverviewRows,
+                                    locationRows: appState.locationDebugRows,
+                                    dataRows: appState.dataDebugRows,
+                                    displayRows: appState.displayDebugRows,
+                                    anchorRows: appState.anchorDebugRows
+                                )
+                            }
                             GeospatialStatusView(
                                 status: appState.geospatialStatus,
                                 coreLocationSnapshot: appState.latestCoreLocationSnapshot,
                                 geospatialSnapshot: appState.latestGeospatialLocationSnapshot
                             )
-                        } else {
-                            CompactGeospatialStatusView(
-                                geospatialSnapshot: appState.latestGeospatialLocationSnapshot,
-                                coreLocationSnapshot: appState.latestCoreLocationSnapshot,
-                                locationConfidence: appState.locationConfidence,
-                                stableOriginDiagnostics: appState.stableOriginDiagnostics,
-                                wgs84CandidateDiagnostics: appState.geospatialWGS84CandidateDiagnostics,
-                                geospatialAnchorStateDiagnostics: appState.geospatialAnchorStateDiagnostics
-                            )
-                        }
 
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(appState.recognitionResult.title)
-                                .font(.headline)
-                            Text(appState.recognitionResult.detail)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(appState.recognitionResult.title)
+                                    .font(.headline)
+                                Text(appState.recognitionResult.detail)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
 
-                        MVPRecognitionControlView()
+                            MVPRecognitionControlView()
 
-                        if appState.showsFullDebugLogs {
                             CandidateSelectionView(result: appState.recognitionResult) { spot in
                                 appState.selectCandidate(spot)
                             }
@@ -610,24 +893,263 @@ struct ARExploreView: View {
                                     }
                                 }
                             }
-                        }
 
-                        Button("도감 열기") {
-                            showsCollection = true
+                            Button("도감 열기") {
+                                showsCollection = true
+                            }
+                            .buttonStyle(.bordered)
                         }
-                        .buttonStyle(.bordered)
+                        .padding()
+                        .frame(width: safeWidth, alignment: .leading)
                     }
-                    .padding()
-                    .frame(width: safeWidth, alignment: .leading)
+                    .frame(width: safeWidth)
+                    .frame(maxHeight: bottomPanelHeight)
+                    .background(.regularMaterial)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
-                .frame(width: safeWidth)
-                .frame(maxHeight: bottomPanelHeight)
-                .background(.regularMaterial)
             }
         }
         .sheet(isPresented: $showsCollection) {
             CollectionBookView(spots: appState.spots, selectedSpot: appState.selectedSpot)
         }
+    }
+}
+
+private struct NavigationRouteMiniMapView: View {
+    @EnvironmentObject private var appState: AppState
+    let height: CGFloat
+    let allowsIndoorMapTap: Bool
+
+    private var destinationSpot: TourismSpot? {
+        appState.navigationDestinationSpot
+    }
+
+    private var route: TMAPPedestrianRoute? {
+        guard let destinationSpot else {
+            return nil
+        }
+
+        return appState.tmapArrivalRoutesBySpotID[destinationSpot.id]
+    }
+
+    private var currentLocation: CLLocationCoordinate2D? {
+        if appState.isIndoorDebugModeEnabled {
+            return appState.latestLocationSnapshot?.coordinate
+                ?? appState.latestGeospatialLocationSnapshot?.coordinate
+                ?? appState.latestCoreLocationSnapshot?.coordinate
+        }
+
+        return appState.latestCoreLocationSnapshot?.coordinate
+            ?? appState.latestGeospatialLocationSnapshot?.coordinate
+            ?? appState.latestLocationSnapshot?.coordinate
+    }
+
+    private var routeCoordinates: [CLLocationCoordinate2D] {
+        if let route, route.routeCoordinates.count >= 2 {
+            return route.routeCoordinates
+        }
+
+        guard let currentLocation, let destinationSpot else {
+            return []
+        }
+
+        return [currentLocation, destinationSpot.center]
+    }
+
+    private var destinationCoordinate: CLLocationCoordinate2D? {
+        route?.arrivalCoordinate ?? destinationSpot?.center
+    }
+
+    private var mapCenter: CLLocationCoordinate2D {
+        currentLocation ?? destinationCoordinate ?? destinationSpot?.center ?? CLLocationCoordinate2D(latitude: 35.1796, longitude: 129.0756)
+    }
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            TMAPNativeMapView(
+                apiKey: appState.apiKeys.tmap,
+                spots: destinationSpot.map { [$0] } ?? [],
+                selectedSpotID: destinationSpot?.id,
+                center: mapCenter,
+                currentLocation: currentLocation,
+                currentHeadingDegrees: appState.cameraHeadingDegrees,
+                routeCoordinates: routeCoordinates,
+                destinationCoordinate: destinationCoordinate,
+                isInteractionEnabled: true,
+                zoomLevel: 17,
+                mapInsets: UIEdgeInsets(top: 24, left: 24, bottom: 28, right: 24),
+                onSelectSpot: { _ in },
+                onTapMap: { coordinate in
+                    guard allowsIndoorMapTap else {
+                        return
+                    }
+                    appState.recordIndoorNavigationMapTapLocation(coordinate)
+                }
+            )
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(destinationSpot?.name ?? "목적지")
+                    .font(.caption.weight(.black))
+                    .lineLimit(1)
+                Text(route == nil ? "경로 준비 중" : "TMAP 도착 좌표 표시")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+            .padding(10)
+        }
+        .frame(height: height)
+        .background(.regularMaterial)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(.white.opacity(0.28))
+                .frame(height: 1)
+        }
+    }
+}
+
+private struct IndoorNavigationDebugPanel: View {
+    @EnvironmentObject private var appState: AppState
+    let onClose: () -> Void
+
+    private var selectedSpot: TourismSpot? {
+        if let id = appState.indoorDebugSelectedSpotID,
+           let spot = appState.spots.first(where: { $0.id == id }) {
+            return spot
+        }
+
+        return appState.navigationDestinationSpot ?? appState.selectedSpot ?? appState.spots.first
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: appState.isIndoorDebugModeEnabled ? "location.fill" : "location.slash")
+                    .foregroundStyle(appState.isIndoorDebugModeEnabled ? .green : .orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("실내 길찾기 디버그")
+                        .font(.subheadline.weight(.semibold))
+                    Text("하단 2D 지도를 탭해 내 위치를 주입하고, heading은 실제 기기 값을 사용합니다.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    onClose()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 28, height: 28)
+                        .background(.white.opacity(0.14), in: Circle())
+                }
+                .accessibilityLabel("실내 테스트 패널 닫기")
+            }
+
+            Menu {
+                ForEach(Array(appState.spots.prefix(80))) { spot in
+                    Button(spot.name) {
+                        appState.selectIndoorNavigationDebugDestination(spot)
+                    }
+                }
+            } label: {
+                HStack {
+                    Text(selectedSpot?.name ?? "목적지 선택")
+                        .lineLimit(1)
+                    Spacer()
+                    Image(systemName: "chevron.down")
+                }
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+            }
+
+            HStack(spacing: 8) {
+                Image(systemName: appState.pendingIndoorDebugMapTapCoordinate == nil ? "hand.tap" : "mappin.and.ellipse")
+                    .foregroundStyle(appState.pendingIndoorDebugMapTapCoordinate == nil ? Color.secondary : Color.blue)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(appState.pendingIndoorDebugMapTapCoordinate == nil ? "하단 2D 지도에서 내 위치를 탭하세요." : "탭 위치 저장됨")
+                        .font(.caption.weight(.semibold))
+                    if let coordinate = appState.pendingIndoorDebugMapTapCoordinate {
+                        Text(Self.coordinateText(coordinate))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("적용 전까지 실제 위치와 경로는 변경되지 않습니다.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+
+            Text(appState.indoorDebugStatus)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 8) {
+                Button {
+                    appState.applyPendingIndoorNavigationMapTapLocation()
+                } label: {
+                    Label("적용", systemImage: "play.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(appState.pendingIndoorDebugMapTapCoordinate == nil)
+
+                Button {
+                    appState.setIndoorDebugModeEnabled(false)
+                    onClose()
+                } label: {
+                    Label("실내 테스트 종료", systemImage: "location")
+                }
+                .buttonStyle(.bordered)
+            }
+            .font(.caption.weight(.semibold))
+        }
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(.white.opacity(0.16), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.25), radius: 12, y: 6)
+    }
+
+    private static func coordinateText(_ coordinate: CLLocationCoordinate2D) -> String {
+        "\(coordinate.latitude.formatted(.number.precision(.fractionLength(6)))), \(coordinate.longitude.formatted(.number.precision(.fractionLength(6))))"
+    }
+}
+
+private struct DebugLogToggleButton: View {
+    @Binding var isExpanded: Bool
+
+    var body: some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.18)) {
+                isExpanded.toggle()
+            }
+        } label: {
+            Label(isExpanded ? "로그 닫기" : "로그 열기", systemImage: isExpanded ? "doc.text.magnifyingglass" : "doc.text")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 8)
+                .background(.black.opacity(0.56), in: RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(.white.opacity(0.28), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(isExpanded ? "로그 닫기" : "로그 열기")
     }
 }
 

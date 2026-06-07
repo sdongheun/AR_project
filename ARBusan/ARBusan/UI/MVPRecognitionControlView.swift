@@ -172,10 +172,6 @@ struct MVPRecognitionControlView: View {
                         Toggle("3D 지리 앵커 마커 표시", isOn: $appState.shows3DGeospatialDebugMarker)
                             .font(.caption)
                     }
-                    if FeatureFlags.enableLegacyFullDebugLogs {
-                        Toggle("전체 로그 보기", isOn: $appState.showsFullDebugLogs)
-                            .font(.caption)
-                    }
                 }
             }
 

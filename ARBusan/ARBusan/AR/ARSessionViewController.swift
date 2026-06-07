@@ -128,7 +128,7 @@ final class ARSessionViewController: UIViewController {
             arView.scene.removeAnchor(routeArrowNode.anchorEntity)
         }
 
-        let anchor = AnchorEntity(world: matrix_identity_float4x4)
+        let anchor = AnchorEntity(.camera)
         let arrows = path.arrows.map { snapshot in
             let arrow = makeRouteArrowEntity(turnDirection: snapshot.turnDirection)
             arrow.position = routeArrowPosition(from: snapshot)
@@ -147,23 +147,11 @@ final class ARSessionViewController: UIViewController {
     }
 
     private func routeArrowHeightText() -> String {
-        if let cameraTransform = arView.session.currentFrame?.camera.transform {
-            return "기기 높이 y \(String(format: "%.2f", cameraTransform.columns.3.y))"
-        }
-        if let detectedGroundY {
-            return "기기 높이 대체값 groundY+1.5 \(String(format: "%.2f", detectedGroundY + 1.5))"
-        }
-        return "기기 높이 대기"
+        "카메라 전방 anchor / 기기 높이 기준"
     }
 
     private func routeArrowPosition(from snapshot: RouteArrowSnapshot) -> SIMD3<Float> {
-        var position = snapshot.position
-        if let cameraTransform = arView.session.currentFrame?.camera.transform {
-            position.y = cameraTransform.columns.3.y
-        } else if let detectedGroundY {
-            position.y = detectedGroundY + 1.5
-        }
-        return position
+        snapshot.position
     }
 
     private func makeRouteArrowEntity(turnDirection: RouteTurnDirection) -> Entity {
@@ -172,6 +160,7 @@ final class ARSessionViewController: UIViewController {
         let turnSign: Float = isRightTurn ? 1 : -1
         let material = SimpleMaterial(color: .systemBlue.withAlphaComponent(0.96), roughness: 0.14, isMetallic: false)
         let glowMaterial = SimpleMaterial(color: .systemBlue.withAlphaComponent(0.72), roughness: 0.1, isMetallic: false)
+        let scale: Float = 1.35
 
         let incomingShaft = ModelEntity(
             mesh: .generateBox(size: SIMD3<Float>(0.42, 0.14, 1.75)),
@@ -208,6 +197,7 @@ final class ARSessionViewController: UIViewController {
         root.addChild(turnShaft)
         root.addChild(arrowHead)
         root.addChild(dot)
+        root.scale = SIMD3<Float>(repeating: scale)
         return root
     }
 
@@ -366,37 +356,7 @@ final class ARSessionViewController: UIViewController {
     }
 
     private func updateRouteArrowGroundYIfNeeded(from frame: ARFrame) {
-        guard latestRouteArrowPath != nil,
-              frame.timestamp - lastGroundRaycastTimestamp >= groundRaycastInterval else {
-            return
-        }
-
-        lastGroundRaycastTimestamp = frame.timestamp
-        let raycastPoint = CGPoint(x: arView.bounds.midX, y: arView.bounds.maxY * 0.72)
-        let results = arView.raycast(
-            from: raycastPoint,
-            allowing: .estimatedPlane,
-            alignment: .horizontal
-        )
-
-        guard let result = results.first else {
-            if let latestRouteArrowPath {
-                onRouteArrowRenderStatusUpdated?("\(latestRouteArrowPath.spotName) RealityKit 화살표 유지 / 바닥 raycast 미감지 / 기존 높이 사용")
-            }
-            return
-        }
-
-        let nextGroundY = result.worldTransform.columns.3.y
-        if let detectedGroundY,
-           abs(detectedGroundY - nextGroundY) < 0.05 {
-            return
-        }
-
-        detectedGroundY = nextGroundY
-        if let latestRouteArrowPath {
-            onRouteArrowRenderStatusUpdated?("\(latestRouteArrowPath.spotName) 바닥 raycast 감지 / groundY \(String(format: "%.2f", nextGroundY)) / 화살표 높이 보정")
-        }
-        applyRouteArrowPath(latestRouteArrowPath)
+        // Route arrows are camera-anchored in this MVP, so ground raycast is not used.
     }
 
     private func smoothedContentOffset(

@@ -7,7 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		F1A2B3C4D5E6F7890A1B2C3D /* FeatureFlags.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A2B3C4D5E6F7890A1B2C3E /* FeatureFlags.swift */; };
 		045C3EDAD4B96FDC841A7ABB /* Pods_ARBusan.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4BA5637E4EAC2D0F5721D0F6 /* Pods_ARBusan.framework */; };
 		0D9A4B7C8E1F23456789A001 /* TMapSDK.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0D9A4B7C8E1F23456789A003 /* TMapSDK.xcframework */; };
 		0D9A4B7C8E1F23456789A002 /* TMapSDK.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 0D9A4B7C8E1F23456789A003 /* TMapSDK.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
@@ -43,11 +42,11 @@
 		9A2C46E705E9BC7F540D3A67 /* AppStatePolygonLookupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90D3B240A096A12D6848EA33 /* AppStatePolygonLookupTests.swift */; };
 		9B05FAEA79811C6D4AD265E0 /* CoreLocation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 67757602351B050E84917B7E /* CoreLocation.framework */; };
 		9FB4F7B4D0D81F0E23C5B4DE /* ARKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1BEEFAABBBBDE97B3D65763B /* ARKit.framework */; };
-		AB34CD56EF78901234560001 /* VSMSDK.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = AB34CD56EF78901234560003 /* VSMSDK.xcframework */; };
-		AB34CD56EF78901234560002 /* VSMSDK.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = AB34CD56EF78901234560003 /* VSMSDK.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		A2CA9E9B2CA16976E69DBA19 /* TourismSpotEntity.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF75EB13A6FB8209F1C5B6EB /* TourismSpotEntity.swift */; };
 		A64513A935681A0CF640A70C /* Pods_ARBusanTests.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 04D29C5DAF3EBD94D103CE51 /* Pods_ARBusanTests.framework */; };
 		A6E235E0B1A944FF6EA011C5 /* RealityAnchorRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39DF0E4705621DEB16B3F29D /* RealityAnchorRenderer.swift */; };
+		AB34CD56EF78901234560001 /* VSMSDK.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = AB34CD56EF78901234560003 /* VSMSDK.xcframework */; };
+		AB34CD56EF78901234560002 /* VSMSDK.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = AB34CD56EF78901234560003 /* VSMSDK.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		ACFD2C7B9394260B73C7EB47 /* APIKeyStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CCCFF3E16B9F9E0B24B976 /* APIKeyStatusView.swift */; };
 		B3B384BB76D9DA9D1289FC14 /* CameraMatrixProjector.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDB6B8DDC3820C969385E6AB /* CameraMatrixProjector.swift */; };
 		B5BDF2E53FE1AF4CA2D4E73B /* GeospatialSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21D260256C3BC47708FAC2B8 /* GeospatialSessionManager.swift */; };
@@ -60,7 +59,18 @@
 		E491AE0DF4774D3193982B81 /* PermissionStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B94377B0F6A4D737C1A4D39 /* PermissionStatus.swift */; };
 		EEDD8658344315C48E1677CF /* MockTourismSpots.swift in Sources */ = {isa = PBXBuildFile; fileRef = 720E65E6365B610695833BFD /* MockTourismSpots.swift */; };
 		EF6B663CF975E7ED6B8DADE3 /* LocationSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3C1EB7D834ACCD23C5208F0 /* LocationSnapshot.swift */; };
+		F1A2B3C4D5E6F7890A1B2C3D /* FeatureFlags.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A2B3C4D5E6F7890A1B2C3E /* FeatureFlags.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		F061B969BDEA67789718A674 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 192C67F2732369004434FB8F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D055590804B2AB709C7533E4;
+			remoteInfo = ARBusan;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
 		0D9A4B7C8E1F23456789A004 /* Embed Frameworks */ = {
@@ -77,28 +87,17 @@
 		};
 /* End PBXCopyFilesBuildPhase section */
 
-/* Begin PBXContainerItemProxy section */
-		F061B969BDEA67789718A674 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 192C67F2732369004434FB8F /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = D055590804B2AB709C7533E4;
-			remoteInfo = ARBusan;
-		};
-/* End PBXContainerItemProxy section */
-
 /* Begin PBXFileReference section */
 		04D29C5DAF3EBD94D103CE51 /* Pods_ARBusanTests.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_ARBusanTests.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		0AFACDCC6BDFAB77AA30FF92 /* Pods-ARBusanTests.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ARBusanTests.release.xcconfig"; path = "Target Support Files/Pods-ARBusanTests/Pods-ARBusanTests.release.xcconfig"; sourceTree = "<group>"; };
+		0D9A4B7C8E1F23456789A003 /* TMapSDK.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = TMapSDK.xcframework; path = Vendor/TMapSDK/TMapSDK.xcframework; sourceTree = "<group>"; };
 		0E2B00642680B0450FA7CD7D /* CameraMatrixProjectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraMatrixProjectorTests.swift; sourceTree = "<group>"; };
 		0F2DF903FCD974FC53B53400 /* OCRRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OCRRecognizer.swift; sourceTree = "<group>"; };
 		1679F3B9837757C3DC24386B /* RecognitionPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecognitionPipeline.swift; sourceTree = "<group>"; };
 		176A6D9A524E66E5F1660B66 /* ARSessionViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARSessionViewController.swift; sourceTree = "<group>"; };
 		1BEEFAABBBBDE97B3D65763B /* ARKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ARKit.framework; path = System/Library/Frameworks/ARKit.framework; sourceTree = SDKROOT; };
-		0D9A4B7C8E1F23456789A003 /* TMapSDK.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = TMapSDK.xcframework; path = Vendor/TMapSDK/TMapSDK.xcframework; sourceTree = "<group>"; };
 		209535A9C81DC4F623248B6E /* Pods-ARBusan.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ARBusan.release.xcconfig"; path = "Target Support Files/Pods-ARBusan/Pods-ARBusan.release.xcconfig"; sourceTree = "<group>"; };
 		20F5E8A02E2E4F8ACD84B20B /* VisualLandmarkRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisualLandmarkRecognizer.swift; sourceTree = "<group>"; };
-		AB34CD56EF78901234560003 /* VSMSDK.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = VSMSDK.xcframework; path = Vendor/TMapSDK/VSMSDK.xcframework; sourceTree = "<group>"; };
 		21D260256C3BC47708FAC2B8 /* GeospatialSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeospatialSessionManager.swift; sourceTree = "<group>"; };
 		34305BA710A2F58FF0E393E3 /* ARExploreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARExploreView.swift; sourceTree = "<group>"; };
 		39DF0E4705621DEB16B3F29D /* RealityAnchorRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealityAnchorRenderer.swift; sourceTree = "<group>"; };
@@ -131,6 +130,7 @@
 		9997A22255DB4A2B06DC9654 /* SwiftData.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftData.framework; path = System/Library/Frameworks/SwiftData.framework; sourceTree = SDKROOT; };
 		9B2F58EBC16053C84F1F7741 /* MVPRecognitionControlView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MVPRecognitionControlView.swift; sourceTree = "<group>"; };
 		9C6BDBD65F5F41B4E29AC0D8 /* RealityKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = RealityKit.framework; path = System/Library/Frameworks/RealityKit.framework; sourceTree = SDKROOT; };
+		AB34CD56EF78901234560003 /* VSMSDK.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = VSMSDK.xcframework; path = Vendor/TMapSDK/VSMSDK.xcframework; sourceTree = "<group>"; };
 		AD485DEC85E1FE8A7281CD65 /* CandidateScorer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CandidateScorer.swift; sourceTree = "<group>"; };
 		ADD79F9408CE21AB49905898 /* SceneSemanticsSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneSemanticsSnapshot.swift; sourceTree = "<group>"; };
 		B7E030A117A08223595D36A2 /* APIKeys.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIKeys.swift; sourceTree = "<group>"; };
@@ -146,8 +146,8 @@
 		DF75EB13A6FB8209F1C5B6EB /* TourismSpotEntity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TourismSpotEntity.swift; sourceTree = "<group>"; };
 		E3C1EB7D834ACCD23C5208F0 /* LocationSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationSnapshot.swift; sourceTree = "<group>"; };
 		ECD728BE6794199852CB60FE /* ARBusanApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARBusanApp.swift; sourceTree = "<group>"; };
-		FDB6B8DDC3820C969385E6AB /* CameraMatrixProjector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraMatrixProjector.swift; sourceTree = "<group>"; };
 		F1A2B3C4D5E6F7890A1B2C3E /* FeatureFlags.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureFlags.swift; sourceTree = "<group>"; };
+		FDB6B8DDC3820C969385E6AB /* CameraMatrixProjector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraMatrixProjector.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
