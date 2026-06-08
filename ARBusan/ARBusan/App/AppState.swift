@@ -237,6 +237,7 @@ final class AppState: ObservableObject {
     @Published var indoorDebugSelectedSpotID: TourismSpot.ID?
     @Published var indoorDebugScenario: IndoorDebugScenario = .front30m
     @Published var pendingIndoorDebugMapTapCoordinate: CLLocationCoordinate2D?
+    @Published var hasAppliedIndoorNavigationMapTapLocation = false
 
     private let recognitionPipeline: RecognitionPipeline
     private let cameraDirectionCandidateProvider: CameraDirectionCandidateProvider
@@ -357,7 +358,6 @@ final class AppState: ObservableObject {
                 self?.refreshOnScreenCandidateMarkerOverlays()
                 self?.refreshRadarMarkerOverlays()
                 self?.refreshRouteArrowPath()
-                self?.ensureNavigationRouteForDestination()
             }
         }
         self.geospatialSessionManager.onStatusChanged = { [weak self] status in
@@ -472,8 +472,14 @@ final class AppState: ObservableObject {
     func setIndoorDebugModeEnabled(_ isEnabled: Bool) {
         isIndoorDebugModeEnabled = isEnabled
         if isEnabled {
-            applyIndoorDebugScenario(indoorDebugScenario)
+            hasAppliedIndoorNavigationMapTapLocation = false
+            pendingIndoorDebugMapTapCoordinate = nil
+            routeArrowPath = nil
+            indoorDebugStatus = "실내 테스트 모드가 켜졌습니다. 하단 2D 지도에서 내 위치를 탭한 뒤 적용을 눌러야 TMAP 경로를 요청합니다."
+            routeArrowDiagnostics = "실내 테스트 대기 / 지도 탭 후 적용 전까지 TMAP 요청 안 함"
+            routeArrowComputationDiagnostics = "실내 테스트 모드 진입만으로는 위치 주입/경로 요청을 수행하지 않습니다."
         } else {
+            hasAppliedIndoorNavigationMapTapLocation = false
             indoorDebugStatus = "실내 디버그 모드를 종료했습니다. 실제 CoreLocation/ARCore snapshot을 다시 사용합니다."
             stableGeospatial3DOrigin = nil
             pendingStableGeospatial3DOrigin = nil
@@ -497,10 +503,8 @@ final class AppState: ObservableObject {
     func selectIndoorDebugSpot(id: TourismSpot.ID) {
         indoorDebugSelectedSpotID = id
         selectedSpot = spots.first(where: { $0.id == id })
-        applyIndoorDebugScenario(indoorDebugScenario)
         refreshRadarMarkerOverlays()
         refreshRouteArrowPath()
-        ensureNavigationRouteForDestination()
     }
 
     func applyIndoorNavigationDebug(spotID: TourismSpot.ID, scenario: IndoorDebugScenario) {
@@ -516,6 +520,7 @@ final class AppState: ObservableObject {
         }
         isIndoorDebugModeEnabled = true
         isNavigationModeEnabled = true
+        hasAppliedIndoorNavigationMapTapLocation = true
         indoorDebugSelectedSpotID = spot.id
         navigationDestinationSpotID = spot.id
         selectedSpot = spot
@@ -532,6 +537,7 @@ final class AppState: ObservableObject {
         navigationDestinationSpotID = spot.id
         selectedSpot = spot
         isNavigationModeEnabled = true
+        hasAppliedIndoorNavigationMapTapLocation = false
         pendingIndoorDebugMapTapCoordinate = nil
         routeArrowPath = nil
         routeArrowDiagnostics = "\(spot.name) 실내 테스트 목적지 선택 / 지도에서 내 위치를 탭하세요."
@@ -549,6 +555,7 @@ final class AppState: ObservableObject {
 
         isIndoorDebugModeEnabled = true
         isNavigationModeEnabled = true
+        hasAppliedIndoorNavigationMapTapLocation = false
         indoorDebugSelectedSpotID = destination.id
         navigationDestinationSpotID = destination.id
         selectedSpot = destination
@@ -581,6 +588,7 @@ final class AppState: ObservableObject {
 
         isIndoorDebugModeEnabled = true
         isNavigationModeEnabled = true
+        hasAppliedIndoorNavigationMapTapLocation = true
         indoorDebugSelectedSpotID = destination.id
         navigationDestinationSpotID = destination.id
         selectedSpot = destination
@@ -1555,7 +1563,6 @@ final class AppState: ObservableObject {
                     self.tmapArrivalRoutesBySpotID[spot.id] = route
                     self.updateTMAPRouteStatus()
                     self.refreshRouteArrowPath()
-                    self.ensureNavigationRouteForDestination()
                     self.refreshGeospatial3DAnchorRequestsIfPossible(force: true)
                 } catch {
                     guard !Task.isCancelled else {
@@ -1605,6 +1612,13 @@ final class AppState: ObservableObject {
             routeArrowPath = nil
             routeArrowDiagnostics = "길찾기 모드 켜짐 / 목적지를 선택하세요."
             routeArrowComputationDiagnostics = "목적지 없음 / TMAP 요청 안 함"
+            return
+        }
+
+        if isIndoorDebugModeEnabled, !hasAppliedIndoorNavigationMapTapLocation {
+            routeArrowPath = nil
+            routeArrowDiagnostics = "\(destination.name) 실내 테스트 대기 / 지도에서 내 위치를 탭하고 적용하세요."
+            routeArrowComputationDiagnostics = "\(destination.name) 실내 테스트 위치 미적용 / TMAP 요청 안 함"
             return
         }
 
@@ -2925,7 +2939,6 @@ final class AppState: ObservableObject {
             markerPlacementDiagnosticsBySpotID = [:]
             lastRequestedTerrainAnchorSpotIDs = []
             geospatialWGS84CandidateDiagnostics = "\(destination.name) 3D 목적지 마커 대기 / TMAP 보행자 경로 마지막 도착 좌표가 아직 없습니다."
-            ensureNavigationRouteForDestination()
             return
         }
 

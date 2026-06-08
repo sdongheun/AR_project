@@ -115,12 +115,8 @@ final class ARSessionViewController: UIViewController {
         if let routeArrowNode,
            routeArrowNode.arrowEntities.count == path.arrows.count,
            routeArrowNode.turnDirections == path.arrows.map(\.turnDirection) {
-            for (arrow, entity) in zip(path.arrows, routeArrowNode.arrowEntities) {
-                entity.position = routeArrowPosition(from: arrow)
-                entity.orientation = simd_quatf(angle: arrow.yawRadians, axis: SIMD3<Float>(0, 1, 0))
-            }
             let heightText = routeArrowHeightText()
-            onRouteArrowRenderStatusUpdated?("\(path.spotName) RealityKit 회전 화살표 업데이트 / \(path.arrows.count)개 / \(heightText)")
+            onRouteArrowRenderStatusUpdated?("\(path.spotName) RealityKit 회전 화살표 유지 / \(path.arrows.count)개 / \(heightText)")
             return
         }
 
@@ -128,11 +124,16 @@ final class ARSessionViewController: UIViewController {
             arView.scene.removeAnchor(routeArrowNode.anchorEntity)
         }
 
-        let anchor = AnchorEntity(.camera)
+        guard let cameraTransform = arView.session.currentFrame?.camera.transform else {
+            routeArrowNode = nil
+            onRouteArrowRenderStatusUpdated?("\(path.spotName) RealityKit 회전 화살표 생성 대기 / ARFrame camera transform 없음")
+            return
+        }
+
+        let anchor = AnchorEntity(world: cameraTransform)
         let arrows = path.arrows.map { snapshot in
             let arrow = makeRouteArrowEntity(turnDirection: snapshot.turnDirection)
             arrow.position = routeArrowPosition(from: snapshot)
-            arrow.orientation = simd_quatf(angle: snapshot.yawRadians, axis: SIMD3<Float>(0, 1, 0))
             anchor.addChild(arrow)
             return arrow
         }
@@ -147,7 +148,7 @@ final class ARSessionViewController: UIViewController {
     }
 
     private func routeArrowHeightText() -> String {
-        "카메라 전방 anchor / 기기 높이 기준"
+        "world-space anchor / 생성 순간 카메라 전방 기준"
     }
 
     private func routeArrowPosition(from snapshot: RouteArrowSnapshot) -> SIMD3<Float> {
@@ -157,47 +158,99 @@ final class ARSessionViewController: UIViewController {
     private func makeRouteArrowEntity(turnDirection: RouteTurnDirection) -> Entity {
         let root = Entity()
         let isRightTurn = turnDirection == .right
-        let turnSign: Float = isRightTurn ? 1 : -1
-        let material = SimpleMaterial(color: .systemBlue.withAlphaComponent(0.96), roughness: 0.14, isMetallic: false)
-        let glowMaterial = SimpleMaterial(color: .systemBlue.withAlphaComponent(0.72), roughness: 0.1, isMetallic: false)
-        let scale: Float = 1.35
+        let material = SimpleMaterial(color: .systemBlue.withAlphaComponent(0.98), roughness: 0.12, isMetallic: false)
+        let glowMaterial = SimpleMaterial(color: .cyan.withAlphaComponent(0.28), roughness: 0.1, isMetallic: false)
+        let scale: Float = 1.85
 
-        let incomingShaft = ModelEntity(
-            mesh: .generateBox(size: SIMD3<Float>(0.42, 0.14, 1.75)),
-            materials: [material]
-        )
-        incomingShaft.position = SIMD3<Float>(0, 0, 0.48)
-
-        let turnShaft = ModelEntity(
-            mesh: .generateBox(size: SIMD3<Float>(1.75, 0.16, 0.42)),
-            materials: [material]
-        )
-        turnShaft.position = SIMD3<Float>(turnSign * 0.76, 0.02, -0.68)
-
-        let arrowHead = ModelEntity(
-            mesh: .generateBox(size: SIMD3<Float>(0.92, 0.2, 0.88)),
-            materials: [material]
-        )
-        arrowHead.position = SIMD3<Float>(turnSign * 1.72, 0.04, -0.68)
-
-        let dot = ModelEntity(
-            mesh: .generateSphere(radius: 0.42),
+        let backing = ModelEntity(
+            mesh: .generateBox(size: SIMD3<Float>(2.9, 1.18, 0.045)),
             materials: [glowMaterial]
         )
-        dot.position = SIMD3<Float>(0, 0.08, -0.68)
+        backing.position = SIMD3<Float>(0, 0, -0.08)
+        root.addChild(backing)
 
-        let base = ModelEntity(
-            mesh: .generateBox(size: SIMD3<Float>(2.7, 0.06, 2.2)),
-            materials: [glowMaterial]
-        )
-        base.position = SIMD3<Float>(turnSign * 0.66, -0.08, -0.24)
+        let spacing: Float = 0.72
+        for index in 0..<3 {
+            let chevron = makeRouteChevronEntity(isRightTurn: isRightTurn, material: material)
+            chevron.position = SIMD3<Float>((Float(index) - 1) * spacing, 0, 0)
+            root.addChild(chevron)
+        }
 
-        root.addChild(base)
-        root.addChild(incomingShaft)
-        root.addChild(turnShaft)
-        root.addChild(arrowHead)
-        root.addChild(dot)
+        let label = makeRouteArrowTextEntity(text: isRightTurn ? ">>>" : "<<<")
+        label.position = SIMD3<Float>(0, -0.62, 0.03)
+        root.addChild(label)
+        root.orientation = routeArrowScreenOrientationCorrection()
         root.scale = SIMD3<Float>(repeating: scale)
+        return root
+    }
+
+    private func routeArrowScreenOrientationCorrection() -> simd_quatf {
+        let orientation = view.window?.windowScene?.interfaceOrientation ?? .portrait
+        let angle: Float
+        switch orientation {
+        case .portrait:
+            angle = .pi / 2
+        case .portraitUpsideDown:
+            angle = -.pi / 2
+        case .landscapeLeft, .landscapeRight:
+            angle = 0
+        default:
+            angle = .pi / 2
+        }
+        return simd_quatf(angle: angle, axis: SIMD3<Float>(0, 0, 1))
+    }
+
+    private func makeRouteChevronEntity(isRightTurn: Bool, material: SimpleMaterial) -> Entity {
+        ModelEntity(mesh: makeRouteChevronMesh(isRightTurn: isRightTurn), materials: [material])
+    }
+
+    private func makeRouteChevronMesh(isRightTurn: Bool) -> MeshResource {
+        var descriptor = MeshDescriptor()
+        let tipX: Float = isRightTurn ? 0.34 : -0.34
+        let tailX: Float = isRightTurn ? -0.34 : 0.34
+        let vertices: [SIMD3<Float>] = [
+            SIMD3<Float>(tipX, 0, 0.06),
+            SIMD3<Float>(tailX, 0.45, 0.06),
+            SIMD3<Float>(tailX, -0.45, 0.06),
+            SIMD3<Float>(tipX, 0, -0.06),
+            SIMD3<Float>(tailX, 0.45, -0.06),
+            SIMD3<Float>(tailX, -0.45, -0.06)
+        ]
+        descriptor.positions = MeshBuffers.Positions(vertices)
+        descriptor.primitives = .triangles([
+            0, 1, 2,
+            3, 5, 4,
+            0, 3, 4,
+            0, 4, 1,
+            1, 4, 5,
+            1, 5, 2,
+            2, 5, 3,
+            2, 3, 0
+        ])
+        return try! MeshResource.generate(from: [descriptor])
+    }
+
+    private func makeRouteArrowTextEntity(text: String) -> Entity {
+        let root = Entity()
+        let textMesh = MeshResource.generateText(
+            text,
+            extrusionDepth: 0.018,
+            font: .systemFont(ofSize: 0.3, weight: .black),
+            containerFrame: CGRect(x: -0.7, y: -0.16, width: 1.4, height: 0.32),
+            alignment: .center,
+            lineBreakMode: .byClipping
+        )
+        let shadow = ModelEntity(
+            mesh: textMesh,
+            materials: [SimpleMaterial(color: UIColor.black.withAlphaComponent(0.76), roughness: 0.18, isMetallic: false)]
+        )
+        shadow.position = SIMD3<Float>(0.018, -0.014, -0.018)
+        let label = ModelEntity(
+            mesh: textMesh,
+            materials: [SimpleMaterial(color: UIColor.white, roughness: 0.1, isMetallic: false)]
+        )
+        root.addChild(shadow)
+        root.addChild(label)
         return root
     }
 

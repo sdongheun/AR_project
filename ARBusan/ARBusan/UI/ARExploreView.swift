@@ -683,6 +683,7 @@ struct ARExploreView: View {
     @EnvironmentObject private var appState: AppState
     @State private var showsCollection = false
     @State private var showsIndoorNavigationDebug = false
+    @State private var isIndoorNavigationDebugCollapsed = false
     var onClose: (() -> Void)?
 
     var body: some View {
@@ -819,10 +820,14 @@ struct ARExploreView: View {
                         withAnimation(.easeOut(duration: 0.18)) {
                             showsIndoorNavigationDebug = false
                         }
+                    } onToggleCollapse: {
+                        withAnimation(.easeOut(duration: 0.18)) {
+                            isIndoorNavigationDebugCollapsed.toggle()
+                        }
                     }
                         .environmentObject(appState)
                         .frame(width: max(1, min(safeWidth - 28, 390)))
-                        .position(x: safeWidth / 2, y: 128)
+                        .position(x: safeWidth / 2, y: isIndoorNavigationDebugCollapsed ? 122 : 176)
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
 
@@ -1013,6 +1018,8 @@ private struct NavigationRouteMiniMapView: View {
 private struct IndoorNavigationDebugPanel: View {
     @EnvironmentObject private var appState: AppState
     let onClose: () -> Void
+    let onToggleCollapse: () -> Void
+    @State private var isCollapsed = false
 
     private var selectedSpot: TourismSpot? {
         if let id = appState.indoorDebugSelectedSpotID,
@@ -1037,17 +1044,63 @@ private struct IndoorNavigationDebugPanel: View {
                 }
                 Spacer()
                 Button {
+                    isCollapsed.toggle()
+                    onToggleCollapse()
+                } label: {
+                    Image(systemName: isCollapsed ? "chevron.down" : "chevron.up")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 40, height: 40)
+                        .background(.white.opacity(0.14), in: Circle())
+                }
+                .accessibilityLabel(isCollapsed ? "실내 테스트 패널 펼치기" : "실내 테스트 패널 접기")
+
+                Button {
                     onClose()
                 } label: {
                     Image(systemName: "xmark")
-                        .font(.caption.weight(.bold))
+                        .font(.subheadline.weight(.bold))
                         .foregroundStyle(.white)
-                        .frame(width: 28, height: 28)
+                        .frame(width: 40, height: 40)
                         .background(.white.opacity(0.14), in: Circle())
                 }
                 .accessibilityLabel("실내 테스트 패널 닫기")
             }
 
+            if isCollapsed {
+                compactArrowStatus
+            } else {
+                expandedContent
+            }
+        }
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(.white.opacity(0.16), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.25), radius: 12, y: 6)
+    }
+
+    private var compactArrowStatus: some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(appState.routeArrowPath == nil ? Color.orange : Color.green)
+                .frame(width: 8, height: 8)
+            Text(appState.routeArrowPath == nil ? "3D 화살표 숨김" : "3D 화살표 활성")
+                .font(.caption.weight(.bold))
+            Spacer(minLength: 0)
+            Text(appState.cameraHeadingDegrees.map { "heading \(Int($0))도" } ?? "heading 대기")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var expandedContent: some View {
+        Group {
             Menu {
                 ForEach(Array(appState.spots.prefix(80))) { spot in
                     Button(spot.name) {
@@ -1148,13 +1201,6 @@ private struct IndoorNavigationDebugPanel: View {
             }
             .font(.caption.weight(.semibold))
         }
-        .padding(12)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(.white.opacity(0.16), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.25), radius: 12, y: 6)
     }
 
     private static func coordinateText(_ coordinate: CLLocationCoordinate2D) -> String {
