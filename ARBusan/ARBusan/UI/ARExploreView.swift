@@ -1095,6 +1095,40 @@ private struct IndoorNavigationDebugPanel: View {
                 .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
 
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(appState.routeArrowPath == nil ? Color.orange : Color.green)
+                        .frame(width: 8, height: 8)
+                    Text(appState.routeArrowPath == nil ? "3D 화살표 숨김" : "3D 화살표 활성")
+                        .font(.caption.weight(.bold))
+                    Spacer(minLength: 0)
+                    if let path = appState.routeArrowPath {
+                        Text("\(path.arrows.count)개")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Text(appState.routeArrowDiagnostics)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+
+                Text(appState.routeArrowComputationDiagnostics)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+
+                Text(appState.routeArrowRenderDiagnostics)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+
             HStack(spacing: 8) {
                 Button {
                     appState.applyPendingIndoorNavigationMapTapLocation()

@@ -264,8 +264,9 @@ final class AppState: ObservableObject {
     private let maxRouteArrowCount = 1
     private let routeTurnMinimumAngleDegrees: Double = 45
     private let routeTurnAlignedThresholdDegrees: Double = 22
-    private let tmapRouteReuseDistanceMeters: CLLocationDistance = 50
-    private let tmapRouteDebounceDistanceMeters: CLLocationDistance = 10
+    private let routeArrowFacingToleranceDegrees: Double = 60
+    private let routeTurnSampleDistanceMeters: CLLocationDistance = 6
+    private let tmapRouteDebounceDistanceMeters: CLLocationDistance = 1
     private let tmapRouteDebounceInterval: TimeInterval = 1.5
     private let geospatial3DAnchorRefreshInterval: TimeInterval = 2.0
     private let stableOriginMaxAccuracyMeters: CLLocationAccuracy = 10
@@ -1401,7 +1402,7 @@ final class AppState: ObservableObject {
         navigationDestinationSpotID = nil
         isNavigationModeEnabled = false
         tmapArrivalRoutesBySpotID = [:]
-        tmapRouteStatus = "후보 초기화로 TMAP 도착 좌표 캐시도 초기화했습니다."
+        tmapRouteStatus = "후보 초기화로 TMAP 도착 좌표를 초기화했습니다."
         resolvedBuildingHeightsBySpotID = [:]
         sceneSemanticsEvidenceBySpotID = [:]
         sceneSemanticsScoringDiagnostics = "후보 초기화로 Scene Semantics 라벨 보정도 초기화했습니다."
@@ -1589,7 +1590,7 @@ final class AppState: ObservableObject {
         let extraText = extra.map { " / \($0)" } ?? ""
 
         if routeSummaries.isEmpty {
-            tmapRouteStatus = "TMAP 도착 좌표 캐시 없음\(inFlightText)\(failedText)\(extraText)"
+            tmapRouteStatus = "TMAP 도착 좌표 없음\(inFlightText)\(failedText)\(extraText)"
         } else {
             tmapRouteStatus = "TMAP 도착 좌표 \(routeSummaries.count)개 / " + routeSummaries.joined(separator: " | ") + inFlightText + failedText + extraText
         }
@@ -1611,19 +1612,6 @@ final class AppState: ObservableObject {
             routeArrowPath = nil
             routeArrowDiagnostics = "\(destination.name) 길찾기 대기 / 현재 위치 수신 필요"
             routeArrowComputationDiagnostics = "\(destination.name) / origin 없음 / CoreLocation 또는 ARCore Geospatial snapshot 대기"
-            return
-        }
-
-        if let cachedRoute = tmapArrivalRoutesBySpotID[destination.id],
-           cachedRoute.requestedStart.distance(to: origin.coordinate) <= tmapRouteReuseDistanceMeters {
-            routeArrowComputationDiagnostics = routeSummaryDiagnostics(
-                destination: destination,
-                route: cachedRoute,
-                origin: origin,
-                source: "캐시 재사용"
-            )
-            refreshRouteArrowPath()
-            refreshGeospatial3DAnchorRequestsIfPossible(force: true)
             return
         }
 
@@ -1805,7 +1793,7 @@ final class AppState: ObservableObject {
         guard let route = tmapArrivalRoutesBySpotID[targetSpot.id] else {
             routeArrowPath = nil
             routeArrowDiagnostics = "\(targetSpot.name) 길찾기 화살표 대기 / TMAP 경로 없음"
-            routeArrowComputationDiagnostics = "\(targetSpot.name) TMAP route 캐시 없음 / routeArrowPath nil"
+            routeArrowComputationDiagnostics = "\(targetSpot.name) TMAP route 없음 / routeArrowPath nil"
             setNavigationGuidance(title: "\(targetSpot.name) 경로 대기", detail: "TMAP 보행자 경로 응답을 기다리는 중입니다.")
             return
         }
@@ -2016,38 +2004,36 @@ final class AppState: ObservableObject {
         let startIndex = max(routeCoordinates.index(after: routeCoordinates.startIndex), nearestIndex)
 
         for index in startIndex..<(routeCoordinates.count - 1) {
-            let start = LocalENUProjector.project(routeCoordinates[index - 1], from: origin)
-            let turn = LocalENUProjector.project(routeCoordinates[index], from: origin)
-            let end = LocalENUProjector.project(routeCoordinates[index + 1], from: origin)
-            let incomingEast = turn.eastMeters - start.eastMeters
-            let incomingNorth = turn.northMeters - start.northMeters
-            let outgoingEast = end.eastMeters - turn.eastMeters
-            let outgoingNorth = end.northMeters - turn.northMeters
-            let incomingLength = hypot(incomingEast, incomingNorth)
-            let outgoingLength = hypot(outgoingEast, outgoingNorth)
-
-            guard incomingLength > 1.0, outgoingLength > 1.0 else {
+            guard let turnMetrics = routeTurnMetrics(
+                routeCoordinates: routeCoordinates,
+                turnIndex: index,
+                origin: origin
+            ) else {
                 continue
             }
 
-            let turnDistance = origin.coordinate.distance(to: routeCoordinates[index])
-            if turnDistance > routeArrowLookAheadMeters {
+            if turnMetrics.distanceFromOrigin > routeArrowLookAheadMeters {
                 continue
             }
 
-            let incomingBearing = atan2(incomingEast, incomingNorth).radiansToDegrees.normalizedDegrees
-            let outgoingBearing = atan2(outgoingEast, outgoingNorth).radiansToDegrees.normalizedDegrees
-            let signedTurn = incomingBearing.signedAngularDifference(to: outgoingBearing)
-            guard abs(signedTurn) >= routeTurnMinimumAngleDegrees else {
+            guard abs(turnMetrics.signedTurnDegrees) >= routeTurnMinimumAngleDegrees else {
                 continue
             }
 
-            guard turnDistance <= routeTurnBoundaryMeters else {
+            guard turnMetrics.distanceFromOrigin <= routeTurnBoundaryMeters else {
                 continue
             }
 
             if let heading = cameraHeadingDegrees {
-                let alignedDelta = heading.signedAngularDifference(to: outgoingBearing)
+                let headingTargetBearing = turnMetrics.distanceFromOrigin < 3
+                    ? turnMetrics.outgoingBearing
+                    : origin.coordinate.bearing(to: routeCoordinates[index])
+                let facingDelta = heading.signedAngularDifference(to: headingTargetBearing)
+                guard abs(facingDelta) <= routeArrowFacingToleranceDegrees else {
+                    continue
+                }
+
+                let alignedDelta = heading.signedAngularDifference(to: turnMetrics.outgoingBearing)
                 if abs(alignedDelta) <= routeTurnAlignedThresholdDegrees {
                     continue
                 }
@@ -2063,8 +2049,8 @@ final class AppState: ObservableObject {
                     id: arrows.count,
                     position: position,
                     yawRadians: 0,
-                    distanceFromOriginMeters: turnDistance,
-                    turnDirection: signedTurn > 0 ? .right : .left
+                    distanceFromOriginMeters: turnMetrics.distanceFromOrigin,
+                    turnDirection: turnMetrics.signedTurnDegrees > 0 ? .right : .left
                 )
             )
 
@@ -2074,6 +2060,128 @@ final class AppState: ObservableObject {
         }
 
         return arrows
+    }
+
+    private struct RouteTurnMetrics {
+        let incomingBearing: Double
+        let outgoingBearing: Double
+        let signedTurnDegrees: Double
+        let incomingSampleDistance: CLLocationDistance
+        let outgoingSampleDistance: CLLocationDistance
+        let distanceFromOrigin: CLLocationDistance
+    }
+
+    private func routeTurnMetrics(
+        routeCoordinates: [CLLocationCoordinate2D],
+        turnIndex: Int,
+        origin: LocationSnapshot
+    ) -> RouteTurnMetrics? {
+        guard routeCoordinates.indices.contains(turnIndex),
+              let incomingCoordinate = routeCoordinate(
+                before: turnIndex,
+                distanceMeters: routeTurnSampleDistanceMeters,
+                in: routeCoordinates
+              ),
+              let outgoingCoordinate = routeCoordinate(
+                after: turnIndex,
+                distanceMeters: routeTurnSampleDistanceMeters,
+                in: routeCoordinates
+              ) else {
+            return nil
+        }
+
+        let turnCoordinate = routeCoordinates[turnIndex]
+        let incomingDistance = incomingCoordinate.distance(to: turnCoordinate)
+        let outgoingDistance = turnCoordinate.distance(to: outgoingCoordinate)
+        guard incomingDistance > 1.0, outgoingDistance > 1.0 else {
+            return nil
+        }
+
+        let incomingBearing = incomingCoordinate.bearing(to: turnCoordinate)
+        let outgoingBearing = turnCoordinate.bearing(to: outgoingCoordinate)
+        return RouteTurnMetrics(
+            incomingBearing: incomingBearing,
+            outgoingBearing: outgoingBearing,
+            signedTurnDegrees: incomingBearing.signedAngularDifference(to: outgoingBearing),
+            incomingSampleDistance: incomingDistance,
+            outgoingSampleDistance: outgoingDistance,
+            distanceFromOrigin: origin.coordinate.distance(to: turnCoordinate)
+        )
+    }
+
+    private func routeCoordinate(
+        before index: Int,
+        distanceMeters targetDistance: CLLocationDistance,
+        in coordinates: [CLLocationCoordinate2D]
+    ) -> CLLocationCoordinate2D? {
+        guard coordinates.indices.contains(index), index > coordinates.startIndex else {
+            return nil
+        }
+
+        var remainingDistance = targetDistance
+        var cursor = coordinates[index]
+        var cursorIndex = index
+        while cursorIndex > coordinates.startIndex {
+            let previousIndex = coordinates.index(before: cursorIndex)
+            let previous = coordinates[previousIndex]
+            let segmentLength = previous.distance(to: cursor)
+            if segmentLength >= remainingDistance {
+                return coordinateAlongSegment(from: cursor, to: previous, distanceMeters: remainingDistance)
+            }
+
+            remainingDistance -= segmentLength
+            cursor = previous
+            cursorIndex = previousIndex
+        }
+
+        return coordinates.first
+    }
+
+    private func routeCoordinate(
+        after index: Int,
+        distanceMeters targetDistance: CLLocationDistance,
+        in coordinates: [CLLocationCoordinate2D]
+    ) -> CLLocationCoordinate2D? {
+        guard coordinates.indices.contains(index), index < coordinates.index(before: coordinates.endIndex) else {
+            return nil
+        }
+
+        var remainingDistance = targetDistance
+        var cursor = coordinates[index]
+        var cursorIndex = index
+        while cursorIndex < coordinates.index(before: coordinates.endIndex) {
+            let nextIndex = coordinates.index(after: cursorIndex)
+            let next = coordinates[nextIndex]
+            let segmentLength = cursor.distance(to: next)
+            if segmentLength >= remainingDistance {
+                return coordinateAlongSegment(from: cursor, to: next, distanceMeters: remainingDistance)
+            }
+
+            remainingDistance -= segmentLength
+            cursor = next
+            cursorIndex = nextIndex
+        }
+
+        return coordinates.last
+    }
+
+    private func coordinateAlongSegment(
+        from start: CLLocationCoordinate2D,
+        to end: CLLocationCoordinate2D,
+        distanceMeters: CLLocationDistance
+    ) -> CLLocationCoordinate2D {
+        let startLocation = CLLocation(latitude: start.latitude, longitude: start.longitude)
+        let endLocation = CLLocation(latitude: end.latitude, longitude: end.longitude)
+        let segmentLength = startLocation.distance(from: endLocation)
+        guard segmentLength > 0 else {
+            return start
+        }
+
+        let ratio = min(max(distanceMeters / segmentLength, 0), 1)
+        return CLLocationCoordinate2D(
+            latitude: start.latitude + (end.latitude - start.latitude) * ratio,
+            longitude: start.longitude + (end.longitude - start.longitude) * ratio
+        )
     }
 
     private func routeArrowRejectionDiagnostics(
@@ -2098,31 +2206,28 @@ final class AppState: ObservableObject {
         let startIndex = max(routeCoordinates.index(after: routeCoordinates.startIndex), nearestIndex)
 
         for index in startIndex..<(routeCoordinates.count - 1) {
-            let start = LocalENUProjector.project(routeCoordinates[index - 1], from: origin)
-            let turn = LocalENUProjector.project(routeCoordinates[index], from: origin)
-            let end = LocalENUProjector.project(routeCoordinates[index + 1], from: origin)
-            let incomingEast = turn.eastMeters - start.eastMeters
-            let incomingNorth = turn.northMeters - start.northMeters
-            let outgoingEast = end.eastMeters - turn.eastMeters
-            let outgoingNorth = end.northMeters - turn.northMeters
-            let incomingLength = hypot(incomingEast, incomingNorth)
-            let outgoingLength = hypot(outgoingEast, outgoingNorth)
             let turnDistance = origin.coordinate.distance(to: routeCoordinates[index])
-
-            guard incomingLength > 1.0, outgoingLength > 1.0 else {
-                candidates.append("#\(index) 제외: 전후 세그먼트 짧음")
+            guard let turnMetrics = routeTurnMetrics(
+                routeCoordinates: routeCoordinates,
+                turnIndex: index,
+                origin: origin
+            ) else {
+                candidates.append("#\(index) 제외: 전후 \(Int(routeTurnSampleDistanceMeters))m 샘플 부족")
                 continue
             }
 
-            let incomingBearing = atan2(incomingEast, incomingNorth).radiansToDegrees.normalizedDegrees
-            let outgoingBearing = atan2(outgoingEast, outgoingNorth).radiansToDegrees.normalizedDegrees
-            let signedTurn = incomingBearing.signedAngularDifference(to: outgoingBearing)
-            let alignedDelta = cameraHeadingDegrees.map { $0.signedAngularDifference(to: outgoingBearing) }
+            let alignedDelta = cameraHeadingDegrees.map { $0.signedAngularDifference(to: turnMetrics.outgoingBearing) }
+            let headingTargetBearing = turnMetrics.distanceFromOrigin < 3
+                ? turnMetrics.outgoingBearing
+                : origin.coordinate.bearing(to: routeCoordinates[index])
+            let facingDelta = cameraHeadingDegrees.map { $0.signedAngularDifference(to: headingTargetBearing) }
             let reason: String
-            if abs(signedTurn) < routeTurnMinimumAngleDegrees {
+            if abs(turnMetrics.signedTurnDegrees) < routeTurnMinimumAngleDegrees {
                 reason = "회전각 부족"
-            } else if turnDistance > routeTurnBoundaryMeters {
+            } else if turnMetrics.distanceFromOrigin > routeTurnBoundaryMeters {
                 reason = "boundary 밖"
+            } else if let facingDelta, abs(facingDelta) > routeArrowFacingToleranceDegrees {
+                reason = "카메라가 회전 지점 안 봄"
             } else if let alignedDelta, abs(alignedDelta) <= routeTurnAlignedThresholdDegrees {
                 reason = "이미 방향 정렬"
             } else if turnDistance > routeArrowLookAheadMeters {
@@ -2131,9 +2236,14 @@ final class AppState: ObservableObject {
                 reason = "조건 통과 예상"
             }
 
-            let headingText = alignedDelta.map { "heading->out \(Int($0))도" } ?? "heading 없음"
+            let headingText: String
+            if let facingDelta, let alignedDelta {
+                headingText = "heading->turn \(Int(facingDelta))도 / heading->out \(Int(alignedDelta))도"
+            } else {
+                headingText = "heading 없음"
+            }
             candidates.append(
-                "#\(index) \(reason) / 거리 \(Int(turnDistance))m / 회전 \(Int(signedTurn))도 / in \(Int(incomingBearing))도 out \(Int(outgoingBearing))도 / \(headingText)"
+                "#\(index) \(reason) / 거리 \(Int(turnMetrics.distanceFromOrigin))m / 회전 \(Int(turnMetrics.signedTurnDegrees))도 / in \(Int(turnMetrics.incomingBearing))도 out \(Int(turnMetrics.outgoingBearing))도 / 샘플 \(Int(turnMetrics.incomingSampleDistance))m-\(Int(turnMetrics.outgoingSampleDistance))m / \(headingText)"
             )
 
             if candidates.count >= 4 {
@@ -2142,7 +2252,7 @@ final class AppState: ObservableObject {
         }
 
         let candidateText = candidates.isEmpty ? "회전 후보 없음" : candidates.joined(separator: " | ")
-        return "\(targetSpot.name) route 좌표 \(routeCoordinates.count)개 / 최근접 \(nearestText) / 기준: boundary \(Int(routeTurnBoundaryMeters))m, 회전 \(Int(routeTurnMinimumAngleDegrees))도 이상, 정렬 \(Int(routeTurnAlignedThresholdDegrees))도 초과 / \(candidateText)"
+        return "\(targetSpot.name) route 좌표 \(routeCoordinates.count)개 / 최근접 \(nearestText) / 기준: boundary \(Int(routeTurnBoundaryMeters))m, 전후 샘플 \(Int(routeTurnSampleDistanceMeters))m, 회전 \(Int(routeTurnMinimumAngleDegrees))도 이상, 회전지점 시야 \(Int(routeArrowFacingToleranceDegrees))도 이내, 정렬 \(Int(routeTurnAlignedThresholdDegrees))도 초과 / \(candidateText)"
     }
 
     private func routePolylineLengthMeters(_ coordinates: [CLLocationCoordinate2D]) -> CLLocationDistance {
