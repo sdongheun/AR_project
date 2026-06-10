@@ -830,7 +830,11 @@ struct ARExploreView: View {
                     }
                         .environmentObject(appState)
                         .frame(width: max(1, min(safeWidth - 28, 390)))
-                        .position(x: safeWidth / 2, y: isIndoorNavigationDebugCollapsed ? 122 : 176)
+                        // 상단 safe area(다이나믹 아일랜드/노치)만큼 내려 패널 상단이 가리지 않게 한다.
+                        .position(
+                            x: safeWidth / 2,
+                            y: (isIndoorNavigationDebugCollapsed ? 122 : 176) + max(geometry.safeAreaInsets.top, 44)
+                        )
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
 
