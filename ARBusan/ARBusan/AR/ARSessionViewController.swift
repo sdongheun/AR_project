@@ -21,6 +21,11 @@ final class ARSessionViewController: UIViewController {
     private var geospatialDebugNodesByID: [UUID: GeospatialDebugRenderNode] = [:]
     private var routeArrowNode: RouteArrowRenderNode?
     private var latestRouteArrowPath: RouteArrowPathSnapshot?
+    private var arrivalPinAnchor: AnchorEntity?
+    private var latestArrivalPin: ArrivalPinSnapshot?
+    private let arrivalPinHeightOffset: Float = -0.3
+    private let arrivalPinMinDistanceMeters: Float = 2
+    private let arrivalPinMaxDistanceMeters: Float = 8
     private var detectedGroundY: Float?
     private var lastGroundRaycastTimestamp: TimeInterval = 0
     private let groundRaycastInterval: TimeInterval = 1.0
@@ -93,6 +98,82 @@ final class ARSessionViewController: UIViewController {
         geospatialDebugNodesByID.values.forEach {
             $0.anchorEntity.isEnabled = isVisible
         }
+    }
+
+    func setArrivalPin(_ pin: ArrivalPinSnapshot?) {
+        guard let pin else {
+            if let arrivalPinAnchor {
+                arView.scene.removeAnchor(arrivalPinAnchor)
+                self.arrivalPinAnchor = nil
+            }
+            latestArrivalPin = nil
+            return
+        }
+
+        if arrivalPinAnchor == nil {
+            // 월드 앵커. 위치/방향은 매 프레임 updateArrivalPinPlacement에서 카메라 월드 위치 + 목적지 방위로 갱신한다.
+            let anchor = AnchorEntity(world: .zero)
+            anchor.addChild(makeArrivalPinEntity())
+            arView.scene.addAnchor(anchor)
+            arrivalPinAnchor = anchor
+        }
+        latestArrivalPin = pin
+    }
+
+    // 도착 핀은 축대칭 마커라 yaw가 필요 없다. 중력 정렬(upright)로 두고 위치만 가는 방향으로 갱신한다.
+    // iOS 17 호환을 위해 generateSphere/generateBox만 사용한다.
+    private func makeArrivalPinEntity() -> Entity {
+        let root = Entity()
+        let pinColor = UIColor.systemGreen
+        let solid = SimpleMaterial(color: pinColor.withAlphaComponent(0.98), roughness: 0.15, isMetallic: false)
+        let glow = SimpleMaterial(color: pinColor.withAlphaComponent(0.28), roughness: 0.1, isMetallic: false)
+
+        let halo = ModelEntity(mesh: .generateSphere(radius: 0.52), materials: [glow])
+        halo.position = SIMD3<Float>(0, 0.42, 0)
+        root.addChild(halo)
+
+        let head = ModelEntity(mesh: .generateSphere(radius: 0.34), materials: [solid])
+        head.position = SIMD3<Float>(0, 0.42, 0)
+        root.addChild(head)
+
+        let dot = ModelEntity(
+            mesh: .generateSphere(radius: 0.13),
+            materials: [SimpleMaterial(color: .white, roughness: 0.2, isMetallic: false)]
+        )
+        dot.position = SIMD3<Float>(0, 0.42, 0.27)
+        root.addChild(dot)
+
+        let stem = ModelEntity(
+            mesh: .generateBox(size: SIMD3<Float>(0.09, 0.52, 0.09)),
+            materials: [solid]
+        )
+        stem.position = SIMD3<Float>(0, -0.02, 0)
+        root.addChild(stem)
+
+        root.scale = SIMD3<Float>(repeating: 1.4)
+        return root
+    }
+
+    private func updateArrivalPinPlacement(from frame: ARFrame) {
+        guard let latestArrivalPin, let arrivalPinAnchor else {
+            return
+        }
+
+        // 카메라 transform에서 위치(높이 포함)만 사용하고 회전은 사용하지 않는다(시선 비추종).
+        let cameraColumn = frame.camera.transform.columns.3
+        let cameraWorldPosition = SIMD3<Float>(cameraColumn.x, cameraColumn.y, cameraColumn.z)
+        let distance = min(
+            max(Float(latestArrivalPin.distanceMeters), arrivalPinMinDistanceMeters),
+            arrivalPinMaxDistanceMeters
+        )
+        let worldPosition = TravelDirectionAnchor.worldPosition(
+            cameraWorldPosition: cameraWorldPosition,
+            bearingDegrees: latestArrivalPin.bearingDegrees,
+            distanceMeters: distance,
+            heightOffsetMeters: arrivalPinHeightOffset
+        )
+        arrivalPinAnchor.transform.translation = worldPosition
+        arrivalPinAnchor.transform.rotation = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
     }
 
     func setRouteArrowPath(_ path: RouteArrowPathSnapshot?) {
@@ -507,6 +588,7 @@ extension ARSessionViewController: ARSessionDelegate {
         geospatialSessionManager.update(with: frame)
         updateGeospatialDebugVisualsForCamera()
         updateRouteArrowGroundYIfNeeded(from: frame)
+        updateArrivalPinPlacement(from: frame)
         publishCameraHeadingIfNeeded(from: frame)
         publishCameraProjectionIfNeeded(from: frame)
         if shouldRunLiveOCR {

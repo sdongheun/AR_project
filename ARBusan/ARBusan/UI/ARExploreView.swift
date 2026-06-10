@@ -1636,6 +1636,7 @@ private struct ARViewContainer: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: ARSessionViewController, context: Context) {
         uiViewController.setShows3DGeospatialDebugMarker(appState.shows3DGeospatialDebugMarker)
         uiViewController.setRouteArrowPath(appState.routeArrowPath)
+        uiViewController.setArrivalPin(appState.arrivalPin)
     }
 }
 

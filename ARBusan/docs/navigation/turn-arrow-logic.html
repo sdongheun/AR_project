@@ -152,6 +152,12 @@
   <p>조건이 모두 통과하면 화살표는 회전점이 아니라 <b>생성 순간의 카메라 전방</b>에 만들어진다.
   RealityKit <code>AnchorEntity(world: cameraTransform)</code> 으로 월드에 고정되므로 GPS·지면 raycast의 영향을 받지 않는다.</p>
 
+  <div class="callout">
+    <strong>변경 예정 (UX 결정):</strong> 현재는 <b>카메라 transform(시선)</b> 기준이라 사용자가 바닥을 보거나 두리번거리면
+    화살표가 시선을 따라 엉뚱한 곳에 뜰 수 있다. 이를 <b>“기기 위치 + 휴대폰 높이 + 가는 방향(경로 방위), 중력 정렬”</b> 앵커링으로 교체한다
+    (카메라에서 위치만 쓰고 회전은 쓰지 않음). 상세 규칙은 <code>AR_NAVIGATION_LOGIC_PLAN.md</code> 3.10.
+  </div>
+
   <figure class="diagram">
     <svg viewBox="0 0 920 300" role="img" aria-label="카메라 기준 화살표 배치">
       <!-- camera/phone -->

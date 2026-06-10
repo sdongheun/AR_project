@@ -107,6 +107,7 @@ ARBusan/ARBusan/Data/Mock/MockTourismSpots.swift
 - 테스트 기록 문서: `ARBusan/docs/testing/TEST_RESULTS.md`
 - `FeatureFlags`로 실내 디버그, matrix, Polygon, 기존 3D 앵커 실험 UI를 기본 비활성화
 - 길찾기 안내의 위치/heading 불안정 대응(체크리스트 3.6/3.7) 구현: 오차 원 기반 turn boundary, TMAP 경로선 스냅, 위치 튐 시 최근 안정 위치 유지, 이동 방향+나침반 융합, 불안정 시 보수적 방향 안내. 순수 로직은 `ARBusan/Navigation/NavigationStabilizer.swift`(+`NavigationStabilizerTests`). 실외 실측은 대기 중이며 실내는 디버그 패널 `정확도 저하 시뮬레이션` 토글로 재현한다.
+- 도착 판정/도착 핀(체크리스트 3.8) 구현: 도착 좌표 10m 이내 진입 시 길안내 종료 + 목적지 2D 라벨/edge marker 숨김 + 3D 대형 도착 핀 표시(`ArrivalPinSnapshot` → `ARSessionViewController.setArrivalPin`). 핀은 카메라 시선을 따라가지 않고 **기기 위치+높이, 목적지 방위 전방, 중력 정렬**로 배치한다(`ARBusan/Navigation/TravelDirectionAnchor.swift`, 3.10 앵커링 규칙). 실기기 시각 검증은 실외 대기.
 
 ## 4. 보존된 비활성 코드
 

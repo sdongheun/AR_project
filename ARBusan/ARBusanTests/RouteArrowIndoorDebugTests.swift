@@ -46,6 +46,63 @@ final class RouteArrowIndoorDebugTests: XCTestCase {
         XCTAssertTrue(fixture.appState.routeArrowComputationDiagnostics.contains("전방 AR 화살표"))
     }
 
+    func testArrivalPinAppearsWithinCompletionRadiusAndHidesEdgeMarkers() throws {
+        let destination = CLLocationCoordinate2D(latitude: 35.245700, longitude: 128.904000)
+        let spot = TourismSpot(
+            id: "arrival-target",
+            name: "도착 테스트 목적지",
+            address: "실내 디버그",
+            districtName: "테스트",
+            category: "길찾기",
+            source: .mock,
+            geometryKind: .point,
+            center: destination,
+            recognitionHints: ["도착 테스트 목적지"],
+            notes: "도착 판정/핀 테스트"
+        )
+        // 현재 위치를 도착 좌표와 동일하게 둬 도착 반경(10m) 안으로 만든다.
+        let origin = LocationSnapshot(
+            latitude: destination.latitude,
+            longitude: destination.longitude,
+            altitude: nil,
+            horizontalAccuracy: 1,
+            verticalAccuracy: nil,
+            heading: nil,
+            headingAccuracy: nil,
+            source: .arCoreGeospatial,
+            capturedAt: Date()
+        )
+        let route = TMAPPedestrianRoute(
+            destinationName: spot.name,
+            requestedStart: destination,
+            requestedDestination: destination,
+            arrivalCoordinate: destination,
+            routeCoordinates: [destination],
+            totalDistanceMeters: nil,
+            totalTimeSeconds: nil
+        )
+        let appState = AppState(spots: [spot])
+        appState.spots = [spot]
+        appState.selectedSpot = spot
+        appState.navigationDestinationSpotID = spot.id
+        appState.isNavigationModeEnabled = true
+        appState.isIndoorDebugModeEnabled = true
+        appState.latestLocationSnapshot = origin
+        appState.latestGeospatialLocationSnapshot = origin
+        appState.locationConfidence = .high
+        appState.effectiveSpatialConfidence = .high
+        appState.tmapArrivalRoutesBySpotID[spot.id] = route
+
+        appState.updateCameraHeading(0)
+
+        let pin = try XCTUnwrap(appState.arrivalPin)
+        XCTAssertEqual(pin.spotID, spot.id)
+        XCTAssertLessThanOrEqual(pin.distanceMeters, 10)
+        XCTAssertNil(appState.routeArrowPath)
+        XCTAssertTrue(appState.edgeMarkerOverlays.isEmpty)
+        XCTAssertTrue(appState.navigationGuidanceIsArrivalNearby)
+    }
+
     private func makeRightTurnFixture(
         originNorthOffsetMeters: Double
     ) -> (appState: AppState, spot: TourismSpot) {

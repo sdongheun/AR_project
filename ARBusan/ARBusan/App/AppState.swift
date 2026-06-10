@@ -86,6 +86,15 @@ struct RouteArrowSnapshot: Identifiable, Equatable {
     let turnDirection: RouteTurnDirection
 }
 
+struct ArrivalPinSnapshot: Equatable {
+    let spotID: TourismSpot.ID
+    let spotName: String
+    /// 현재 위치에서 목적지(도착 좌표)로의 방위(도). 핀을 "가는 방향"에 배치할 때 쓴다.
+    let bearingDegrees: Double
+    /// 현재 위치와 도착 좌표 사이 거리(m).
+    let distanceMeters: Double
+}
+
 private struct NavigationGuidance {
     let title: String
     let detail: String
@@ -198,6 +207,7 @@ final class AppState: ObservableObject {
     @Published var navigationGuidanceHorizontalOffsetRatio: Double = 0
     @Published var navigationGuidanceIsArrivalNearby = false
     @Published var navigationStabilityDiagnostics = "위치/방향 안정화를 아직 계산하지 않았습니다."
+    @Published var arrivalPin: ArrivalPinSnapshot?
     @Published var showsMatrixDebugMarker = FeatureFlags.enableLegacyMatrixDebugOverlay
     @Published var showsOnScreenCandidateDebugMarkers = FeatureFlags.enableLegacyOnScreenCandidateDebugMarkers
     @Published var shows3DGeospatialDebugMarker = FeatureFlags.enableLegacyGeospatial3DMarkers
@@ -678,6 +688,7 @@ final class AppState: ObservableObject {
             navigationRouteTask = nil
             navigationRouteTaskSpotID = nil
             routeArrowPath = nil
+            arrivalPin = nil
             routeArrowDiagnostics = "길찾기 모드 꺼짐 / 목적지를 선택하면 화살표를 표시합니다."
             routeArrowComputationDiagnostics = "길찾기 모드 꺼짐 / 화살표 계산 안 함"
             setNavigationGuidance(title: "길찾기 꺼짐", detail: "목적지를 선택하면 TMAP 경로 기준 방향 안내를 표시합니다.")
@@ -1786,6 +1797,8 @@ final class AppState: ObservableObject {
     }
 
     private func refreshRouteArrowPath() {
+        // 기본은 도착 핀 없음. 아래 도착 분기에서만 다시 설정한다(모든 비도착 경로 자동 해제).
+        arrivalPin = nil
         guard isNavigationModeEnabled else {
             routeArrowPath = nil
             routeArrowDiagnostics = "길찾기 모드 꺼짐 / 목적지를 선택하면 화살표를 표시합니다."
@@ -1840,8 +1853,17 @@ final class AppState: ObservableObject {
         let arrivalDistance = guidedOrigin.coordinate.distance(to: route.arrivalCoordinate)
         if arrivalDistance <= routeArrivalCompletionMeters {
             routeArrowPath = nil
+            // 도착: 길안내 종료 + 목적지 방향 3D 대형 핀 표시 + 목적지 2D 라벨/edge marker 숨김.
+            arrivalPin = ArrivalPinSnapshot(
+                spotID: targetSpot.id,
+                spotName: targetSpot.name,
+                bearingDegrees: guidedOrigin.coordinate.bearing(to: route.arrivalCoordinate),
+                distanceMeters: arrivalDistance
+            )
+            edgeMarkerOverlays = []
+            arLabelOverlay = nil
             routeArrowDiagnostics = "\(targetSpot.name) 도착 완료 / TMAP 도착 좌표 \(Int(arrivalDistance))m 이내 / 길안내 종료"
-            routeArrowComputationDiagnostics = "\(targetSpot.name) 도착 완료 / AR 화살표 제거 / 도착 핀 상태로 전환"
+            routeArrowComputationDiagnostics = "\(targetSpot.name) 도착 완료 / AR 화살표 제거 / 목적지 방향 3D 도착 핀 표시"
             updateNavigationGuidance(for: route, targetSpot: targetSpot, origin: guidedOrigin, guidanceFix: guidanceFix)
             return
         }
@@ -2408,6 +2430,11 @@ final class AppState: ObservableObject {
     }
 
     private func refreshEdgeMarkerOverlays() {
+        // 도착 상태에서는 목적지 2D 라벨/edge marker를 숨기고 도착 핀만 남긴다.
+        if isNavigationModeEnabled, arrivalPin != nil {
+            edgeMarkerOverlays = []
+            return
+        }
         updateEdgeMarkerOverlays(focusing: recognitionResult.labelSpot ?? selectedSpot)
     }
 
