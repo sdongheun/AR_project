@@ -26,6 +26,16 @@ final class ARSessionViewController: UIViewController {
     private let arrivalPinHeightOffset: Float = -0.3
     private let arrivalPinMinDistanceMeters: Float = 2
     private let arrivalPinMaxDistanceMeters: Float = 8
+    // 회전 chevron: 주행 방향 앵커링(시선 비추종). 카메라 위치+높이 기준 전방에 배치.
+    private let routeArrowForwardDistanceMeters: Float = 3.0
+    private let routeArrowHeightOffset: Float = -0.05
+    // 바닥 리본: 가는 방향으로 뻗는 납작한 레인(중력 수평). 기기 높이 아래로 내려 바닥처럼 보이게 한다.
+    private var ribbonAnchor: AnchorEntity?
+    private var latestRibbon: RouteRibbonSnapshot?
+    private let ribbonHeightOffset: Float = -1.2
+    private let ribbonNearMeters: Float = 1.2
+    private let ribbonFarMeters: Float = 6.0
+    private let ribbonWidthMeters: Float = 0.7
     private var detectedGroundY: Float?
     private var lastGroundRaycastTimestamp: TimeInterval = 0
     private let groundRaycastInterval: TimeInterval = 1.0
@@ -196,8 +206,7 @@ final class ARSessionViewController: UIViewController {
         if let routeArrowNode,
            routeArrowNode.arrowEntities.count == path.arrows.count,
            routeArrowNode.turnDirections == path.arrows.map(\.turnDirection) {
-            let heightText = routeArrowHeightText()
-            onRouteArrowRenderStatusUpdated?("\(path.spotName) RealityKit 회전 화살표 유지 / \(path.arrows.count)개 / \(heightText)")
+            onRouteArrowRenderStatusUpdated?("\(path.spotName) RealityKit 회전 화살표 유지 / \(path.arrows.count)개 / 주행 방향 앵커(기기 높이)")
             return
         }
 
@@ -205,16 +214,11 @@ final class ARSessionViewController: UIViewController {
             arView.scene.removeAnchor(routeArrowNode.anchorEntity)
         }
 
-        guard let cameraTransform = arView.session.currentFrame?.camera.transform else {
-            routeArrowNode = nil
-            onRouteArrowRenderStatusUpdated?("\(path.spotName) RealityKit 회전 화살표 생성 대기 / ARFrame camera transform 없음")
-            return
-        }
-
-        let anchor = AnchorEntity(world: cameraTransform)
-        let arrows = path.arrows.map { snapshot in
+        // 월드 앵커. 위치/방향은 매 프레임 updateRouteArrowPlacement에서 카메라 위치 + 주행 방위로 갱신한다(시선 비추종).
+        let anchor = AnchorEntity(world: .zero)
+        let arrows = path.arrows.map { snapshot -> Entity in
             let arrow = makeRouteArrowEntity(turnDirection: snapshot.turnDirection)
-            arrow.position = routeArrowPosition(from: snapshot)
+            arrow.position = .zero
             anchor.addChild(arrow)
             return arrow
         }
@@ -224,16 +228,77 @@ final class ARSessionViewController: UIViewController {
             turnDirections: path.arrows.map(\.turnDirection)
         )
         arView.scene.addAnchor(anchor)
-        let heightText = routeArrowHeightText()
-        onRouteArrowRenderStatusUpdated?("\(path.spotName) RealityKit 회전 화살표 생성 / \(arrows.count)개 / \(heightText)")
+        onRouteArrowRenderStatusUpdated?("\(path.spotName) RealityKit 회전 화살표 생성 / \(arrows.count)개 / 주행 방향 앵커(기기 높이)")
     }
 
-    private func routeArrowHeightText() -> String {
-        "world-space anchor / 생성 순간 카메라 전방 기준"
+    private func updateRouteArrowPlacement(from frame: ARFrame) {
+        guard let routeArrowNode,
+              let bearing = latestRouteArrowPath?.arrows.first?.bearingDegrees else {
+            return
+        }
+
+        let cameraColumn = frame.camera.transform.columns.3
+        let cameraWorldPosition = SIMD3<Float>(cameraColumn.x, cameraColumn.y, cameraColumn.z)
+        routeArrowNode.anchorEntity.transform.translation = TravelDirectionAnchor.worldPosition(
+            cameraWorldPosition: cameraWorldPosition,
+            bearingDegrees: bearing,
+            distanceMeters: routeArrowForwardDistanceMeters,
+            heightOffsetMeters: routeArrowHeightOffset
+        )
+        // 패널 콘텐츠면(+Z)이 사용자를 향하도록 회전. orientation(bearing)은 -Z를 주행 방위로,
+        // 즉 +Z(=chevron/텍스트 면)를 사용자 쪽으로 돌려 좌/우 chevron이 읽히게 한다.
+        routeArrowNode.anchorEntity.transform.rotation = TravelDirectionAnchor.orientation(bearingDegrees: bearing)
     }
 
-    private func routeArrowPosition(from snapshot: RouteArrowSnapshot) -> SIMD3<Float> {
-        snapshot.position
+    func setRouteRibbon(_ ribbon: RouteRibbonSnapshot?) {
+        guard let ribbon else {
+            if let ribbonAnchor {
+                arView.scene.removeAnchor(ribbonAnchor)
+                self.ribbonAnchor = nil
+            }
+            latestRibbon = nil
+            return
+        }
+
+        if ribbonAnchor == nil {
+            let anchor = AnchorEntity(world: .zero)
+            anchor.addChild(makeRibbonEntity())
+            arView.scene.addAnchor(anchor)
+            ribbonAnchor = anchor
+        }
+        latestRibbon = ribbon
+    }
+
+    // 가는 방향으로 뻗는 납작한 바닥 레인(중력 수평). 좌표 고정이 아니라 매 프레임 카메라 위치 기준으로 재배치한다.
+    private func makeRibbonEntity() -> Entity {
+        let root = Entity()
+        let length = ribbonFarMeters - ribbonNearMeters
+        let material = SimpleMaterial(color: .systemBlue.withAlphaComponent(0.45), roughness: 0.3, isMetallic: false)
+        let lane = ModelEntity(
+            mesh: .generatePlane(width: ribbonWidthMeters, depth: length, cornerRadius: ribbonWidthMeters * 0.5),
+            materials: [material]
+        )
+        // 엔티티 전방(-Z)으로 near..far 구간에 눕힌다. generatePlane(width:depth:)는 XZ 수평면.
+        lane.position = SIMD3<Float>(0, 0, -(ribbonNearMeters + length / 2))
+        root.addChild(lane)
+        return root
+    }
+
+    private func updateRibbonPlacement(from frame: ARFrame) {
+        guard let latestRibbon, let ribbonAnchor else {
+            return
+        }
+
+        let cameraColumn = frame.camera.transform.columns.3
+        let cameraWorldPosition = SIMD3<Float>(cameraColumn.x, cameraColumn.y, cameraColumn.z)
+        // 카메라 수평 위치 + 바닥 높이. 회전은 주행 방위 yaw만(중력 수평 유지).
+        ribbonAnchor.transform.translation = TravelDirectionAnchor.worldPosition(
+            cameraWorldPosition: cameraWorldPosition,
+            bearingDegrees: latestRibbon.bearingDegrees,
+            distanceMeters: 0,
+            heightOffsetMeters: ribbonHeightOffset
+        )
+        ribbonAnchor.transform.rotation = TravelDirectionAnchor.orientation(bearingDegrees: latestRibbon.bearingDegrees)
     }
 
     private func makeRouteArrowEntity(turnDirection: RouteTurnDirection) -> Entity {
@@ -260,25 +325,9 @@ final class ARSessionViewController: UIViewController {
         let label = makeRouteArrowTextEntity(text: isRightTurn ? ">>>" : "<<<")
         label.position = SIMD3<Float>(0, -0.62, 0.03)
         root.addChild(label)
-        root.orientation = routeArrowScreenOrientationCorrection()
+        // 화면(카메라) 기준 보정 없음: 월드 앵커가 매 프레임 사용자를 향하도록 회전시킨다.
         root.scale = SIMD3<Float>(repeating: scale)
         return root
-    }
-
-    private func routeArrowScreenOrientationCorrection() -> simd_quatf {
-        let orientation = view.window?.windowScene?.interfaceOrientation ?? .portrait
-        let angle: Float
-        switch orientation {
-        case .portrait:
-            angle = .pi / 2
-        case .portraitUpsideDown:
-            angle = -.pi / 2
-        case .landscapeLeft, .landscapeRight:
-            angle = 0
-        default:
-            angle = .pi / 2
-        }
-        return simd_quatf(angle: angle, axis: SIMD3<Float>(0, 0, 1))
     }
 
     private func makeRouteChevronEntity(isRightTurn: Bool, material: SimpleMaterial) -> Entity {
@@ -588,6 +637,8 @@ extension ARSessionViewController: ARSessionDelegate {
         geospatialSessionManager.update(with: frame)
         updateGeospatialDebugVisualsForCamera()
         updateRouteArrowGroundYIfNeeded(from: frame)
+        updateRouteArrowPlacement(from: frame)
+        updateRibbonPlacement(from: frame)
         updateArrivalPinPlacement(from: frame)
         publishCameraHeadingIfNeeded(from: frame)
         publishCameraProjectionIfNeeded(from: frame)

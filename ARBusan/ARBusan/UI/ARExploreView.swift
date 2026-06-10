@@ -801,7 +801,10 @@ struct ARExploreView: View {
                         .animation(.easeOut(duration: 0.16), value: marker)
                 }
 
-	                if appState.isNavigationModeEnabled {
+	                // 길찾기 중 방향은 바닥 리본/회전 chevron이 담당하므로 상단 2D 방향 라벨은 평소 숨긴다.
+	                // 도착 또는 위치/heading 불안정(좌우 확정 불가)일 때만 텍스트 배너로 표시한다.
+	                if appState.isNavigationModeEnabled,
+	                   appState.navigationGuidanceIsArrivalNearby || appState.navigationGuidanceIsConservative {
 	                    NavigationARGuidanceOverlay(
                         title: appState.navigationGuidanceTitle,
                         detail: appState.navigationGuidanceDetail,
@@ -1636,6 +1639,7 @@ private struct ARViewContainer: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: ARSessionViewController, context: Context) {
         uiViewController.setShows3DGeospatialDebugMarker(appState.shows3DGeospatialDebugMarker)
         uiViewController.setRouteArrowPath(appState.routeArrowPath)
+        uiViewController.setRouteRibbon(appState.routeRibbonPath)
         uiViewController.setArrivalPin(appState.arrivalPin)
     }
 }

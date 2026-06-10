@@ -84,6 +84,14 @@ struct RouteArrowSnapshot: Identifiable, Equatable {
     let yawRadians: Float
     let distanceFromOriginMeters: Double
     let turnDirection: RouteTurnDirection
+    /// 화살표를 둘 "가는 방향"(현재 위치 → 회전 지점 방위, 도). 주행 방향 앵커링에 쓴다.
+    let bearingDegrees: Double
+}
+
+struct RouteRibbonSnapshot: Equatable {
+    let spotID: TourismSpot.ID
+    /// 바닥 리본을 뻗을 "가는 방향"(현재 위치 → 다음 안내점 방위, 도).
+    let bearingDegrees: Double
 }
 
 struct ArrivalPinSnapshot: Equatable {
@@ -101,6 +109,7 @@ private struct NavigationGuidance {
     let systemImageName: String
     let horizontalOffsetRatio: Double
     let isArrivalNearby: Bool
+    var isConservative: Bool = false
 }
 
 struct DebugStatusRow: Identifiable, Equatable {
@@ -208,6 +217,8 @@ final class AppState: ObservableObject {
     @Published var navigationGuidanceIsArrivalNearby = false
     @Published var navigationStabilityDiagnostics = "위치/방향 안정화를 아직 계산하지 않았습니다."
     @Published var arrivalPin: ArrivalPinSnapshot?
+    @Published var routeRibbonPath: RouteRibbonSnapshot?
+    @Published var navigationGuidanceIsConservative = false
     @Published var showsMatrixDebugMarker = FeatureFlags.enableLegacyMatrixDebugOverlay
     @Published var showsOnScreenCandidateDebugMarkers = FeatureFlags.enableLegacyOnScreenCandidateDebugMarkers
     @Published var shows3DGeospatialDebugMarker = FeatureFlags.enableLegacyGeospatial3DMarkers
@@ -689,6 +700,7 @@ final class AppState: ObservableObject {
             navigationRouteTaskSpotID = nil
             routeArrowPath = nil
             arrivalPin = nil
+            routeRibbonPath = nil
             routeArrowDiagnostics = "길찾기 모드 꺼짐 / 목적지를 선택하면 화살표를 표시합니다."
             routeArrowComputationDiagnostics = "길찾기 모드 꺼짐 / 화살표 계산 안 함"
             setNavigationGuidance(title: "길찾기 꺼짐", detail: "목적지를 선택하면 TMAP 경로 기준 방향 안내를 표시합니다.")
@@ -1797,8 +1809,9 @@ final class AppState: ObservableObject {
     }
 
     private func refreshRouteArrowPath() {
-        // 기본은 도착 핀 없음. 아래 도착 분기에서만 다시 설정한다(모든 비도착 경로 자동 해제).
+        // 기본은 도착 핀/바닥 리본 없음. 아래 분기에서 안내 가능할 때만 다시 설정한다.
         arrivalPin = nil
+        routeRibbonPath = nil
         guard isNavigationModeEnabled else {
             routeArrowPath = nil
             routeArrowDiagnostics = "길찾기 모드 꺼짐 / 목적지를 선택하면 화살표를 표시합니다."
@@ -1868,6 +1881,14 @@ final class AppState: ObservableObject {
             return
         }
 
+        // 안내 중(도착 전): 가는 방향으로 뻗는 바닥 리본을 계산한다. 위치/heading이 불안정하면 숨긴다.
+        routeRibbonPath = navigationRibbonSnapshot(
+            for: route,
+            targetSpot: targetSpot,
+            origin: guidedOrigin,
+            guidanceFix: guidanceFix
+        )
+
         let arrows = routeArrowSnapshots(
             for: route,
             from: guidedOrigin,
@@ -1921,12 +1942,48 @@ final class AppState: ObservableObject {
         setNavigationGuidance(guidance)
     }
 
+    /// 가는 방향(다음 안내점 방위)으로 뻗는 바닥 리본. 위치 불안정 또는 heading 신뢰 불가 시 nil(숨김).
+    private func navigationRibbonSnapshot(
+        for route: TMAPPedestrianRoute,
+        targetSpot: TourismSpot,
+        origin: LocationSnapshot,
+        guidanceFix: GuidanceFix
+    ) -> RouteRibbonSnapshot? {
+        guard guidanceFix.allowsTurnCommitment else {
+            return nil
+        }
+
+        let facing = HeadingGuidance.facingEstimate(
+            compassHeadingDegrees: cameraHeadingDegrees,
+            compassDeltaDegrees: cameraHeadingDeltaDegrees,
+            movementBearingDegrees: movementTracker.movementBearingDegrees,
+            isWalking: movementTracker.isWalking(now: Date()),
+            instabilityThresholdDegrees: headingInstabilityThresholdDegrees
+        )
+        guard facing.isConfident else {
+            return nil
+        }
+
+        guard let nextCoordinate = nextRouteGuidanceCoordinate(
+            from: origin.coordinate,
+            routeCoordinates: route.routeCoordinates
+        ) else {
+            return nil
+        }
+
+        return RouteRibbonSnapshot(
+            spotID: targetSpot.id,
+            bearingDegrees: origin.coordinate.bearing(to: nextCoordinate)
+        )
+    }
+
     private func setNavigationGuidance(_ guidance: NavigationGuidance) {
         navigationGuidanceTitle = guidance.title
         navigationGuidanceDetail = guidance.detail
         navigationGuidanceSystemImageName = guidance.systemImageName
         navigationGuidanceHorizontalOffsetRatio = guidance.horizontalOffsetRatio
         navigationGuidanceIsArrivalNearby = guidance.isArrivalNearby
+        navigationGuidanceIsConservative = guidance.isConservative
     }
 
     private func setNavigationGuidance(
@@ -2012,7 +2069,8 @@ final class AppState: ObservableObject {
                 detail: "\(targetSpot.name)까지 약 \(remainingText) / \(reason)로 좌우 안내를 보수적으로 표시합니다.",
                 systemImageName: DirectionZone.uncertain.systemImageName,
                 horizontalOffsetRatio: DirectionZone.uncertain.horizontalOffsetRatio,
-                isArrivalNearby: false
+                isArrivalNearby: false,
+                isConservative: true
             )
         }
 
@@ -2157,7 +2215,8 @@ final class AppState: ObservableObject {
                     position: position,
                     yawRadians: 0,
                     distanceFromOriginMeters: turnMetrics.distanceFromOrigin,
-                    turnDirection: turnMetrics.signedTurnDegrees > 0 ? .right : .left
+                    turnDirection: turnMetrics.signedTurnDegrees > 0 ? .right : .left,
+                    bearingDegrees: origin.coordinate.bearing(to: routeCoordinates[index])
                 )
             )
 
@@ -2430,8 +2489,9 @@ final class AppState: ObservableObject {
     }
 
     private func refreshEdgeMarkerOverlays() {
-        // 도착 상태에서는 목적지 2D 라벨/edge marker를 숨기고 도착 핀만 남긴다.
-        if isNavigationModeEnabled, arrivalPin != nil {
+        // 길찾기 중에는 하단 2D 지도가 경로 진실을 담당하므로 카메라 상단 2D 방향 라벨/edge marker를 띄우지 않는다.
+        // 방향은 바닥 리본/회전 chevron이, 불안정/도착은 텍스트 배너가 담당한다.
+        if isNavigationModeEnabled {
             edgeMarkerOverlays = []
             return
         }
