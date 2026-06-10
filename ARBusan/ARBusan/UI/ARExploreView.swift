@@ -1171,6 +1171,22 @@ private struct IndoorNavigationDebugPanel: View {
             .padding(.vertical, 6)
             .background(.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
 
+            Toggle(isOn: $appState.prefersHighResolutionCamera) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("고해상도 카메라")
+                        .font(.caption.weight(.semibold))
+                    Text("기본은 저해상도(발열 절감). 켜면 고해상도로 전환되며 발열이 늘 수 있습니다.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .font(.caption)
+            .tint(.blue)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+
             Text(appState.navigationStabilityDiagnostics)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -1642,6 +1658,7 @@ private struct ARViewContainer: UIViewControllerRepresentable {
 
     func updateUIViewController(_ uiViewController: ARSessionViewController, context: Context) {
         uiViewController.setShows3DGeospatialDebugMarker(appState.shows3DGeospatialDebugMarker)
+        uiViewController.setPrefersHighResolutionCamera(appState.prefersHighResolutionCamera)
         uiViewController.setRouteArrowPath(appState.routeArrowPath)
         uiViewController.setRouteRibbon(appState.routeRibbonPath)
         uiViewController.setArrivalPin(appState.arrivalPin)

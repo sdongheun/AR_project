@@ -36,9 +36,8 @@ final class ARSessionViewController: UIViewController {
     private let ribbonNearMeters: Float = 1.2
     private let ribbonFarMeters: Float = 6.0
     private let ribbonWidthMeters: Float = 0.7
-    private var detectedGroundY: Float?
-    private var lastGroundRaycastTimestamp: TimeInterval = 0
-    private let groundRaycastInterval: TimeInterval = 1.0
+    // 카메라 영상 해상도 선호. 기본은 저해상도(발열 절감), 토글로 고해상도 전환 가능.
+    private var prefersHighResolutionCamera = false
     private let markerScreenScalePerMeter: Float = 0.085
     private let labelScreenScalePerMeter: Float = 0.075
     private var selectedGeospatialDebugAnchorID: UUID?
@@ -98,9 +97,38 @@ final class ARSessionViewController: UIViewController {
 
         let configuration = ARWorldTrackingConfiguration()
         configuration.worldAlignment = .gravityAndHeading
-        configuration.planeDetection = [.horizontal]
+        // 평면 감지는 사용하지 않는다(화살표/리본/핀은 주행 방향 앵커 기반). 상시 평면 추정 비용 제거.
+        configuration.planeDetection = []
+        // 저해상도 영상 포맷으로 카메라 ISP/CPU 부하를 낮춘다(발열 절감). 토글 시 기본(고해상도)으로 복귀.
+        if !prefersHighResolutionCamera,
+           let lowResolutionFormat = Self.lowestResolutionVideoFormat() {
+            configuration.videoFormat = lowResolutionFormat
+        }
 
         arView.session.run(configuration)
+    }
+
+    /// 지원 포맷 중 가장 낮은 해상도(동률이면 낮은 fps)를 고른다. 발열 절감용.
+    private static func lowestResolutionVideoFormat() -> ARConfiguration.VideoFormat? {
+        ARWorldTrackingConfiguration.supportedVideoFormats.min { lhs, rhs in
+            let lhsPixels = lhs.imageResolution.width * lhs.imageResolution.height
+            let rhsPixels = rhs.imageResolution.width * rhs.imageResolution.height
+            if lhsPixels != rhsPixels {
+                return lhsPixels < rhsPixels
+            }
+            return lhs.framesPerSecond < rhs.framesPerSecond
+        }
+    }
+
+    func setPrefersHighResolutionCamera(_ prefersHighResolution: Bool) {
+        guard prefersHighResolution != prefersHighResolutionCamera else {
+            return
+        }
+        prefersHighResolutionCamera = prefersHighResolution
+        // 영상 포맷은 세션 재구성으로만 바뀐다. 수동 토글이라 짧은 재추적은 허용.
+        if isViewLoaded {
+            startSession()
+        }
     }
 
     func setShows3DGeospatialDebugMarker(_ isVisible: Bool) {
@@ -538,10 +566,6 @@ final class ARSessionViewController: UIViewController {
         }
     }
 
-    private func updateRouteArrowGroundYIfNeeded(from frame: ARFrame) {
-        // Route arrows are camera-anchored in this MVP, so ground raycast is not used.
-    }
-
     private func smoothedContentOffset(
         current: SIMD3<Float>,
         target: SIMD3<Float>,
@@ -636,7 +660,6 @@ extension ARSessionViewController: ARSessionDelegate {
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
         geospatialSessionManager.update(with: frame)
         updateGeospatialDebugVisualsForCamera()
-        updateRouteArrowGroundYIfNeeded(from: frame)
         updateRouteArrowPlacement(from: frame)
         updateRibbonPlacement(from: frame)
         updateArrivalPinPlacement(from: frame)

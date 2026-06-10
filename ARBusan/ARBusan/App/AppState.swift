@@ -261,6 +261,8 @@ final class AppState: ObservableObject {
     @Published var pendingIndoorDebugMapTapCoordinate: CLLocationCoordinate2D?
     @Published var hasAppliedIndoorNavigationMapTapLocation = false
     @Published var indoorDebugSimulatesPoorAccuracy = false
+    // 카메라 영상 해상도. 기본 false(저해상도, 발열 절감), 토글로 고해상도 전환.
+    @Published var prefersHighResolutionCamera = false
 
     private let recognitionPipeline: RecognitionPipeline
     private let cameraDirectionCandidateProvider: CameraDirectionCandidateProvider
@@ -1191,6 +1193,13 @@ final class AppState: ObservableObject {
     }
 
     func runRecognition() {
+        // 길찾기 중에는 건물 인식 파이프라인을 돌리지 않는다(둘러보기 전용, 발열/CPU 절감).
+        // 단 길찾기 화살표/리본 갱신은 유지한다.
+        guard !isNavigationModeEnabled else {
+            refreshRouteArrowPath()
+            return
+        }
+
         recognitionResult = recognitionPipeline.recognize(
             candidates: spots,
             cameraText: cameraTextInput,
@@ -1222,6 +1231,12 @@ final class AppState: ObservableObject {
     }
 
     private func updateCameraDirectionCandidate() {
+        // 길찾기 중에는 카메라 방향 후보/VWorld Polygon 자동 조회(네트워크)를 돌리지 않는다.
+        // 길찾기는 TMAP 경로 기반이라 이 신호가 필요 없고, 네트워크/CPU/발열만 늘린다.
+        guard !isNavigationModeEnabled else {
+            return
+        }
+
         guard let heading = cameraHeadingDegrees else {
             cameraDirectionSpotID = nil
             polygonValidatedSpotID = nil

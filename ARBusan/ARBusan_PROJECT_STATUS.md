@@ -192,7 +192,9 @@ ARBusan/Config/Secrets.local.xcconfig
 
 ## 7. 현재 한계
 
-- Scene Semantics는 현재 주 로직에서 제외했다. OCR은 메인 인식 UI에서는 빠졌지만 AR 세션 중 `ARSessionViewController`에서 약 3.5초 간격으로 여전히 동작한다(FeatureFlag 게이트 없음). 발열/성능 정리(3.9) 때 재검토 대상이다.
+- 발열 주요 기능은 모두 비활성 상태다(3.9에서 확인): OCR(`shouldRunLiveOCR = false`)·Scene Semantics(`shouldEnableSceneSemantics = false`, semanticMode 비활성)·Streetscape Geometry(`streetscapeGeometryMode = .disabled`). ARCore Geospatial(VPS/위치)만 활성이다.
+- 추가로 길찾기 모드 중에는 건물 인식 파이프라인(`runRecognition`)과 VWorld Polygon 자동 조회(`updateCameraDirectionCandidate`, 네트워크)를 건너뛴다(둘러보기 전용). 길찾기 화살표/리본 갱신은 유지한다.
+- 발열 절감: 미사용 평면 감지(`planeDetection`)를 제거했고, 카메라 영상은 기본 저해상도(`videoFormat` 최저 해상도)로 두되 실내 디버그 패널의 `고해상도 카메라` 토글(`prefersHighResolutionCamera`)로 전환할 수 있다. AR 카메라 VIO 자체의 누적 발열은 본질적이며 VPS 상시 가동이 남은 최대 레버(보류).
 - VPS는 건물 후보로 쓰지 않고 위치 정확도 신호로만 쓴다.
 - Polygon 후보는 브이월드 조회 결과가 있으면 실제 외곽 좌표 기반으로 반영한다.
 - 브이월드 Polygon 선택은 POI 포함 여부까지 개선됐다.
