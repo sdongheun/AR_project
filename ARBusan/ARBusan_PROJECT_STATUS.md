@@ -106,6 +106,7 @@ ARBusan/ARBusan/Data/Mock/MockTourismSpots.swift
 - 후보 선택/도감 화면
 - 테스트 기록 문서: `ARBusan/docs/testing/TEST_RESULTS.md`
 - `FeatureFlags`로 실내 디버그, matrix, Polygon, 기존 3D 앵커 실험 UI를 기본 비활성화
+- 길찾기 안내의 위치/heading 불안정 대응(체크리스트 3.6/3.7) 구현: 오차 원 기반 turn boundary, TMAP 경로선 스냅, 위치 튐 시 최근 안정 위치 유지, 이동 방향+나침반 융합, 불안정 시 보수적 방향 안내. 순수 로직은 `ARBusan/Navigation/NavigationStabilizer.swift`(+`NavigationStabilizerTests`). 실외 실측은 대기 중이며 실내는 디버그 패널 `정확도 저하 시뮬레이션` 토글로 재현한다.
 
 ## 4. 보존된 비활성 코드
 
@@ -189,7 +190,7 @@ ARBusan/Config/Secrets.local.xcconfig
 
 ## 7. 현재 한계
 
-- OCR과 Scene Semantics는 현재 주 로직에서 제외했다.
+- Scene Semantics는 현재 주 로직에서 제외했다. OCR은 메인 인식 UI에서는 빠졌지만 AR 세션 중 `ARSessionViewController`에서 약 3.5초 간격으로 여전히 동작한다(FeatureFlag 게이트 없음). 발열/성능 정리(3.9) 때 재검토 대상이다.
 - VPS는 건물 후보로 쓰지 않고 위치 정확도 신호로만 쓴다.
 - Polygon 후보는 브이월드 조회 결과가 있으면 실제 외곽 좌표 기반으로 반영한다.
 - 브이월드 Polygon 선택은 POI 포함 여부까지 개선됐다.

@@ -1148,6 +1148,28 @@ private struct IndoorNavigationDebugPanel: View {
                 .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
 
+            Toggle(isOn: $appState.indoorDebugSimulatesPoorAccuracy) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("정확도 저하 시뮬레이션")
+                        .font(.caption.weight(.semibold))
+                    Text("실내에서 GPS 오차 원을 키워 위치 불안정 안내(3.6)를 검증합니다. 적용 시 반영됩니다.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .font(.caption)
+            .tint(.orange)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+
+            Text(appState.navigationStabilityDiagnostics)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
                     Circle()

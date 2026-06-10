@@ -197,6 +197,7 @@ final class AppState: ObservableObject {
     @Published var navigationGuidanceSystemImageName = "location.fill"
     @Published var navigationGuidanceHorizontalOffsetRatio: Double = 0
     @Published var navigationGuidanceIsArrivalNearby = false
+    @Published var navigationStabilityDiagnostics = "위치/방향 안정화를 아직 계산하지 않았습니다."
     @Published var showsMatrixDebugMarker = FeatureFlags.enableLegacyMatrixDebugOverlay
     @Published var showsOnScreenCandidateDebugMarkers = FeatureFlags.enableLegacyOnScreenCandidateDebugMarkers
     @Published var shows3DGeospatialDebugMarker = FeatureFlags.enableLegacyGeospatial3DMarkers
@@ -238,6 +239,7 @@ final class AppState: ObservableObject {
     @Published var indoorDebugScenario: IndoorDebugScenario = .front30m
     @Published var pendingIndoorDebugMapTapCoordinate: CLLocationCoordinate2D?
     @Published var hasAppliedIndoorNavigationMapTapLocation = false
+    @Published var indoorDebugSimulatesPoorAccuracy = false
 
     private let recognitionPipeline: RecognitionPipeline
     private let cameraDirectionCandidateProvider: CameraDirectionCandidateProvider
@@ -305,6 +307,9 @@ final class AppState: ObservableObject {
     private var markerPlacementDiagnosticsBySpotID: [TourismSpot.ID: String] = [:]
     private let facadeSwitchRayDistanceImprovementMeters: Double = 1.5
     private let facadeSwitchConfirmationInterval: TimeInterval = 0.5
+    private let indoorDegradedAccuracyMeters: CLLocationAccuracy = 30
+    private var guidanceStabilizer = NavigationGuidanceStabilizer()
+    private var movementTracker = MovementDirectionTracker()
     let geospatialSessionManager: GeospatialSessionManager
 
     init(
@@ -343,6 +348,7 @@ final class AppState: ObservableObject {
                     self?.latestGeospatialLocationSnapshot = snapshot
                 }
                 self?.locationConfidence = Self.locationConfidence(for: snapshot.horizontalAccuracy)
+                self?.movementTracker.update(coordinate: snapshot.coordinate, now: snapshot.capturedAt)
                 let stableOriginDidChange = self?.updateStableGeospatial3DOrigin(with: snapshot) ?? false
                 self?.refreshSpatialTrackingConfidence()
                 self?.applyNearbySpotFilter()
@@ -471,6 +477,8 @@ final class AppState: ObservableObject {
 
     func setIndoorDebugModeEnabled(_ isEnabled: Bool) {
         isIndoorDebugModeEnabled = isEnabled
+        guidanceStabilizer.reset()
+        movementTracker.reset()
         if isEnabled {
             hasAppliedIndoorNavigationMapTapLocation = false
             pendingIndoorDebugMapTapCoordinate = nil
@@ -595,11 +603,13 @@ final class AppState: ObservableObject {
         routeArrowPath = nil
         tmapRouteFailedSpotIDs.remove(destination.id)
 
+        // 실내 재현용: 정확도 저하 토글이 켜져 있으면 오차 원을 키워 3.6 불안정 경로를 실내에서 검증할 수 있게 한다.
+        let injectedAccuracy: CLLocationAccuracy = indoorDebugSimulatesPoorAccuracy ? indoorDegradedAccuracyMeters : 1
         let snapshot = LocationSnapshot(
             latitude: coordinate.latitude,
             longitude: coordinate.longitude,
             altitude: latestGeospatialLocationSnapshot?.altitude ?? latestCoreLocationSnapshot?.altitude,
-            horizontalAccuracy: 1,
+            horizontalAccuracy: injectedAccuracy,
             verticalAccuracy: latestGeospatialLocationSnapshot?.verticalAccuracy ?? latestCoreLocationSnapshot?.verticalAccuracy,
             heading: cameraHeadingDegrees,
             headingAccuracy: nil,
@@ -609,14 +619,15 @@ final class AppState: ObservableObject {
 
         latestLocationSnapshot = snapshot
         latestGeospatialLocationSnapshot = snapshot
-        locationConfidence = .high
-        effectiveSpatialConfidence = .high
+        movementTracker.update(coordinate: coordinate, now: snapshot.capturedAt)
+        locationConfidence = Self.locationConfidence(for: injectedAccuracy)
+        effectiveSpatialConfidence = locationConfidence
         stableGeospatial3DOrigin = snapshot
         pendingStableGeospatial3DOrigin = nil
         pendingStableOriginFirstSeenAt = nil
         stableOriginLastAcceptedAt = Date()
         stableOriginIsUsableFor3DAnchors = true
-        stableOriginDiagnostics = "3D stable origin 확정(실내 지도 탭) / 정확도 1m / \(coordinate.shortText)"
+        stableOriginDiagnostics = "3D stable origin 확정(실내 지도 탭) / 정확도 \(Int(injectedAccuracy))m / \(coordinate.shortText)"
         geospatialStatus = "실내 디버그 모드: 하단 2D 지도 탭 좌표를 현재 위치로 사용합니다."
 
         let headingText = cameraHeadingDegrees.map { "\(Int($0))도" } ?? "수신 대기"
@@ -643,6 +654,9 @@ final class AppState: ObservableObject {
 
     func setNavigationModeEnabled(_ isEnabled: Bool) {
         isNavigationModeEnabled = isEnabled
+        // 길찾기 진입/종료 시 경로 맥락이 바뀌므로 위치/방향 안정화 상태를 초기화한다.
+        guidanceStabilizer.reset()
+        movementTracker.reset()
 
         if isEnabled {
             if navigationDestinationSpotID == nil {
@@ -1812,25 +1826,41 @@ final class AppState: ObservableObject {
             return
         }
 
-        let arrivalDistance = origin.coordinate.distance(to: route.arrivalCoordinate)
+        // 3.6 위치 불안정 대응: 현재 위치를 오차 원으로 보고 경로선 스냅/위치 튐 유지를 적용한 뒤,
+        // 이후 도착/회전/방향 안내는 모두 이 보정 위치(guidedOrigin)를 기준으로 계산한다.
+        let guidanceFix = guidanceStabilizer.stabilize(
+            rawCoordinate: origin.coordinate,
+            accuracyRadiusMeters: origin.horizontalAccuracy,
+            routeCoordinates: route.routeCoordinates,
+            now: Date()
+        )
+        let guidedOrigin = origin.replacingCoordinate(guidanceFix.coordinate)
+        updateNavigationStabilityDiagnostics(guidanceFix: guidanceFix, rawOrigin: origin)
+
+        let arrivalDistance = guidedOrigin.coordinate.distance(to: route.arrivalCoordinate)
         if arrivalDistance <= routeArrivalCompletionMeters {
             routeArrowPath = nil
             routeArrowDiagnostics = "\(targetSpot.name) 도착 완료 / TMAP 도착 좌표 \(Int(arrivalDistance))m 이내 / 길안내 종료"
             routeArrowComputationDiagnostics = "\(targetSpot.name) 도착 완료 / AR 화살표 제거 / 도착 핀 상태로 전환"
-            updateNavigationGuidance(for: route, targetSpot: targetSpot, origin: origin)
+            updateNavigationGuidance(for: route, targetSpot: targetSpot, origin: guidedOrigin, guidanceFix: guidanceFix)
             return
         }
 
-        let arrows = routeArrowSnapshots(for: route, from: origin)
+        let arrows = routeArrowSnapshots(
+            for: route,
+            from: guidedOrigin,
+            accuracyRadiusMeters: guidanceFix.accuracyRadiusMeters,
+            allowsTurnCommitment: guidanceFix.allowsTurnCommitment
+        )
         guard !arrows.isEmpty else {
             routeArrowPath = nil
-            routeArrowDiagnostics = "\(targetSpot.name) 전방 3D 화살표 숨김 / \(Int(routeTurnBoundaryMeters))m turn boundary 안 활성 회전 없음"
+            routeArrowDiagnostics = "\(targetSpot.name) 전방 3D 화살표 숨김 / \(Int(routeTurnBoundaryMeters))m turn boundary 안 활성 회전 없음 / \(guidanceFix.quality.displayName)"
             routeArrowComputationDiagnostics = routeArrowRejectionDiagnostics(
                 route: route,
-                origin: origin,
+                origin: guidedOrigin,
                 targetSpot: targetSpot
             )
-            updateNavigationGuidance(for: route, targetSpot: targetSpot, origin: origin)
+            updateNavigationGuidance(for: route, targetSpot: targetSpot, origin: guidedOrigin, guidanceFix: guidanceFix)
             return
         }
 
@@ -1839,20 +1869,33 @@ final class AppState: ObservableObject {
             spotName: targetSpot.name,
             arrows: arrows
         )
-        routeArrowDiagnostics = "\(targetSpot.name) 전방 3D 대형 화살표 \(arrows.count)개 / turn boundary \(Int(routeTurnBoundaryMeters))m / \(Int(routeTurnMinimumAngleDegrees))도 이상 꺾임"
+        routeArrowDiagnostics = "\(targetSpot.name) 전방 3D 대형 화살표 \(arrows.count)개 / turn boundary \(Int(routeTurnBoundaryMeters))m / \(Int(routeTurnMinimumAngleDegrees))도 이상 꺾임 / \(guidanceFix.quality.displayName)"
         let first = arrows.first
         let firstText = first.map { "활성 회전 \(String(format: "%.0f", $0.distanceFromOriginMeters))m / \($0.turnDirection.displayName) / 카메라 전방 \(String(format: "%.1f", abs($0.position.z)))m / 높이 offset \(String(format: "%.2f", $0.position.y))m" } ?? "활성 회전 화살표 없음"
         let routeLength = routePolylineLengthMeters(route.routeCoordinates)
-        routeArrowComputationDiagnostics = "\(targetSpot.name) route 좌표 \(route.routeCoordinates.count)개 / 경로 길이 \(Int(routeLength))m -> turn boundary 안 전방 AR 화살표 \(arrows.count)개 생성 / origin \(origin.source.rawValue) \(origin.coordinate.shortText) / \(firstText)"
-        updateNavigationGuidance(for: route, targetSpot: targetSpot, origin: origin)
+        routeArrowComputationDiagnostics = "\(targetSpot.name) route 좌표 \(route.routeCoordinates.count)개 / 경로 길이 \(Int(routeLength))m -> turn boundary 안 전방 AR 화살표 \(arrows.count)개 생성 / guidedOrigin \(guidedOrigin.source.rawValue) \(guidedOrigin.coordinate.shortText) / \(guidanceFix.quality.displayName) / \(firstText)"
+        updateNavigationGuidance(for: route, targetSpot: targetSpot, origin: guidedOrigin, guidanceFix: guidanceFix)
+    }
+
+    private func updateNavigationStabilityDiagnostics(guidanceFix: GuidanceFix, rawOrigin: LocationSnapshot) {
+        let offRouteText = guidanceFix.offRouteDistanceMeters.map { "경로선 \(Int($0))m" } ?? "경로선 거리 없음"
+        let snapText = guidanceFix.didSnapToRoute ? "경로 스냅 적용" : "원시 위치 사용"
+        let movementText: String
+        if movementTracker.isWalking(now: Date()), let bearing = movementTracker.movementBearingDegrees {
+            movementText = "이동 방향 \(Int(bearing))도(걷는 중)"
+        } else {
+            movementText = "이동 방향 미확정(정지/대기)"
+        }
+        navigationStabilityDiagnostics = "위치 \(guidanceFix.quality.displayName) / 정확도 \(Int(guidanceFix.accuracyRadiusMeters))m / \(offRouteText) / \(snapText) / \(movementText)"
     }
 
     private func updateNavigationGuidance(
         for route: TMAPPedestrianRoute,
         targetSpot: TourismSpot,
-        origin: LocationSnapshot
+        origin: LocationSnapshot,
+        guidanceFix: GuidanceFix
     ) {
-        let guidance = navigationGuidance(for: route, targetSpot: targetSpot, origin: origin)
+        let guidance = navigationGuidance(for: route, targetSpot: targetSpot, origin: origin, guidanceFix: guidanceFix)
         setNavigationGuidance(guidance)
     }
 
@@ -1884,7 +1927,8 @@ final class AppState: ObservableObject {
     private func navigationGuidance(
         for route: TMAPPedestrianRoute,
         targetSpot: TourismSpot,
-        origin: LocationSnapshot
+        origin: LocationSnapshot,
+        guidanceFix: GuidanceFix
     ) -> NavigationGuidance {
         let arrivalDistance = origin.coordinate.distance(to: route.arrivalCoordinate)
         if arrivalDistance <= routeArrivalCompletionMeters {
@@ -1912,22 +1956,52 @@ final class AppState: ObservableObject {
         }
 
         let targetBearing = origin.coordinate.bearing(to: nextCoordinate)
-        let heading = cameraHeadingDegrees ?? targetBearing
-        let signedDelta = heading.signedAngularDifference(to: targetBearing)
         let distanceToNext = origin.coordinate.distance(to: nextCoordinate)
         let remainingDistance = remainingRouteDistance(
             from: origin.coordinate,
             routeCoordinates: route.routeCoordinates,
             fallbackDestination: route.arrivalCoordinate
         )
-        let visualCue = navigationVisualCue(forSignedDelta: signedDelta)
         let remainingText = remainingDistance.map { "\(Int($0))m" } ?? "\(Int(arrivalDistance))m"
 
+        // 3.7 heading 불안정 대응: 걷는 중이면 이동 방향을, 아니면 나침반 heading을 쓰되 변화량이 크면 신뢰하지 않는다.
+        let facing = HeadingGuidance.facingEstimate(
+            compassHeadingDegrees: cameraHeadingDegrees,
+            compassDeltaDegrees: cameraHeadingDeltaDegrees,
+            movementBearingDegrees: movementTracker.movementBearingDegrees,
+            isWalking: movementTracker.isWalking(now: Date()),
+            instabilityThresholdDegrees: headingInstabilityThresholdDegrees
+        )
+
+        // 향한 방향을 신뢰할 수 없거나(나침반 흔들림/정지) 위치가 불안정하면 좌/우를 확정하지 않고 보수적으로 안내한다.
+        guard let facingBearing = facing.bearingDegrees,
+              facing.isConfident,
+              guidanceFix.allowsTurnCommitment else {
+            let reason: String
+            if facing.bearingDegrees == nil {
+                reason = "방향 신호 대기"
+            } else if !facing.isConfident {
+                reason = "heading 불안정"
+            } else {
+                reason = guidanceFix.quality.displayName
+            }
+            return NavigationGuidance(
+                title: DirectionZone.uncertain.title,
+                detail: "\(targetSpot.name)까지 약 \(remainingText) / \(reason)로 좌우 안내를 보수적으로 표시합니다.",
+                systemImageName: DirectionZone.uncertain.systemImageName,
+                horizontalOffsetRatio: DirectionZone.uncertain.horizontalOffsetRatio,
+                isArrivalNearby: false
+            )
+        }
+
+        let signedDelta = facingBearing.signedAngularDifference(to: targetBearing)
+        let zone = HeadingGuidance.zone(forSignedDeltaDegrees: signedDelta)
+        let facingSourceText = facing.usedMovementDirection ? "이동 방향" : "heading"
         return NavigationGuidance(
-            title: visualCue.title,
-            detail: "\(targetSpot.name)까지 약 \(remainingText) / 다음 기준점 \(Int(distanceToNext))m / heading \(Int(heading))도 -> 경로 \(Int(targetBearing))도 / 차이 \(Int(signedDelta))도",
-            systemImageName: visualCue.systemImageName,
-            horizontalOffsetRatio: visualCue.horizontalOffsetRatio,
+            title: zone.title,
+            detail: "\(targetSpot.name)까지 약 \(remainingText) / 다음 기준점 \(Int(distanceToNext))m / \(facingSourceText) \(Int(facingBearing))도 -> 경로 \(Int(targetBearing))도 / 차이 \(Int(signedDelta))도",
+            systemImageName: zone.systemImageName,
+            horizontalOffsetRatio: zone.horizontalOffsetRatio,
             isArrivalNearby: false
         )
     }
@@ -1979,21 +2053,6 @@ final class AppState: ObservableObject {
         return distance
     }
 
-    private func navigationVisualCue(forSignedDelta signedDelta: Double) -> (title: String, systemImageName: String, horizontalOffsetRatio: Double) {
-        switch signedDelta {
-        case -180 ..< -120:
-            return ("뒤쪽 왼편으로 돌아보세요", "arrow.uturn.left", -0.34)
-        case -120 ..< -35:
-            return ("왼쪽으로 이동하세요", "arrow.left", -0.28)
-        case -35 ... 35:
-            return ("계속 직진하세요", "arrow.up", 0)
-        case 35 ... 120:
-            return ("오른쪽으로 이동하세요", "arrow.right", 0.28)
-        default:
-            return ("뒤쪽 오른편으로 돌아보세요", "arrow.uturn.right", 0.34)
-        }
-    }
-
     private func routeArrowTargetSpot() -> TourismSpot? {
         guard let navigationDestinationSpotID else {
             return nil
@@ -2004,8 +2063,15 @@ final class AppState: ObservableObject {
 
     private func routeArrowSnapshots(
         for route: TMAPPedestrianRoute,
-        from origin: LocationSnapshot
+        from origin: LocationSnapshot,
+        accuracyRadiusMeters: CLLocationAccuracy,
+        allowsTurnCommitment: Bool
     ) -> [RouteArrowSnapshot] {
+        // 위치가 불안정하면 turn boundary 안이어도 전방 화살표를 확정하지 않는다(3.6/3.7 보수적 처리).
+        guard allowsTurnCommitment else {
+            return []
+        }
+
         let routeCoordinates = route.routeCoordinates
         guard routeCoordinates.count >= 3 else {
             return []
@@ -2034,7 +2100,12 @@ final class AppState: ObservableObject {
                 continue
             }
 
-            guard turnMetrics.distanceFromOrigin <= routeTurnBoundaryMeters else {
+            // 위치를 오차 원으로 보고, 오차 원이 turn boundary와 겹치면 회전 준비로 인정한다(3.6).
+            guard RouteGeometry.turnBoundaryReached(
+                distanceToTurnMeters: turnMetrics.distanceFromOrigin,
+                accuracyRadiusMeters: accuracyRadiusMeters,
+                boundaryMeters: routeTurnBoundaryMeters
+            ) else {
                 continue
             }
 

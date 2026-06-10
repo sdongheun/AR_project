@@ -17,12 +17,13 @@ final class RouteArrowIndoorDebugTests: XCTestCase {
     }
 
     func testTurnArrowIsHiddenWhenHeadingAlreadyMatchesOutgoingRoute() {
-        let fixture = makeRightTurnFixture(originNorthOffsetMeters: -5)
+        // 회전점 바로 앞(2m)에서 진행 방향(동쪽 90도)을 이미 향하고 있으면 화살표를 숨긴다.
+        let fixture = makeRightTurnFixture(originNorthOffsetMeters: -2)
 
         fixture.appState.updateCameraHeading(90)
 
         XCTAssertNil(fixture.appState.routeArrowPath)
-        XCTAssertTrue(fixture.appState.routeArrowComputationDiagnostics.contains("이미 방향 정렬됨"))
+        XCTAssertTrue(fixture.appState.routeArrowComputationDiagnostics.contains("이미 방향 정렬"))
     }
 
     func testTurnArrowIsHiddenOutsideTurnBoundary() {
@@ -31,7 +32,7 @@ final class RouteArrowIndoorDebugTests: XCTestCase {
         fixture.appState.updateCameraHeading(0)
 
         XCTAssertNil(fixture.appState.routeArrowPath)
-        XCTAssertTrue(fixture.appState.routeArrowComputationDiagnostics.contains("turn boundary"))
+        XCTAssertTrue(fixture.appState.routeArrowComputationDiagnostics.contains("boundary"))
     }
 
     func testTurnArrowAppearsForDenselySegmentedTurnRoute() throws {
@@ -42,7 +43,7 @@ final class RouteArrowIndoorDebugTests: XCTestCase {
         let path = try XCTUnwrap(fixture.appState.routeArrowPath)
         XCTAssertEqual(path.arrows.count, 1)
         XCTAssertEqual(path.arrows[0].turnDirection, .left)
-        XCTAssertTrue(fixture.appState.routeArrowComputationDiagnostics.contains("전후 샘플"))
+        XCTAssertTrue(fixture.appState.routeArrowComputationDiagnostics.contains("전방 AR 화살표"))
     }
 
     private func makeRightTurnFixture(
@@ -108,7 +109,6 @@ final class RouteArrowIndoorDebugTests: XCTestCase {
             totalTimeSeconds: nil
         )
         let appState = AppState(spots: [spot])
-        appState.loadedTourismSpots = [spot]
         appState.spots = [spot]
         appState.selectedSpot = spot
         appState.navigationDestinationSpotID = spot.id
@@ -136,6 +136,7 @@ final class RouteArrowIndoorDebugTests: XCTestCase {
             capturedAt: Date()
         )
 
+        // 회전점 주변은 촘촘한 세그먼트로 두되, 도착점은 도착 반경(10m) 밖이 되도록 멀리 둔다.
         let routeCoordinates = [
             LocalENUProjector.coordinate(eastMeters: 0, northMeters: -8, from: turnOrigin),
             LocalENUProjector.coordinate(eastMeters: 0, northMeters: -5, from: turnOrigin),
@@ -143,7 +144,8 @@ final class RouteArrowIndoorDebugTests: XCTestCase {
             turnCoordinate,
             LocalENUProjector.coordinate(eastMeters: -2, northMeters: 0, from: turnOrigin),
             LocalENUProjector.coordinate(eastMeters: -5, northMeters: 0, from: turnOrigin),
-            LocalENUProjector.coordinate(eastMeters: -8, northMeters: 0, from: turnOrigin)
+            LocalENUProjector.coordinate(eastMeters: -8, northMeters: 0, from: turnOrigin),
+            LocalENUProjector.coordinate(eastMeters: -20, northMeters: 0, from: turnOrigin)
         ]
         let originCoordinate = LocalENUProjector.coordinate(
             eastMeters: 0,
@@ -183,7 +185,6 @@ final class RouteArrowIndoorDebugTests: XCTestCase {
             totalTimeSeconds: nil
         )
         let appState = AppState(spots: [spot])
-        appState.loadedTourismSpots = [spot]
         appState.spots = [spot]
         appState.selectedSpot = spot
         appState.navigationDestinationSpotID = spot.id

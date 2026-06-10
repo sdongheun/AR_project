@@ -29,6 +29,7 @@
 | 문서 | 역할 | 상태 |
 | --- | --- | --- |
 | [`navigation/AR_NAVIGATION_LOGIC_PLAN.md`](navigation/AR_NAVIGATION_LOGIC_PLAN.md) | AR 길찾기 로직: TMAP 경로, 2D 방향 안내, turn boundary 3D 화살표, 도착 핀 체크리스트 | 활성 |
+| [`navigation/turn-arrow-logic.html`](navigation/turn-arrow-logic.html) | 회전 지점 3D 화살표 표시 로직 시각화(판단 흐름·다이어그램·상수) | 보조/시각화 |
 
 ## 5. AR Label
 
