@@ -14,6 +14,9 @@ final class RouteArrowIndoorDebugTests: XCTestCase {
         XCTAssertEqual(path.arrows[0].turnDirection, .right)
         XCTAssertEqual(path.arrows[0].distanceFromOriginMeters, 5, accuracy: 0.8)
         XCTAssertTrue(fixture.appState.routeArrowDiagnostics.contains("전방 3D 대형 화살표"))
+        // 거리 카운트다운 배너("Nm 후 우회전")가 채워져야 한다.
+        let banner = try XCTUnwrap(fixture.appState.navigationTurnBanner)
+        XCTAssertTrue(banner.hasSuffix("후 우회전"), "예상과 다른 배너: \(banner)")
     }
 
     func testTurnArrowIsHiddenWhenHeadingAlreadyMatchesOutgoingRoute() {

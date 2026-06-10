@@ -219,6 +219,8 @@ final class AppState: ObservableObject {
     @Published var arrivalPin: ArrivalPinSnapshot?
     @Published var routeRibbonPath: RouteRibbonSnapshot?
     @Published var navigationGuidanceIsConservative = false
+    /// 활성 회전 화살표가 있을 때의 카운트다운 안내("15m 후 우회전"). 없으면 nil.
+    @Published var navigationTurnBanner: String?
     @Published var showsMatrixDebugMarker = FeatureFlags.enableLegacyMatrixDebugOverlay
     @Published var showsOnScreenCandidateDebugMarkers = FeatureFlags.enableLegacyOnScreenCandidateDebugMarkers
     @Published var shows3DGeospatialDebugMarker = FeatureFlags.enableLegacyGeospatial3DMarkers
@@ -703,6 +705,7 @@ final class AppState: ObservableObject {
             routeArrowPath = nil
             arrivalPin = nil
             routeRibbonPath = nil
+            navigationTurnBanner = nil
             routeArrowDiagnostics = "길찾기 모드 꺼짐 / 목적지를 선택하면 화살표를 표시합니다."
             routeArrowComputationDiagnostics = "길찾기 모드 꺼짐 / 화살표 계산 안 함"
             setNavigationGuidance(title: "길찾기 꺼짐", detail: "목적지를 선택하면 TMAP 경로 기준 방향 안내를 표시합니다.")
@@ -1824,9 +1827,10 @@ final class AppState: ObservableObject {
     }
 
     private func refreshRouteArrowPath() {
-        // 기본은 도착 핀/바닥 리본 없음. 아래 분기에서 안내 가능할 때만 다시 설정한다.
+        // 기본은 도착 핀/바닥 리본/회전 배너 없음. 아래 분기에서 안내 가능할 때만 다시 설정한다.
         arrivalPin = nil
         routeRibbonPath = nil
+        navigationTurnBanner = nil
         guard isNavigationModeEnabled else {
             routeArrowPath = nil
             routeArrowDiagnostics = "길찾기 모드 꺼짐 / 목적지를 선택하면 화살표를 표시합니다."
@@ -1927,6 +1931,10 @@ final class AppState: ObservableObject {
             spotName: targetSpot.name,
             arrows: arrows
         )
+        if let firstArrow = arrows.first {
+            // 거리 카운트다운: "Nm 후 좌/우회전". 거리는 현재 위치→회전 지점 직선 거리.
+            navigationTurnBanner = "\(Int(firstArrow.distanceFromOriginMeters.rounded()))m 후 \(firstArrow.turnDirection.displayName)"
+        }
         routeArrowDiagnostics = "\(targetSpot.name) 전방 3D 대형 화살표 \(arrows.count)개 / turn boundary \(Int(routeTurnBoundaryMeters))m / \(Int(routeTurnMinimumAngleDegrees))도 이상 꺾임 / \(guidanceFix.quality.displayName)"
         let first = arrows.first
         let firstText = first.map { "활성 회전 \(String(format: "%.0f", $0.distanceFromOriginMeters))m / \($0.turnDirection.displayName) / 카메라 전방 \(String(format: "%.1f", abs($0.position.z)))m / 높이 offset \(String(format: "%.2f", $0.position.y))m" } ?? "활성 회전 화살표 없음"

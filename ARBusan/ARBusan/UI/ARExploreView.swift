@@ -838,6 +838,22 @@ struct ARExploreView: View {
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
 
+                // 회전 카운트다운("Nm 후 우회전"). 회전 화살표가 활성일 때만. 실내 디버그 패널보다 위(z-순서 뒤)에
+                // 그리고 상단 safe area 바로 아래에 둬 패널/아일랜드에 가리지 않게 한다.
+                if appState.isNavigationModeEnabled, let turnBanner = appState.navigationTurnBanner {
+                    Label(turnBanner, systemImage: "arrow.triangle.turn.up.right.diamond.fill")
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 10)
+                        .background(.blue.opacity(0.9), in: Capsule())
+                        .shadow(color: .black.opacity(0.3), radius: 8, y: 3)
+                        .position(x: safeWidth / 2, y: max(geometry.safeAreaInsets.top, 44) + 28)
+                        .allowsHitTesting(false)
+                        .transition(.opacity)
+                        .animation(.easeOut(duration: 0.18), value: turnBanner)
+                }
+
                 if isLogPanelVisible, !appState.radarMarkerOverlays.isEmpty {
                     RadarOverlayView(markers: appState.radarMarkerOverlays) { markerID in
                         if let spot = appState.spots.first(where: { $0.id == markerID }) {

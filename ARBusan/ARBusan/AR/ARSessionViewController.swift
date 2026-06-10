@@ -27,7 +27,9 @@ final class ARSessionViewController: UIViewController {
     private let arrivalPinMinDistanceMeters: Float = 2
     private let arrivalPinMaxDistanceMeters: Float = 8
     // 회전 chevron: 주행 방향 앵커링(시선 비추종). 카메라 위치+높이 기준 전방에 배치.
-    private let routeArrowForwardDistanceMeters: Float = 3.0
+    // 거리감을 위해 실제 회전 거리에 비례해 배치하되, 너무 멀거나 가까우면 보기 나쁘므로 클램프.
+    private let routeArrowMinRenderDistanceMeters: Float = 2.5
+    private let routeArrowMaxRenderDistanceMeters: Float = 12
     private let routeArrowHeightOffset: Float = -0.05
     // 바닥 리본: 가는 방향으로 뻗는 납작한 레인(중력 수평). 기기 높이 아래로 내려 바닥처럼 보이게 한다.
     private var ribbonAnchor: AnchorEntity?
@@ -261,16 +263,22 @@ final class ARSessionViewController: UIViewController {
 
     private func updateRouteArrowPlacement(from frame: ARFrame) {
         guard let routeArrowNode,
-              let bearing = latestRouteArrowPath?.arrows.first?.bearingDegrees else {
+              let arrow = latestRouteArrowPath?.arrows.first else {
             return
         }
 
+        let bearing = arrow.bearingDegrees
+        // 실제 회전 거리에 비례해 배치(가까워지면 화살표도 가까워짐). 보기 위해 2.5~12m로 클램프.
+        let renderDistance = min(
+            max(Float(arrow.distanceFromOriginMeters), routeArrowMinRenderDistanceMeters),
+            routeArrowMaxRenderDistanceMeters
+        )
         let cameraColumn = frame.camera.transform.columns.3
         let cameraWorldPosition = SIMD3<Float>(cameraColumn.x, cameraColumn.y, cameraColumn.z)
         routeArrowNode.anchorEntity.transform.translation = TravelDirectionAnchor.worldPosition(
             cameraWorldPosition: cameraWorldPosition,
             bearingDegrees: bearing,
-            distanceMeters: routeArrowForwardDistanceMeters,
+            distanceMeters: renderDistance,
             heightOffsetMeters: routeArrowHeightOffset
         )
         // 패널 콘텐츠면(+Z)이 사용자를 향하도록 회전. orientation(bearing)은 -Z를 주행 방위로,
