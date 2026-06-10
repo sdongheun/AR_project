@@ -2167,6 +2167,18 @@ final class AppState: ObservableObject {
             return []
         }
 
+        // 회전 판정은 TMAP 안내점(turnType)을 우선 사용한다. 작은 각도 갈림길도 인정하고
+        // 완만한 도로 굽이는 무시하기 위함이다(TURN_UX_RULES_V2 §1). 안내점이 없으면 기하 각도로 fallback.
+        let turnManeuvers = route.maneuvers.filter { $0.kind.isTurn }
+        if !turnManeuvers.isEmpty {
+            return maneuverArrowSnapshots(
+                route: route,
+                origin: origin,
+                accuracyRadiusMeters: accuracyRadiusMeters,
+                turnManeuvers: turnManeuvers
+            )
+        }
+
         let routeCoordinates = route.routeCoordinates
         guard routeCoordinates.count >= 3 else {
             return []
@@ -2241,6 +2253,97 @@ final class AppState: ObservableObject {
         }
 
         return arrows
+    }
+
+    /// TMAP 회전 안내점 기준 전방 화살표 1개. TMAP이 이미 회전으로 판정한 지점이라 기하 각도(45°)는 보지 않고,
+    /// boundary(오차 원 반영)·회전점 시야·정렬 여부 게이트만 적용한다.
+    private func maneuverArrowSnapshots(
+        route: TMAPPedestrianRoute,
+        origin: LocationSnapshot,
+        accuracyRadiusMeters: CLLocationAccuracy,
+        turnManeuvers: [TMAPRouteManeuver]
+    ) -> [RouteArrowSnapshot] {
+        let routeCoordinates = route.routeCoordinates
+        let sortedByDistance = turnManeuvers
+            .map { (maneuver: $0, distance: origin.coordinate.distance(to: $0.coordinate)) }
+            .sorted { $0.distance < $1.distance }
+
+        for entry in sortedByDistance {
+            guard let direction = entry.maneuver.kind.turnDirection else {
+                continue
+            }
+            let distance = entry.distance
+            if distance > routeArrowLookAheadMeters {
+                continue
+            }
+            guard RouteGeometry.turnBoundaryReached(
+                distanceToTurnMeters: distance,
+                accuracyRadiusMeters: accuracyRadiusMeters,
+                boundaryMeters: routeTurnBoundaryMeters
+            ) else {
+                continue
+            }
+
+            let bearingToTurn = origin.coordinate.bearing(to: entry.maneuver.coordinate)
+            let outgoingBearing = maneuverOutgoingBearing(
+                maneuver: entry.maneuver,
+                routeCoordinates: routeCoordinates
+            )
+
+            if let heading = cameraHeadingDegrees {
+                let headingTargetBearing = distance < 3 ? (outgoingBearing ?? bearingToTurn) : bearingToTurn
+                let facingDelta = heading.signedAngularDifference(to: headingTargetBearing)
+                guard abs(facingDelta) <= routeArrowFacingToleranceDegrees else {
+                    continue
+                }
+                if let outgoingBearing {
+                    let alignedDelta = heading.signedAngularDifference(to: outgoingBearing)
+                    if abs(alignedDelta) <= routeTurnAlignedThresholdDegrees {
+                        continue
+                    }
+                }
+            }
+
+            let position = SIMD3<Float>(
+                0,
+                routeArrowCameraHeightOffsetMeters,
+                -routeArrowForwardDistanceMeters
+            )
+            return [
+                RouteArrowSnapshot(
+                    id: 0,
+                    position: position,
+                    yawRadians: 0,
+                    distanceFromOriginMeters: distance,
+                    turnDirection: direction,
+                    bearingDegrees: bearingToTurn
+                )
+            ]
+        }
+
+        return []
+    }
+
+    /// 안내점 좌표에서 경로 진출 방위(샘플 거리 앞)를 구한다. 정렬/시야 판정용. 계산 불가 시 nil.
+    private func maneuverOutgoingBearing(
+        maneuver: TMAPRouteManeuver,
+        routeCoordinates: [CLLocationCoordinate2D]
+    ) -> Double? {
+        guard !routeCoordinates.isEmpty else {
+            return nil
+        }
+        let nearestIndex = routeCoordinates.indices.min {
+            maneuver.coordinate.distance(to: routeCoordinates[$0]) < maneuver.coordinate.distance(to: routeCoordinates[$1])
+        }
+        guard let nearestIndex,
+              let outgoing = routeCoordinate(
+                after: nearestIndex,
+                distanceMeters: routeTurnSampleDistanceMeters,
+                in: routeCoordinates
+              ) else {
+            return nil
+        }
+        return maneuver.coordinate.bearing(to: outgoing)
     }
 
     private struct RouteTurnMetrics {

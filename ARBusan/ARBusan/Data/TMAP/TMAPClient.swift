@@ -1,6 +1,57 @@
 import CoreLocation
 import Foundation
 
+/// TMAP 보행자 경로 안내점(turnType) 종류. 회전 판정을 기하 각도가 아니라 TMAP 안내로 하기 위함.
+enum TMAPManeuverKind: Equatable {
+    case depart, arrive, straight
+    case turnLeft, turnRight, slightLeft, slightRight, uTurn
+    case crosswalk, overpass, underpass, stairs, other
+
+    /// 화살표용 좌/우. 회전류가 아니면 nil.
+    var turnDirection: RouteTurnDirection? {
+        switch self {
+        case .turnLeft, .slightLeft, .uTurn:
+            return .left
+        case .turnRight, .slightRight:
+            return .right
+        default:
+            return nil
+        }
+    }
+
+    /// 전방 3D 화살표를 띄울 회전류인지.
+    var isTurn: Bool {
+        turnDirection != nil
+    }
+
+    /// TMAP 보행자 turnType 코드 → 종류 매핑.
+    static func from(turnType: Int) -> TMAPManeuverKind {
+        switch turnType {
+        case 11: return .straight
+        case 12, 16: return .turnLeft     // 좌회전 / 8시 방향
+        case 17: return .slightLeft       // 10시 방향
+        case 13, 19: return .turnRight    // 우회전 / 4시 방향
+        case 18: return .slightRight      // 2시 방향
+        case 14: return .uTurn
+        case 125: return .overpass        // 육교
+        case 126: return .underpass       // 지하보도
+        case 127, 128, 129: return .stairs // 계단/경사로
+        case 200: return .depart
+        case 201: return .arrive
+        case 211...218: return .crosswalk  // 횡단보도류
+        default: return .other
+        }
+    }
+}
+
+/// TMAP 경로의 개별 안내점(Point feature).
+struct TMAPRouteManeuver {
+    let coordinate: CLLocationCoordinate2D
+    let turnType: Int
+    let kind: TMAPManeuverKind
+    let description: String
+}
+
 struct TMAPPedestrianRoute {
     let destinationName: String
     let requestedStart: CLLocationCoordinate2D
@@ -9,6 +60,8 @@ struct TMAPPedestrianRoute {
     let routeCoordinates: [CLLocationCoordinate2D]
     let totalDistanceMeters: Double?
     let totalTimeSeconds: Double?
+    /// TMAP 안내점 목록. POI fallback 경로 등에서는 비어 있을 수 있다.
+    var maneuvers: [TMAPRouteManeuver] = []
 }
 
 struct TMAPPOISearchResult: Identifiable {
@@ -134,7 +187,8 @@ struct SKOpenAPITMAPClient: TMAPClient {
             arrivalCoordinate: arrivalCoordinate,
             routeCoordinates: payload.routeCoordinates,
             totalDistanceMeters: payload.totalDistanceMeters,
-            totalTimeSeconds: payload.totalTimeSeconds
+            totalTimeSeconds: payload.totalTimeSeconds,
+            maneuvers: payload.maneuvers
         )
     }
 
@@ -197,9 +251,11 @@ struct SKOpenAPITMAPClient: TMAPClient {
         var routeCoordinates: [CLLocationCoordinate2D] = []
         var totalDistanceMeters: Double?
         var totalTimeSeconds: Double?
+        var maneuvers: [TMAPRouteManeuver] = []
 
         for feature in features {
-            if let properties = feature["properties"] as? [String: Any] {
+            let properties = feature["properties"] as? [String: Any]
+            if let properties {
                 totalDistanceMeters = totalDistanceMeters ?? properties.doubleValue(for: "totalDistance")
                 totalTimeSeconds = totalTimeSeconds ?? properties.doubleValue(for: "totalTime")
             }
@@ -213,6 +269,16 @@ struct SKOpenAPITMAPClient: TMAPClient {
                let coordinate = parseCoordinate(geometry["coordinates"]) {
                 arrivalCoordinate = coordinate
                 routeCoordinates.append(coordinate)
+                if let turnType = properties?.intValue(for: "turnType") {
+                    maneuvers.append(
+                        TMAPRouteManeuver(
+                            coordinate: coordinate,
+                            turnType: turnType,
+                            kind: TMAPManeuverKind.from(turnType: turnType),
+                            description: properties?.stringValue(for: "description") ?? ""
+                        )
+                    )
+                }
             } else if type == "LineString",
                       let coordinates = parseCoordinates(geometry["coordinates"]) {
                 routeCoordinates.append(contentsOf: coordinates)
@@ -226,7 +292,8 @@ struct SKOpenAPITMAPClient: TMAPClient {
             arrivalCoordinate: arrivalCoordinate,
             routeCoordinates: routeCoordinates,
             totalDistanceMeters: totalDistanceMeters,
-            totalTimeSeconds: totalTimeSeconds
+            totalTimeSeconds: totalTimeSeconds,
+            maneuvers: maneuvers
         )
     }
 
@@ -312,6 +379,7 @@ private struct ParsedTMAPRoutePayload {
     let routeCoordinates: [CLLocationCoordinate2D]
     let totalDistanceMeters: Double?
     let totalTimeSeconds: Double?
+    let maneuvers: [TMAPRouteManeuver]
 }
 
 private extension Dictionary where Key == String, Value == Any {
@@ -337,6 +405,19 @@ private extension Dictionary where Key == String, Value == Any {
         }
         if let value = self[key] as? String {
             return Double(value)
+        }
+        return nil
+    }
+
+    func intValue(for key: String) -> Int? {
+        if let value = self[key] as? Int {
+            return value
+        }
+        if let value = self[key] as? Double {
+            return Int(value)
+        }
+        if let value = self[key] as? String {
+            return Int(value)
         }
         return nil
     }

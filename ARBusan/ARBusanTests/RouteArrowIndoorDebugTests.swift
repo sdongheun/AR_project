@@ -117,6 +117,95 @@ final class RouteArrowIndoorDebugTests: XCTestCase {
         XCTAssertTrue(fixture.appState.edgeMarkerOverlays.isEmpty)
     }
 
+    func testManeuverDrivesTurnArrowEvenForSmallAngle() throws {
+        // 30도(45도 미만) 꺾임 + TMAP 우회전 안내점 → 화살표가 떠야 한다(maneuver 우선).
+        let fixture = makeSmallAngleRightTurnFixture(includeManeuver: true)
+        fixture.appState.updateCameraHeading(0)
+
+        let path = try XCTUnwrap(fixture.appState.routeArrowPath)
+        XCTAssertEqual(path.arrows.count, 1)
+        XCTAssertEqual(path.arrows[0].turnDirection, .right)
+    }
+
+    func testGeometricFallbackIgnoresSmallAngleWithoutManeuver() {
+        // 같은 30도 꺾임이지만 안내점이 없으면 기하 45° 기준 미달 → 화살표 없음(fallback).
+        let fixture = makeSmallAngleRightTurnFixture(includeManeuver: false)
+        fixture.appState.updateCameraHeading(0)
+
+        XCTAssertNil(fixture.appState.routeArrowPath)
+    }
+
+    private func makeSmallAngleRightTurnFixture(
+        includeManeuver: Bool
+    ) -> (appState: AppState, spot: TourismSpot) {
+        let turnCoordinate = CLLocationCoordinate2D(latitude: 35.245700, longitude: 128.904000)
+        let turnOrigin = LocationSnapshot(
+            latitude: turnCoordinate.latitude,
+            longitude: turnCoordinate.longitude,
+            altitude: nil,
+            horizontalAccuracy: 1,
+            verticalAccuracy: nil,
+            heading: nil,
+            headingAccuracy: nil,
+            source: .arCoreGeospatial,
+            capturedAt: Date()
+        )
+        // 진입: 남쪽에서 북쪽으로. 진출: 북에서 동쪽으로 30도만 꺾임(작은 각도).
+        let incoming = LocalENUProjector.coordinate(eastMeters: 0, northMeters: -10, from: turnOrigin)
+        let outgoing = LocalENUProjector.coordinate(eastMeters: 4, northMeters: 6.9, from: turnOrigin)
+        let originCoordinate = LocalENUProjector.coordinate(eastMeters: 0, northMeters: -5, from: turnOrigin)
+        let routeCoordinates = [incoming, turnCoordinate, outgoing]
+
+        let spot = TourismSpot(
+            id: "maneuver-small-angle-target",
+            name: "갈림길 테스트 목적지",
+            address: "실내 디버그",
+            districtName: "테스트",
+            category: "길찾기",
+            source: .mock,
+            geometryKind: .point,
+            center: outgoing,
+            recognitionHints: ["갈림길 테스트 목적지"],
+            notes: "작은 각도 + TMAP 안내점 회전 테스트"
+        )
+        let origin = LocationSnapshot(
+            latitude: originCoordinate.latitude,
+            longitude: originCoordinate.longitude,
+            altitude: nil,
+            horizontalAccuracy: 1,
+            verticalAccuracy: nil,
+            heading: nil,
+            headingAccuracy: nil,
+            source: .arCoreGeospatial,
+            capturedAt: Date()
+        )
+        let maneuvers: [TMAPRouteManeuver] = includeManeuver
+            ? [TMAPRouteManeuver(coordinate: turnCoordinate, turnType: 13, kind: .turnRight, description: "우회전")]
+            : []
+        let route = TMAPPedestrianRoute(
+            destinationName: spot.name,
+            requestedStart: originCoordinate,
+            requestedDestination: spot.center,
+            arrivalCoordinate: outgoing,
+            routeCoordinates: routeCoordinates,
+            totalDistanceMeters: nil,
+            totalTimeSeconds: nil,
+            maneuvers: maneuvers
+        )
+        let appState = AppState(spots: [spot])
+        appState.spots = [spot]
+        appState.selectedSpot = spot
+        appState.navigationDestinationSpotID = spot.id
+        appState.isNavigationModeEnabled = true
+        appState.isIndoorDebugModeEnabled = true
+        appState.latestLocationSnapshot = origin
+        appState.latestGeospatialLocationSnapshot = origin
+        appState.locationConfidence = .high
+        appState.effectiveSpatialConfidence = .high
+        appState.tmapArrivalRoutesBySpotID[spot.id] = route
+        return (appState, spot)
+    }
+
     private func makeRightTurnFixture(
         originNorthOffsetMeters: Double
     ) -> (appState: AppState, spot: TourismSpot) {
