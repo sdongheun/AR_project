@@ -854,6 +854,33 @@ struct ARExploreView: View {
                         .animation(.easeOut(duration: 0.18), value: turnBanner)
                 }
 
+                // 북 재보정 경고(§4-C): 나침반과 ARKit 월드 북이 지속 발산할 때 탭 → 세션 재고정. 회전 배너 아래.
+                if appState.isNavigationModeEnabled,
+                   appState.headingMiscalibrated || appState.isRecalibratingNorth {
+                    Button {
+                        appState.requestNorthRecalibration()
+                    } label: {
+                        Label(
+                            appState.isRecalibratingNorth ? "방향 보정 중…" : "방향이 어긋난 듯해요 · 방향 보정",
+                            systemImage: appState.isRecalibratingNorth ? "arrow.triangle.2.circlepath" : "location.north.line.fill"
+                        )
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 9)
+                            .background(.orange.opacity(0.92), in: Capsule())
+                            .shadow(color: .black.opacity(0.3), radius: 8, y: 3)
+                    }
+                    .disabled(appState.isRecalibratingNorth)
+                    .position(
+                        x: safeWidth / 2,
+                        y: max(geometry.safeAreaInsets.top, 44) + (appState.navigationTurnBanner == nil ? 28 : 76)
+                    )
+                    .transition(.opacity)
+                    .animation(.easeOut(duration: 0.18), value: appState.headingMiscalibrated)
+                    .animation(.easeOut(duration: 0.18), value: appState.isRecalibratingNorth)
+                }
+
                 if isLogPanelVisible, !appState.radarMarkerOverlays.isEmpty {
                     RadarOverlayView(markers: appState.radarMarkerOverlays) { markerID in
                         if let spot = appState.spots.first(where: { $0.id == markerID }) {
@@ -1722,6 +1749,8 @@ private struct ARViewContainer: UIViewControllerRepresentable {
         uiViewController.setRouteArrowPath(appState.routeArrowPath)
         uiViewController.setRouteRibbon(appState.routeRibbonPath)
         uiViewController.setArrivalPin(appState.arrivalPin)
+        // 북 재보정(§4-C): requestID가 바뀐 경우에만 세션을 리셋 재실행해 월드 북을 다시 고정한다.
+        uiViewController.applyRecalibrationIfNeeded(requestID: appState.northRecalibrationRequestID)
     }
 }
 

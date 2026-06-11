@@ -234,6 +234,12 @@ final class AppState: ObservableObject {
     @Published var isRerouting = false
     /// 수동 "다시 맞추기" 후 잠깐 보여주는 알림(예: 보정만 했을 때). 자동 해제.
     @Published var navigationManualNotice: String?
+    /// 나침반(절대 북)과 ARKit 월드 북이 지속 발산 → 세션 시작 시 고정한 북이 틀어진 것으로 의심(§4-C). 감지 전용.
+    @Published var headingMiscalibrated = false
+    /// 북 재보정(세션 재실행)이 진행 중이면 true. 끝나면 자동 해제.
+    @Published var isRecalibratingNorth = false
+    /// 증가할 때마다 ARViewContainer가 세션을 리셋 재실행해 월드 북을 다시 고정한다.
+    @Published private(set) var northRecalibrationRequestID = 0
     @Published var showsMatrixDebugMarker = FeatureFlags.enableLegacyMatrixDebugOverlay
     @Published var showsOnScreenCandidateDebugMarkers = FeatureFlags.enableLegacyOnScreenCandidateDebugMarkers
     @Published var shows3DGeospatialDebugMarker = FeatureFlags.enableLegacyGeospatial3DMarkers
@@ -318,6 +324,13 @@ final class AppState: ObservableObject {
     private let manualRerouteOffRouteThresholdMeters: CLLocationDistance = 20
     private var offRouteSince: Date?
     private var lastRerouteAt: Date?
+    // 북 재보정 감지(§4-C). 오탐을 줄이려고 큰 발산 + 지속 + 신뢰 가능한 나침반일 때만 깃발을 세운다.
+    private let headingDivergenceThresholdDegrees: Double = 25
+    private let headingDivergenceSustainSeconds: TimeInterval = 6
+    private let headingDivergenceMaxCompassAccuracyDegrees: Double = 20
+    private var compassHeadingDegrees: Double?
+    private var compassHeadingAccuracyDegrees: Double = -1
+    private var headingDivergenceSince: Date?
     private let tmapRouteDebounceDistanceMeters: CLLocationDistance = 1
     private let tmapRouteDebounceInterval: TimeInterval = 1.5
     private let geospatial3DAnchorRefreshInterval: TimeInterval = 2.0
@@ -384,6 +397,11 @@ final class AppState: ObservableObject {
         self.geospatialSessionManager = GeospatialSessionManager(apiKeysProvider: { apiKeys })
         self.cameraTextInput = ""
         self.polygonValidatedSpotID = nil
+        self.geospatialSessionManager.onCompassHeadingUpdated = { [weak self] heading, accuracy in
+            Task { @MainActor in
+                self?.updateCompassHeading(heading, accuracyDegrees: accuracy)
+            }
+        }
         self.geospatialSessionManager.onSnapshotUpdated = { [weak self] snapshot in
             Task { @MainActor in
                 guard self?.isIndoorDebugModeEnabled != true else {
@@ -734,6 +752,8 @@ final class AppState: ObservableObject {
             lastRerouteAt = nil
             isRerouting = false
             navigationManualNotice = nil
+            headingMiscalibrated = false
+            headingDivergenceSince = nil
             routeArrowDiagnostics = "길찾기 모드 꺼짐 / 목적지를 선택하면 화살표를 표시합니다."
             routeArrowComputationDiagnostics = "길찾기 모드 꺼짐 / 화살표 계산 안 함"
             setNavigationGuidance(title: "길찾기 꺼짐", detail: "목적지를 선택하면 TMAP 경로 기준 방향 안내를 표시합니다.")
@@ -1229,6 +1249,12 @@ final class AppState: ObservableObject {
     func updateARTrackingState(limited: Bool, reason: String) {
         arTrackingLimited = limited
         arTrackingReason = reason
+        // 재보정 직후 세션이 .limited(.initializing)를 거쳐 normal로 돌아오면 보정 완료로 본다.
+        if !limited, isRecalibratingNorth {
+            isRecalibratingNorth = false
+            headingMiscalibrated = false
+            headingDivergenceSince = nil
+        }
         if isNavigationModeEnabled {
             refreshRouteArrowPath()
         }
@@ -2126,6 +2152,75 @@ final class AppState: ObservableObject {
             if self?.navigationManualNotice == text {
                 self?.navigationManualNotice = nil
             }
+        }
+    }
+
+    // MARK: - 북 재보정 (§4-C)
+
+    /// 디바이스 나침반(절대 북) 업데이트. ARKit 월드 북과의 지속 발산을 감지한다.
+    func updateCompassHeading(_ degrees: Double, accuracyDegrees: Double) {
+        compassHeadingDegrees = degrees
+        compassHeadingAccuracyDegrees = accuracyDegrees
+        evaluateNorthCalibration()
+    }
+
+    /// 나침반(신뢰 가능할 때)과 ARKit 월드 heading이 임계값 넘게 지속 발산하면 `headingMiscalibrated`를 세운다(감지 전용).
+    private func evaluateNorthCalibration() {
+        // 길찾기 중이 아니거나 재보정/추적 불안정(세션 초기화)이면 판단 보류.
+        guard isNavigationModeEnabled, !isRecalibratingNorth, !arTrackingLimited,
+              let arkitHeading = cameraHeadingDegrees,
+              let compass = compassHeadingDegrees else {
+            headingDivergenceSince = nil
+            return
+        }
+
+        let now = Date()
+        let divergence = arkitHeading.angularDifference(to: compass) // 0~180
+        let compassTrustworthy = compassHeadingAccuracyDegrees >= 0
+            && compassHeadingAccuracyDegrees <= headingDivergenceMaxCompassAccuracyDegrees
+
+        if compassTrustworthy, divergence > headingDivergenceThresholdDegrees {
+            if headingDivergenceSince == nil {
+                headingDivergenceSince = now
+            }
+        } else {
+            headingDivergenceSince = nil
+        }
+
+        let miscalibrated = NorthCalibration.shouldFlagMiscalibration(
+            divergenceDegrees: divergence,
+            divergenceSince: headingDivergenceSince,
+            compassAccuracyDegrees: compassHeadingAccuracyDegrees,
+            now: now,
+            thresholdDegrees: headingDivergenceThresholdDegrees,
+            sustainSeconds: headingDivergenceSustainSeconds,
+            maxCompassAccuracyDegrees: headingDivergenceMaxCompassAccuracyDegrees
+        )
+        if miscalibrated != headingMiscalibrated {
+            headingMiscalibrated = miscalibrated
+        }
+    }
+
+    /// 수동 북 재보정(§4-C): AR 세션을 리셋 재실행해 현재 나침반 기준으로 월드 북을 다시 고정한다.
+    /// 실제 재실행은 ARViewContainer가 `northRecalibrationRequestID` 변화를 보고 수행한다.
+    func requestNorthRecalibration() {
+        guard isNavigationModeEnabled, !isRecalibratingNorth else {
+            return
+        }
+        isRecalibratingNorth = true
+        headingMiscalibrated = false
+        headingDivergenceSince = nil
+        northRecalibrationRequestID += 1
+        showManualNotice("방향(북)을 다시 맞추는 중…")
+        // 세션 초기화가 정상 트래킹으로 돌아오면 updateARTrackingState에서 해제하지만,
+        // 만약 normal 전이를 놓쳐도 무한 "재보정 중"이 되지 않게 안전망 타임아웃을 둔다.
+        let requestID = northRecalibrationRequestID
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            guard let self, self.northRecalibrationRequestID == requestID else {
+                return
+            }
+            self.isRecalibratingNorth = false
         }
     }
 

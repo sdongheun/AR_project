@@ -97,6 +97,35 @@ final class NavigationStabilizerTests: XCTestCase {
         ))
     }
 
+    func testShouldFlagNorthMiscalibrationOnlyWhenTrustedCompassDivergesSustained() {
+        let start = Date(timeIntervalSince1970: 0)
+        // 작은 발산(20°) → 안 세움.
+        XCTAssertFalse(NorthCalibration.shouldFlagMiscalibration(
+            divergenceDegrees: 20, divergenceSince: start, compassAccuracyDegrees: 10,
+            now: start.addingTimeInterval(10), thresholdDegrees: 25, sustainSeconds: 6, maxCompassAccuracyDegrees: 20
+        ))
+        // 큰 발산이나 지속 미달 → 안 세움.
+        XCTAssertFalse(NorthCalibration.shouldFlagMiscalibration(
+            divergenceDegrees: 40, divergenceSince: start, compassAccuracyDegrees: 10,
+            now: start.addingTimeInterval(3), thresholdDegrees: 25, sustainSeconds: 6, maxCompassAccuracyDegrees: 20
+        ))
+        // 큰 발산 + 충분히 지속 + 나침반 신뢰 가능 → 세움.
+        XCTAssertTrue(NorthCalibration.shouldFlagMiscalibration(
+            divergenceDegrees: 40, divergenceSince: start, compassAccuracyDegrees: 10,
+            now: start.addingTimeInterval(7), thresholdDegrees: 25, sustainSeconds: 6, maxCompassAccuracyDegrees: 20
+        ))
+        // 조건 충족하나 나침반 정확도 나쁨(30° > 20°) → 판단 보류(안 세움).
+        XCTAssertFalse(NorthCalibration.shouldFlagMiscalibration(
+            divergenceDegrees: 40, divergenceSince: start, compassAccuracyDegrees: 30,
+            now: start.addingTimeInterval(7), thresholdDegrees: 25, sustainSeconds: 6, maxCompassAccuracyDegrees: 20
+        ))
+        // 나침반 무효(음수 정확도) → 판단 보류(안 세움).
+        XCTAssertFalse(NorthCalibration.shouldFlagMiscalibration(
+            divergenceDegrees: 40, divergenceSince: start, compassAccuracyDegrees: -1,
+            now: start.addingTimeInterval(7), thresholdDegrees: 25, sustainSeconds: 6, maxCompassAccuracyDegrees: 20
+        ))
+    }
+
     func testTurnBoundaryReachedWidensWithAccuracyCircle() {
         // 오차 원(5m)이 boundary(18m)와 겹치면 회전 준비로 인정.
         XCTAssertTrue(RouteGeometry.turnBoundaryReached(distanceToTurnMeters: 20, accuracyRadiusMeters: 5, boundaryMeters: 18))

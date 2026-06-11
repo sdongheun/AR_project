@@ -135,6 +135,35 @@ enum NavigationReroute {
     }
 }
 
+// MARK: - 북 재보정 감지 (§4-C)
+
+/// 세션 시작 시 `.gravityAndHeading`으로 고정한 월드 북이 틀어졌는지 판단한다(감지 전용).
+/// 신뢰 가능한 나침반(절대 북)과 ARKit 월드 heading이 임계값 넘게 "지속" 발산하면 미스캘리브레이션으로 본다.
+/// 실제 보정(세션 재실행)은 사용자가 수동으로 트리거한다.
+enum NorthCalibration {
+    static func shouldFlagMiscalibration(
+        divergenceDegrees: Double,
+        divergenceSince: Date?,
+        compassAccuracyDegrees: Double,
+        now: Date,
+        thresholdDegrees: Double,
+        sustainSeconds: TimeInterval,
+        maxCompassAccuracyDegrees: Double
+    ) -> Bool {
+        // 나침반 자체가 못 믿을 정도(무효/정확도 나쁨)면 판단 보류 — 둘 다 틀리면 구분 불가.
+        guard compassAccuracyDegrees >= 0, compassAccuracyDegrees <= maxCompassAccuracyDegrees else {
+            return false
+        }
+        guard divergenceDegrees > thresholdDegrees else {
+            return false
+        }
+        guard let divergenceSince, now.timeIntervalSince(divergenceSince) >= sustainSeconds else {
+            return false
+        }
+        return true
+    }
+}
+
 // MARK: - 3.6 위치 불안정 대응
 
 /// 안내에 사용할 보정된 위치와 그 품질.

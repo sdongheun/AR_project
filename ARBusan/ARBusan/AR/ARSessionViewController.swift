@@ -63,6 +63,8 @@ final class ARSessionViewController: UIViewController {
     var onTrackingStateChanged: ((Bool, String) -> Void)?
     private var lastTrackingLimited: Bool?
     private var lastTrackingReason = ""
+    // 북 재보정(§4-C): AppState의 requestID가 바뀔 때만 세션을 재실행해 월드 북을 다시 고정한다.
+    private var lastAppliedRecalibrationID = 0
 
     init(geospatialSessionManager: GeospatialSessionManager) {
         self.geospatialSessionManager = geospatialSessionManager
@@ -96,7 +98,7 @@ final class ARSessionViewController: UIViewController {
         arView.session.pause()
     }
 
-    private func startSession() {
+    private func startSession(resetTracking: Bool = false) {
         guard ARWorldTrackingConfiguration.isSupported else {
             return
         }
@@ -111,7 +113,22 @@ final class ARSessionViewController: UIViewController {
             configuration.videoFormat = lowResolutionFormat
         }
 
-        arView.session.run(configuration)
+        // 북 재보정(§4-C): 트래킹/앵커를 리셋해 현재(더 정확한) 나침반 기준으로 월드 북을 다시 고정한다.
+        let options: ARSession.RunOptions = resetTracking ? [.resetTracking, .removeExistingAnchors] : []
+        arView.session.run(configuration, options: options)
+    }
+
+    /// 북 재보정(§4-C 수동): 세션을 리셋 재실행해 월드 북을 현재 나침반 기준으로 다시 고정한다.
+    /// 직후 ARKit이 `.limited(.initializing)`이 되어 §4-B 경로로 3D 안내가 잠시 강등된다.
+    func applyRecalibrationIfNeeded(requestID: Int) {
+        guard requestID != lastAppliedRecalibrationID else {
+            return
+        }
+        lastAppliedRecalibrationID = requestID
+        guard requestID > 0, isViewLoaded else {
+            return
+        }
+        startSession(resetTracking: true)
     }
 
     /// 지원 포맷 중 가장 낮은 해상도(동률이면 낮은 fps)를 고른다. 발열 절감용.

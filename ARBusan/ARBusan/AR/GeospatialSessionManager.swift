@@ -76,6 +76,8 @@ final class GeospatialSessionManager: NSObject, CLLocationManagerDelegate {
     private(set) var latestStatusMessage = "ARCore Geospatial 세션을 아직 시작하지 않았습니다."
 
     var onSnapshotUpdated: ((LocationSnapshot) -> Void)?
+    /// 디바이스 나침반 절대 북(trueHeading, headingAccuracy도). ARKit 월드 북 발산 감지(§4-C)에 쓴다.
+    var onCompassHeadingUpdated: ((Double, Double) -> Void)?
     var onStatusChanged: ((String) -> Void)?
     var onSceneSemanticsUpdated: ((SceneSemanticsSnapshot) -> Void)?
     var onSceneSemanticsStatusChanged: ((String) -> Void)?
@@ -96,6 +98,9 @@ final class GeospatialSessionManager: NSObject, CLLocationManagerDelegate {
     func startLocationUpdates() {
         locationManager.desiredAccuracy = kCLLocationAccuracyBest
         locationManager.startUpdatingLocation()
+        if CLLocationManager.headingAvailable() {
+            locationManager.startUpdatingHeading()
+        }
     }
 
     func configureIfPossible() {
@@ -537,6 +542,14 @@ final class GeospatialSessionManager: NSObject, CLLocationManagerDelegate {
             capturedAt: location.timestamp
         )
         publish(snapshot)
+    }
+
+    func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {
+        // trueHeading은 위치 보정이 되면 ≥0, 안 되면 -1 → 그땐 magneticHeading로 폴백.
+        let heading = newHeading.trueHeading >= 0 ? newHeading.trueHeading : newHeading.magneticHeading
+        DispatchQueue.main.async { [onCompassHeadingUpdated] in
+            onCompassHeadingUpdated?(heading, newHeading.headingAccuracy)
+        }
     }
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {

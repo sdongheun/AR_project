@@ -132,6 +132,29 @@ final class RouteArrowIndoorDebugTests: XCTestCase {
         XCTAssertNotNil(fixture.appState.navigationManualNotice)
     }
 
+    func testManualNorthRecalibrationBumpsRequestAndEntersRecalibrating() {
+        // 수동 "방향 보정" → 세션 재고정 트리거(requestID 증가) + 재보정 중 진입 + 의심 플래그 해제(§4-C).
+        let fixture = makeRightTurnFixture(originNorthOffsetMeters: -5)
+        fixture.appState.updateCameraHeading(0)
+        fixture.appState.headingMiscalibrated = true
+        let beforeID = fixture.appState.northRecalibrationRequestID
+
+        fixture.appState.requestNorthRecalibration()
+
+        XCTAssertEqual(fixture.appState.northRecalibrationRequestID, beforeID + 1)
+        XCTAssertTrue(fixture.appState.isRecalibratingNorth)
+        XCTAssertFalse(fixture.appState.headingMiscalibrated)
+        XCTAssertNotNil(fixture.appState.navigationManualNotice)
+
+        // 재보정 중엔 중복 트리거가 무시된다(세션 reset 연타 방지).
+        fixture.appState.requestNorthRecalibration()
+        XCTAssertEqual(fixture.appState.northRecalibrationRequestID, beforeID + 1)
+
+        // 트래킹이 normal로 돌아오면 재보정 완료 처리.
+        fixture.appState.updateARTrackingState(limited: false, reason: "정상")
+        XCTAssertFalse(fixture.appState.isRecalibratingNorth)
+    }
+
     func testRouteRibbonAppearsWhileGuiding() {
         let fixture = makeRightTurnFixture(originNorthOffsetMeters: -5)
 
