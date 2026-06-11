@@ -121,6 +121,17 @@ final class RouteArrowIndoorDebugTests: XCTestCase {
         XCTAssertTrue(fixture.appState.navigationGuidanceIsConservative)
     }
 
+    func testManualRefreshOnRouteDoesNotReroute() {
+        // 온-루트인데 수동 버튼을 누르면 위치/heading 보정만 하고 경로 재탐색(API)은 하지 않는다(§4-A 스마트).
+        let fixture = makeRightTurnFixture(originNorthOffsetMeters: -5)
+        fixture.appState.updateCameraHeading(0)
+
+        fixture.appState.requestReroute(manual: true)
+
+        XCTAssertFalse(fixture.appState.isRerouting)
+        XCTAssertNotNil(fixture.appState.navigationManualNotice)
+    }
+
     func testRouteRibbonAppearsWhileGuiding() {
         let fixture = makeRightTurnFixture(originNorthOffsetMeters: -5)
 

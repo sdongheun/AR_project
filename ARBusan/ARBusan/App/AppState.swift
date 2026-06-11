@@ -230,6 +230,10 @@ final class AppState: ObservableObject {
     /// ARKit 트래킹이 limited/notAvailable이면 true. 이때 3D 안내(리본/화살표/도착 핀)를 숨긴다.
     @Published var arTrackingLimited = false
     private var arTrackingReason = ""
+    /// 경로 재탐색(자동/수동) 요청이 진행 중이면 true.
+    @Published var isRerouting = false
+    /// 수동 "다시 맞추기" 후 잠깐 보여주는 알림(예: 보정만 했을 때). 자동 해제.
+    @Published var navigationManualNotice: String?
     @Published var showsMatrixDebugMarker = FeatureFlags.enableLegacyMatrixDebugOverlay
     @Published var showsOnScreenCandidateDebugMarkers = FeatureFlags.enableLegacyOnScreenCandidateDebugMarkers
     @Published var shows3DGeospatialDebugMarker = FeatureFlags.enableLegacyGeospatial3DMarkers
@@ -305,6 +309,15 @@ final class AppState: ObservableObject {
     private let routeTurnSampleDistanceMeters: CLLocationDistance = 6
     private let ribbonSampleSpacingMeters: CLLocationDistance = 2
     private let ribbonMaxLengthMeters: CLLocationDistance = 14
+    // 경로 이탈 자동 재탐색(§4-A). 오탐을 피하려고 넉넉하게 잡는다.
+    private let autoRerouteThresholdMeters: CLLocationDistance = 40
+    private let autoRerouteSustainSeconds: TimeInterval = 8
+    private let rerouteCooldownSeconds: TimeInterval = 15
+    private let manualRerouteMinIntervalSeconds: TimeInterval = 3
+    // 수동 버튼: 이 거리 이내면 온-루트로 보고 경로 재탐색(API) 없이 위치/heading 보정만 한다.
+    private let manualRerouteOffRouteThresholdMeters: CLLocationDistance = 20
+    private var offRouteSince: Date?
+    private var lastRerouteAt: Date?
     private let tmapRouteDebounceDistanceMeters: CLLocationDistance = 1
     private let tmapRouteDebounceInterval: TimeInterval = 1.5
     private let geospatial3DAnchorRefreshInterval: TimeInterval = 2.0
@@ -717,6 +730,10 @@ final class AppState: ObservableObject {
             arrivalPin = nil
             routeRibbonPath = nil
             navigationTurnBanner = nil
+            offRouteSince = nil
+            lastRerouteAt = nil
+            isRerouting = false
+            navigationManualNotice = nil
             routeArrowDiagnostics = "길찾기 모드 꺼짐 / 목적지를 선택하면 화살표를 표시합니다."
             routeArrowComputationDiagnostics = "길찾기 모드 꺼짐 / 화살표 계산 안 함"
             setNavigationGuidance(title: "길찾기 꺼짐", detail: "목적지를 선택하면 TMAP 경로 기준 방향 안내를 표시합니다.")
@@ -920,6 +937,29 @@ final class AppState: ObservableObject {
             DebugStatusRow(title: "거리", value: distanceText),
             DebugStatusRow(title: "인식", value: recognitionSummaryText)
         ]
+    }
+
+    /// 길찾기 중 현재 위치 출처/정확도 요약("VPS 3m" / "GPS 18m" / "실내 주입"). 없으면 nil.
+    var navigationLocationQuality: String? {
+        guard isNavigationModeEnabled else {
+            return nil
+        }
+        if isIndoorDebugModeEnabled {
+            return "실내 주입"
+        }
+        guard let snapshot = latestLocationSnapshot else {
+            return nil
+        }
+        let source = snapshot.source == .arCoreGeospatial ? "VPS" : "GPS"
+        return "\(source) \(Int(snapshot.horizontalAccuracy))m"
+    }
+
+    /// 위치 품질 표시 색상 기준: VPS + 정확도 양호(≤15m)일 때만 양호(초록), 아니면 주의(주황).
+    var navigationLocationIsAccurate: Bool {
+        guard let snapshot = latestLocationSnapshot else {
+            return false
+        }
+        return snapshot.source == .arCoreGeospatial && snapshot.horizontalAccuracy <= 15
     }
 
     var locationDebugRows: [DebugStatusRow] {
@@ -1677,7 +1717,7 @@ final class AppState: ObservableObject {
         }
     }
 
-    private func ensureNavigationRouteForDestination() {
+    private func ensureNavigationRouteForDestination(forceReroute: Bool = false) {
         guard isNavigationModeEnabled else {
             return
         }
@@ -1709,7 +1749,7 @@ final class AppState: ObservableObject {
             return
         }
 
-        if shouldDebounceNavigationRouteRequest(destination: destination, origin: origin) {
+        if !forceReroute, shouldDebounceNavigationRouteRequest(destination: destination, origin: origin) {
             routeArrowDiagnostics = "\(destination.name) 길찾기 요청 무시 / 같은 위치에서 너무 빠른 재요청"
             routeArrowComputationDiagnostics = "\(destination.name) 연타 방지 / origin \(origin.coordinate.shortText) / \(String(format: "%.1f", tmapRouteDebounceInterval))초 이내 중복 요청"
             return
@@ -1718,6 +1758,7 @@ final class AppState: ObservableObject {
         guard apiKeys.tmap.isRuntimeConfiguredAPIKey else {
             let route = fallbackNavigationRoute(destination: destination, from: origin)
             tmapArrivalRoutesBySpotID[destination.id] = route
+            isRerouting = false
             routeArrowDiagnostics = "\(destination.name) TMAP 키 없음 / POI 직선 fallback 경로 사용"
             routeArrowComputationDiagnostics = routeSummaryDiagnostics(
                 destination: destination,
@@ -1731,8 +1772,13 @@ final class AppState: ObservableObject {
             return
         }
 
-        routeArrowPath = nil
-        routeArrowDiagnostics = "\(destination.name) TMAP 보행자 경로 요청 중 / 현재 위치 기준"
+        if !forceReroute {
+            // 재탐색이 아니면 요청 동안 기존 화살표를 비운다. 재탐색은 새 경로가 올 때까지 기존 안내 유지(soft).
+            routeArrowPath = nil
+        }
+        routeArrowDiagnostics = forceReroute
+            ? "\(destination.name) 경로 재탐색 중 / 현재 위치 기준(기존 안내 유지)"
+            : "\(destination.name) TMAP 보행자 경로 요청 중 / 현재 위치 기준"
         routeArrowComputationDiagnostics = "\(destination.name) TMAP 요청 시작 / origin \(origin.coordinate.shortText) / destination \(destination.center.shortText)"
         updateTMAPRouteStatus(extra: "\(destination.name) 길찾기 요청 중")
         recordNavigationRouteRequest(destination: destination, origin: origin)
@@ -1753,6 +1799,7 @@ final class AppState: ObservableObject {
 
                 self.navigationRouteTask = nil
                 self.navigationRouteTaskSpotID = nil
+                self.isRerouting = false
                 self.tmapRouteFailedSpotIDs.remove(destination.id)
                 self.tmapArrivalRoutesBySpotID[destination.id] = route
                 self.routeArrowComputationDiagnostics = self.routeSummaryDiagnostics(
@@ -1772,6 +1819,7 @@ final class AppState: ObservableObject {
 
                 self.navigationRouteTask = nil
                 self.navigationRouteTaskSpotID = nil
+                self.isRerouting = false
                 self.tmapRouteFailedSpotIDs.insert(destination.id)
                 let route = self.fallbackNavigationRoute(destination: destination, from: origin)
                 self.tmapArrivalRoutesBySpotID[destination.id] = route
@@ -1918,6 +1966,7 @@ final class AppState: ObservableObject {
         )
         let guidedOrigin = origin.replacingCoordinate(guidanceFix.coordinate)
         updateNavigationStabilityDiagnostics(guidanceFix: guidanceFix, rawOrigin: origin)
+        evaluateAutoReroute(offRouteMeters: guidanceFix.offRouteDistanceMeters)
 
         let arrivalDistance = guidedOrigin.coordinate.distance(to: route.arrivalCoordinate)
         if arrivalDistance <= routeArrivalCompletionMeters {
@@ -1990,6 +2039,94 @@ final class AppState: ObservableObject {
             movementText = "이동 방향 미확정(정지/대기)"
         }
         navigationStabilityDiagnostics = "위치 \(guidanceFix.quality.displayName) / 정확도 \(Int(guidanceFix.accuracyRadiusMeters))m / \(offRouteText) / \(snapText) / \(movementText)"
+    }
+
+    /// 경로선에서 넉넉한 임계값 이상 지속 이탈하면 자동 재탐색(§4-A).
+    private func evaluateAutoReroute(offRouteMeters: CLLocationDistance?) {
+        let now = Date()
+        let offRoute = offRouteMeters ?? 0
+        if offRoute > autoRerouteThresholdMeters {
+            if offRouteSince == nil {
+                offRouteSince = now
+            }
+        } else {
+            offRouteSince = nil
+        }
+
+        if NavigationReroute.shouldAutoReroute(
+            offRouteMeters: offRoute,
+            offRouteSince: offRouteSince,
+            lastRerouteAt: lastRerouteAt,
+            now: now,
+            thresholdMeters: autoRerouteThresholdMeters,
+            sustainSeconds: autoRerouteSustainSeconds,
+            cooldownSeconds: rerouteCooldownSeconds
+        ) {
+            requestReroute(manual: false)
+        }
+    }
+
+    /// 자동/수동 경로 재탐색. 새 경로가 올 때까지 기존 안내는 유지한다(soft).
+    /// 수동(스마트 단일 버튼): 항상 위치/heading 보정(무료) + 경로 재탐색은 실제 이탈/경로 없음일 때만(불필요한 API 호출 방지).
+    func requestReroute(manual: Bool) {
+        guard isNavigationModeEnabled, let destination = navigationDestinationSpot else {
+            return
+        }
+        let now = Date()
+
+        if manual {
+            // 1) 항상 위치/heading 보정(API 없음): 누적 보정/이동방향을 버리고 현재 센서로 재시작.
+            guidanceStabilizer.reset()
+            movementTracker.reset()
+            offRouteSince = nil
+
+            // 2) 경로 재탐색은 실제 이탈/경로 없음일 때만.
+            guard manualRerouteNeeded(for: destination) else {
+                refreshRouteArrowPath()
+                showManualNotice("위치·방향을 다시 맞췄어요")
+                return
+            }
+            // 재탐색 필요하나 너무 잦으면 보정만 하고 끝(스팸 방지).
+            if let lastRerouteAt, now.timeIntervalSince(lastRerouteAt) < manualRerouteMinIntervalSeconds {
+                refreshRouteArrowPath()
+                showManualNotice("위치·방향을 다시 맞췄어요")
+                return
+            }
+        } else if let lastRerouteAt, now.timeIntervalSince(lastRerouteAt) < rerouteCooldownSeconds {
+            return
+        }
+
+        lastRerouteAt = now
+        offRouteSince = nil
+        isRerouting = true
+        ensureNavigationRouteForDestination(forceReroute: true)
+    }
+
+    /// 수동 버튼에서 경로 재탐색(API)이 필요한지. 경로가 없거나, 현재 위치가 경로선에서 임계값 넘게 벗어났을 때만 true.
+    private func manualRerouteNeeded(for destination: TourismSpot) -> Bool {
+        guard let route = tmapArrivalRoutesBySpotID[destination.id] else {
+            return true
+        }
+        guard let origin = stableGeospatial3DOrigin ?? latestGeospatialLocationSnapshot ?? latestLocationSnapshot else {
+            return false
+        }
+        guard let closest = RouteGeometry.closestPointOnRoute(
+            from: origin.coordinate,
+            routeCoordinates: route.routeCoordinates
+        ) else {
+            return true
+        }
+        return closest.distanceMeters > manualRerouteOffRouteThresholdMeters
+    }
+
+    private func showManualNotice(_ text: String) {
+        navigationManualNotice = text
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            if self?.navigationManualNotice == text {
+                self?.navigationManualNotice = nil
+            }
+        }
     }
 
     private func updateNavigationGuidance(

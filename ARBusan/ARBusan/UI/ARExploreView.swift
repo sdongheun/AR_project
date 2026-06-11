@@ -872,6 +872,47 @@ struct ARExploreView: View {
                     )
                         .environmentObject(appState)
                         .frame(width: safeWidth, height: navigationMapHeight)
+                        // 2D 지도 상단 오른쪽: "다시 맞추기"(항상 위치/heading 보정, 실제 이탈 시에만 경로 재탐색).
+                        .overlay(alignment: .topTrailing) {
+                            VStack(alignment: .trailing, spacing: 6) {
+                                if let quality = appState.navigationLocationQuality {
+                                    Text(quality)
+                                        .font(.caption2.weight(.bold))
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 5)
+                                        .background(
+                                            (appState.navigationLocationIsAccurate ? Color.green : Color.orange).opacity(0.85),
+                                            in: Capsule()
+                                        )
+                                }
+                                Button {
+                                    appState.requestReroute(manual: true)
+                                } label: {
+                                    Label(appState.isRerouting ? "재검색 중" : "다시 맞추기",
+                                          systemImage: "location.circle")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 8)
+                                        .background(.blue.opacity(0.9), in: Capsule())
+                                        .shadow(color: .black.opacity(0.25), radius: 6, y: 2)
+                                }
+                                .disabled(appState.isRerouting)
+
+                                if let notice = appState.navigationManualNotice {
+                                    Text(notice)
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 6)
+                                        .background(.black.opacity(0.6), in: Capsule())
+                                        .transition(.opacity)
+                                }
+                            }
+                            .padding(10)
+                            .animation(.easeOut(duration: 0.18), value: appState.navigationManualNotice)
+                        }
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
 

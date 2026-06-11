@@ -109,6 +109,32 @@ enum RouteGeometry {
     }
 }
 
+// MARK: - 경로 이탈 자동 재탐색 (§4-A)
+
+/// 자동 재탐색 판단. 오탐을 줄이기 위해 임계값/지속시간/쿨다운을 넉넉하게 둔다.
+enum NavigationReroute {
+    static func shouldAutoReroute(
+        offRouteMeters: CLLocationDistance,
+        offRouteSince: Date?,
+        lastRerouteAt: Date?,
+        now: Date,
+        thresholdMeters: CLLocationDistance,
+        sustainSeconds: TimeInterval,
+        cooldownSeconds: TimeInterval
+    ) -> Bool {
+        guard offRouteMeters > thresholdMeters else {
+            return false
+        }
+        guard let offRouteSince, now.timeIntervalSince(offRouteSince) >= sustainSeconds else {
+            return false
+        }
+        if let lastRerouteAt, now.timeIntervalSince(lastRerouteAt) < cooldownSeconds {
+            return false
+        }
+        return true
+    }
+}
+
 // MARK: - 3.6 위치 불안정 대응
 
 /// 안내에 사용할 보정된 위치와 그 품질.

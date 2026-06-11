@@ -73,6 +73,30 @@ final class NavigationStabilizerTests: XCTestCase {
         XCTAssertGreaterThan(samples.last!.longitude, base.longitude + 0.00002)
     }
 
+    func testShouldAutoRerouteOnlyWhenFarOffSustainedAndCoolerDown() {
+        let start = Date(timeIntervalSince1970: 0)
+        // 임계값(40m) 이하 → 안 함.
+        XCTAssertFalse(NavigationReroute.shouldAutoReroute(
+            offRouteMeters: 30, offRouteSince: start, lastRerouteAt: nil,
+            now: start.addingTimeInterval(20), thresholdMeters: 40, sustainSeconds: 8, cooldownSeconds: 15
+        ))
+        // 멀지만 지속 시간 미달 → 안 함.
+        XCTAssertFalse(NavigationReroute.shouldAutoReroute(
+            offRouteMeters: 50, offRouteSince: start, lastRerouteAt: nil,
+            now: start.addingTimeInterval(5), thresholdMeters: 40, sustainSeconds: 8, cooldownSeconds: 15
+        ))
+        // 멀고 충분히 지속 + 최근 재탐색 없음 → 함.
+        XCTAssertTrue(NavigationReroute.shouldAutoReroute(
+            offRouteMeters: 50, offRouteSince: start, lastRerouteAt: nil,
+            now: start.addingTimeInterval(9), thresholdMeters: 40, sustainSeconds: 8, cooldownSeconds: 15
+        ))
+        // 조건 충족하나 쿨다운 이내 → 안 함.
+        XCTAssertFalse(NavigationReroute.shouldAutoReroute(
+            offRouteMeters: 50, offRouteSince: start, lastRerouteAt: start.addingTimeInterval(2),
+            now: start.addingTimeInterval(9), thresholdMeters: 40, sustainSeconds: 8, cooldownSeconds: 15
+        ))
+    }
+
     func testTurnBoundaryReachedWidensWithAccuracyCircle() {
         // 오차 원(5m)이 boundary(18m)와 겹치면 회전 준비로 인정.
         XCTAssertTrue(RouteGeometry.turnBoundaryReached(distanceToTurnMeters: 20, accuracyRadiusMeters: 5, boundaryMeters: 18))
