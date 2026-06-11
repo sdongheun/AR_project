@@ -35,9 +35,10 @@ final class ARSessionViewController: UIViewController {
     private var ribbonAnchor: AnchorEntity?
     private var latestRibbon: RouteRibbonSnapshot?
     private let ribbonHeightOffset: Float = -1.2
-    private let ribbonNearMeters: Float = 1.2
-    private let ribbonFarMeters: Float = 6.0
     private let ribbonWidthMeters: Float = 0.7
+    private let ribbonRebuildInterval: TimeInterval = 0.1
+    private var lastRibbonRebuildTimestamp: TimeInterval = 0
+    private var ribbonModelEntity: ModelEntity?
     // 카메라 영상 해상도 선호. 기본은 저해상도(발열 절감), 토글로 고해상도 전환 가능.
     private var prefersHighResolutionCamera = false
     private let markerScreenScalePerMeter: Float = 0.085
@@ -292,49 +293,110 @@ final class ARSessionViewController: UIViewController {
                 arView.scene.removeAnchor(ribbonAnchor)
                 self.ribbonAnchor = nil
             }
+            ribbonModelEntity = nil
             latestRibbon = nil
             return
         }
 
         if ribbonAnchor == nil {
             let anchor = AnchorEntity(world: .zero)
-            anchor.addChild(makeRibbonEntity())
             arView.scene.addAnchor(anchor)
             ribbonAnchor = anchor
+            ribbonModelEntity = nil
+            lastRibbonRebuildTimestamp = 0
         }
         latestRibbon = ribbon
     }
 
-    // 가는 방향으로 뻗는 납작한 바닥 레인(중력 수평). 좌표 고정이 아니라 매 프레임 카메라 위치 기준으로 재배치한다.
-    private func makeRibbonEntity() -> Entity {
-        let root = Entity()
-        let length = ribbonFarMeters - ribbonNearMeters
-        let material = SimpleMaterial(color: .systemBlue.withAlphaComponent(0.45), roughness: 0.3, isMetallic: false)
-        let lane = ModelEntity(
-            mesh: .generatePlane(width: ribbonWidthMeters, depth: length, cornerRadius: ribbonWidthMeters * 0.5),
-            materials: [material]
-        )
-        // 엔티티 전방(-Z)으로 near..far 구간에 눕힌다. generatePlane(width:depth:)는 XZ 수평면.
-        lane.position = SIMD3<Float>(0, 0, -(ribbonNearMeters + length / 2))
-        root.addChild(lane)
-        return root
-    }
-
+    // 곡선 바닥 리본(§3.2): 전방 경로 샘플 점들을 카메라 위치 기준 world 좌표로 펴고,
+    // 연속 점 사이를 납작한 세그먼트로 잇는다. 세그먼트마다 방위가 달라 도로 곡률이 재현된다.
+    // 사용자가 움직이면 모양이 바뀌므로 throttle 주기로 재생성한다.
     private func updateRibbonPlacement(from frame: ARFrame) {
         guard let latestRibbon, let ribbonAnchor else {
             return
         }
+        guard frame.timestamp - lastRibbonRebuildTimestamp >= ribbonRebuildInterval else {
+            return
+        }
+        lastRibbonRebuildTimestamp = frame.timestamp
 
         let cameraColumn = frame.camera.transform.columns.3
         let cameraWorldPosition = SIMD3<Float>(cameraColumn.x, cameraColumn.y, cameraColumn.z)
-        // 카메라 수평 위치 + 바닥 높이. 회전은 주행 방위 yaw만(중력 수평 유지).
-        ribbonAnchor.transform.translation = TravelDirectionAnchor.worldPosition(
-            cameraWorldPosition: cameraWorldPosition,
-            bearingDegrees: latestRibbon.bearingDegrees,
-            distanceMeters: 0,
-            heightOffsetMeters: ribbonHeightOffset
-        )
-        ribbonAnchor.transform.rotation = TravelDirectionAnchor.orientation(bearingDegrees: latestRibbon.bearingDegrees)
+        let worldPoints = latestRibbon.points.map { point in
+            TravelDirectionAnchor.worldPosition(
+                cameraWorldPosition: cameraWorldPosition,
+                bearingDegrees: point.bearingDegrees,
+                distanceMeters: Float(point.distanceMeters),
+                heightOffsetMeters: ribbonHeightOffset
+            )
+        }
+
+        guard let mesh = makeRibbonMesh(worldPoints: worldPoints) else {
+            ribbonModelEntity?.removeFromParent()
+            ribbonModelEntity = nil
+            return
+        }
+
+        let material = SimpleMaterial(color: .systemBlue.withAlphaComponent(0.45), roughness: 0.3, isMetallic: false)
+        if let ribbonModelEntity {
+            // 겹치는 세그먼트(Z-파이팅) 대신 하나의 연속 메시를 교체만 한다.
+            ribbonModelEntity.model = ModelComponent(mesh: mesh, materials: [material])
+        } else {
+            let entity = ModelEntity(mesh: mesh, materials: [material])
+            ribbonAnchor.addChild(entity)
+            ribbonModelEntity = entity
+        }
+    }
+
+    // 경로 점들의 좌/우 가장자리 정점을 잇는 단일 연속 메시. 겹치는 면이 없어 Z-파이팅(깜빡임)이 없다.
+    // 위/아래 양면 삼각형을 모두 넣어 컬링 방향과 무관하게 보이게 한다(좌표는 ribbonAnchor 로컬=월드).
+    private func makeRibbonMesh(worldPoints: [SIMD3<Float>]) -> MeshResource? {
+        guard worldPoints.count >= 2 else {
+            return nil
+        }
+        let halfWidth = ribbonWidthMeters / 2
+        var positions: [SIMD3<Float>] = []
+        var normals: [SIMD3<Float>] = []
+        positions.reserveCapacity(worldPoints.count * 2)
+
+        for index in worldPoints.indices {
+            let tangent: SIMD3<Float>
+            if index < worldPoints.count - 1 {
+                tangent = horizontalDirection(worldPoints[index + 1] - worldPoints[index])
+            } else {
+                tangent = horizontalDirection(worldPoints[index] - worldPoints[index - 1])
+            }
+            // tangent를 Y축 기준 90도 돌린 수평 수직벡터(좌우 폭 방향).
+            let perpendicular = SIMD3<Float>(tangent.z, 0, -tangent.x)
+            let center = worldPoints[index]
+            positions.append(center + perpendicular * halfWidth) // 좌 (2*index)
+            positions.append(center - perpendicular * halfWidth) // 우 (2*index+1)
+            normals.append(SIMD3<Float>(0, 1, 0))
+            normals.append(SIMD3<Float>(0, 1, 0))
+        }
+
+        var indices: [UInt32] = []
+        for index in 0..<(worldPoints.count - 1) {
+            let l0 = UInt32(2 * index)
+            let r0 = UInt32(2 * index + 1)
+            let l1 = UInt32(2 * index + 2)
+            let r1 = UInt32(2 * index + 3)
+            // 윗면 + 아랫면(역순) → 양면 가시.
+            indices += [l0, r0, l1, r0, r1, l1]
+            indices += [l0, l1, r0, r0, l1, r1]
+        }
+
+        var descriptor = MeshDescriptor(name: "routeRibbon")
+        descriptor.positions = MeshBuffers.Positions(positions)
+        descriptor.normals = MeshBuffers.Normals(normals)
+        descriptor.primitives = .triangles(indices)
+        return try? MeshResource.generate(from: [descriptor])
+    }
+
+    private func horizontalDirection(_ vector: SIMD3<Float>) -> SIMD3<Float> {
+        let horizontal = SIMD3<Float>(vector.x, 0, vector.z)
+        let length = simd_length(horizontal)
+        return length > 1e-5 ? horizontal / length : SIMD3<Float>(0, 0, -1)
     }
 
     private func makeRouteArrowEntity(turnDirection: RouteTurnDirection) -> Entity {

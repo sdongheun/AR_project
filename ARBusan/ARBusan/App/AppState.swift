@@ -88,10 +88,16 @@ struct RouteArrowSnapshot: Identifiable, Equatable {
     let bearingDegrees: Double
 }
 
+/// 곡선 리본의 한 점. 현재 위치 기준 상대 방위/거리(§3.2).
+struct RouteRibbonPoint: Equatable {
+    let bearingDegrees: Double
+    let distanceMeters: Double
+}
+
 struct RouteRibbonSnapshot: Equatable {
     let spotID: TourismSpot.ID
-    /// 바닥 리본을 뻗을 "가는 방향"(현재 위치 → 다음 안내점 방위, 도).
-    let bearingDegrees: Double
+    /// 전방 경로를 재샘플한 점들(현재 위치 기준 상대). 도로 곡률이 그대로 담긴다.
+    let points: [RouteRibbonPoint]
 }
 
 struct ArrivalPinSnapshot: Equatable {
@@ -294,6 +300,8 @@ final class AppState: ObservableObject {
     private let routeTurnAlignedThresholdDegrees: Double = 22
     private let routeArrowFacingToleranceDegrees: Double = 60
     private let routeTurnSampleDistanceMeters: CLLocationDistance = 6
+    private let ribbonSampleSpacingMeters: CLLocationDistance = 2
+    private let ribbonMaxLengthMeters: CLLocationDistance = 14
     private let tmapRouteDebounceDistanceMeters: CLLocationDistance = 1
     private let tmapRouteDebounceInterval: TimeInterval = 1.5
     private let geospatial3DAnchorRefreshInterval: TimeInterval = 2.0
@@ -1987,17 +1995,24 @@ final class AppState: ObservableObject {
             return nil
         }
 
-        guard let nextCoordinate = nextRouteGuidanceCoordinate(
+        // 곡선 리본(§3.2): 전방 경로를 재샘플해 도로 곡률을 그대로 담는다.
+        let samples = RouteGeometry.forwardRibbonSamples(
             from: origin.coordinate,
-            routeCoordinates: route.routeCoordinates
-        ) else {
+            routeCoordinates: route.routeCoordinates,
+            spacingMeters: ribbonSampleSpacingMeters,
+            maxLengthMeters: ribbonMaxLengthMeters
+        )
+        guard samples.count >= 2 else {
             return nil
         }
 
-        return RouteRibbonSnapshot(
-            spotID: targetSpot.id,
-            bearingDegrees: origin.coordinate.bearing(to: nextCoordinate)
-        )
+        let points = samples.map { sample in
+            RouteRibbonPoint(
+                bearingDegrees: origin.coordinate.bearing(to: sample),
+                distanceMeters: origin.coordinate.distance(to: sample)
+            )
+        }
+        return RouteRibbonSnapshot(spotID: targetSpot.id, points: points)
     }
 
     private func setNavigationGuidance(_ guidance: NavigationGuidance) {
@@ -2177,7 +2192,8 @@ final class AppState: ObservableObject {
 
         // 회전 판정은 TMAP 안내점(turnType)을 우선 사용한다. 작은 각도 갈림길도 인정하고
         // 완만한 도로 굽이는 무시하기 위함이다(TURN_UX_RULES_V2 §1). 안내점이 없으면 기하 각도로 fallback.
-        let turnManeuvers = route.maneuvers.filter { $0.kind.isTurn }
+        // 강한 회전(좌/우회전·유턴)만 화살표로. 약한 굽이(slight)는 곡선 리본이 담당(§3.1).
+        let turnManeuvers = route.maneuvers.filter { $0.kind.isHardTurn }
         if !turnManeuvers.isEmpty {
             return maneuverArrowSnapshots(
                 route: route,

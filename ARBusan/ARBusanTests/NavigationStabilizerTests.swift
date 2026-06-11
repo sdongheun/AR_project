@@ -37,6 +37,42 @@ final class NavigationStabilizerTests: XCTestCase {
         XCTAssertEqual(result.distanceMeters, 10, accuracy: 0.5)
     }
 
+    func testForwardRibbonSamplesResamplesAtFixedSpacing() {
+        // 북쪽 직선 30m 경로에서 2m 간격, 최대 10m 재샘플.
+        let route = [offset(east: 0, north: 0), offset(east: 0, north: 30)]
+        let samples = RouteGeometry.forwardRibbonSamples(
+            from: offset(east: 0, north: 2),
+            routeCoordinates: route,
+            spacingMeters: 2,
+            maxLengthMeters: 10
+        )
+        XCTAssertGreaterThanOrEqual(samples.count, 4)
+        for index in 1..<samples.count {
+            let a = CLLocation(latitude: samples[index - 1].latitude, longitude: samples[index - 1].longitude)
+            let b = CLLocation(latitude: samples[index].latitude, longitude: samples[index].longitude)
+            XCTAssertEqual(a.distance(from: b), 2, accuracy: 0.3)
+        }
+    }
+
+    func testForwardRibbonSamplesFollowsCurve() {
+        // ㄱ자 곡선: 북으로 가다 동으로 꺾임. 샘플 방위가 도중에 바뀌어야 한다(곡률 재현).
+        let route = [
+            offset(east: 0, north: 0),
+            offset(east: 0, north: 8),
+            offset(east: 8, north: 8)
+        ]
+        let samples = RouteGeometry.forwardRibbonSamples(
+            from: offset(east: 0, north: 1),
+            routeCoordinates: route,
+            spacingMeters: 2,
+            maxLengthMeters: 16
+        )
+        XCTAssertGreaterThanOrEqual(samples.count, 5)
+        // 첫 구간은 북향(경도 거의 고정), 마지막 구간은 동향(위도 거의 고정)이어야 한다.
+        XCTAssertEqual(samples.first!.longitude, base.longitude, accuracy: 0.00002)
+        XCTAssertGreaterThan(samples.last!.longitude, base.longitude + 0.00002)
+    }
+
     func testTurnBoundaryReachedWidensWithAccuracyCircle() {
         // 오차 원(5m)이 boundary(18m)와 겹치면 회전 준비로 인정.
         XCTAssertTrue(RouteGeometry.turnBoundaryReached(distanceToTurnMeters: 20, accuracyRadiusMeters: 5, boundaryMeters: 18))

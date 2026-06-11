@@ -138,8 +138,17 @@ final class RouteArrowIndoorDebugTests: XCTestCase {
         XCTAssertNil(fixture.appState.routeArrowPath)
     }
 
+    func testSlightManeuverDoesNotShowArrow() {
+        // 약한 굽이(turnType 18, slightRight)는 화살표가 아니라 곡선 리본이 담당 → 화살표 없음.
+        let fixture = makeSmallAngleRightTurnFixture(includeManeuver: true, turnType: 18)
+        fixture.appState.updateCameraHeading(0)
+
+        XCTAssertNil(fixture.appState.routeArrowPath)
+    }
+
     private func makeSmallAngleRightTurnFixture(
-        includeManeuver: Bool
+        includeManeuver: Bool,
+        turnType: Int = 13
     ) -> (appState: AppState, spot: TourismSpot) {
         let turnCoordinate = CLLocationCoordinate2D(latitude: 35.245700, longitude: 128.904000)
         let turnOrigin = LocationSnapshot(
@@ -183,7 +192,7 @@ final class RouteArrowIndoorDebugTests: XCTestCase {
             capturedAt: Date()
         )
         let maneuvers: [TMAPRouteManeuver] = includeManeuver
-            ? [TMAPRouteManeuver(coordinate: turnCoordinate, turnType: 13, kind: .turnRight, description: "우회전")]
+            ? [TMAPRouteManeuver(coordinate: turnCoordinate, turnType: turnType, kind: .from(turnType: turnType), description: "회전")]
             : []
         let route = TMAPPedestrianRoute(
             destinationName: spot.name,

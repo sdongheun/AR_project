@@ -196,7 +196,8 @@ ARBusan/Config/Secrets.local.xcconfig
 - 추가로 길찾기 모드 중에는 건물 인식 파이프라인(`runRecognition`)과 VWorld Polygon 자동 조회(`updateCameraDirectionCandidate`, 네트워크)를 건너뛴다(둘러보기 전용). 길찾기 화살표/리본 갱신은 유지한다.
 - 발열 절감: 미사용 평면 감지(`planeDetection`)를 제거했고, 카메라 영상은 기본 저해상도(`videoFormat` 최저 해상도)로 두되 실내 디버그 패널의 `고해상도 카메라` 토글(`prefersHighResolutionCamera`)로 전환할 수 있다. AR 카메라 VIO 자체의 누적 발열은 본질적이며 VPS 상시 가동이 남은 최대 레버(보류).
 - 회전 판정 정교화 1차(TURN_UX_RULES_V2 §1): `TMAPClient`가 보행자 경로의 `turnType`을 파싱해 `route.maneuvers`로 만들고, 길찾기 화살표가 **TMAP 회전 안내점을 우선** 사용한다(작은 각도 갈림길도 인정, 완만한 도로 굽이 무시). 안내점이 없으면 기존 기하 45°로 fallback.
-- 거리감 1차(TURN_UX_RULES_V2 §2): 회전 화살표를 실제 회전 거리에 비례 배치(2.5~12m 클램프)하고, `navigationTurnBanner`("Nm 후 좌/우회전")를 회전 활성 시 상단에 표시. 경로 누적 거리 정밀화·횡단보도/계단 특수 안내·리본 곡선화는 후속.
+- 거리감 1차(TURN_UX_RULES_V2 §2): 회전 화살표를 실제 회전 거리에 비례 배치(2.5~12m 클램프)하고, `navigationTurnBanner`("Nm 후 좌/우회전")를 회전 활성 시 상단에 표시. 경로 누적 거리 정밀화·횡단보도/계단 특수 안내는 후속.
+- 곡선 리본 1차(TURN_UX_RULES_V2 §3.2): 전방 경로를 `RouteGeometry.forwardRibbonSamples`로 arc-length 재샘플(2m 간격, 최대 14m)해 `RouteRibbonSnapshot.points`로 만들고, 렌더러가 좌/우 가장자리를 잇는 **단일 연속 메시**로 **도로 곡률을 그대로 따라가는 곡선 리본**을 그린다(시선 비추종, ~10Hz 재생성, 겹침 없어 Z-파이팅 깜빡임 없음). 약한 굽이(slight maneuver)는 화살표에서 제외(`isHardTurn`)하고 리본이 담당. Catmull-Rom 평활화·가변 길이·방향 흐름 애니메이션은 후속.
 - VPS는 건물 후보로 쓰지 않고 위치 정확도 신호로만 쓴다.
 - Polygon 후보는 브이월드 조회 결과가 있으면 실제 외곽 좌표 기반으로 반영한다.
 - 브이월드 Polygon 선택은 POI 포함 여부까지 개선됐다.

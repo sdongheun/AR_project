@@ -19,9 +19,19 @@ enum TMAPManeuverKind: Equatable {
         }
     }
 
-    /// 전방 3D 화살표를 띄울 회전류인지.
+    /// 전방 3D 화살표를 띄울 회전류인지(약한 굽이 포함).
     var isTurn: Bool {
         turnDirection != nil
+    }
+
+    /// 강한 회전(좌/우회전·유턴). 화살표는 이것만, 약한 굽이(slight)는 곡선 리본이 담당(§3.1).
+    var isHardTurn: Bool {
+        switch self {
+        case .turnLeft, .turnRight, .uTurn:
+            return true
+        default:
+            return false
+        }
     }
 
     /// TMAP 보행자 turnType 코드 → 종류 매핑.
