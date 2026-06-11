@@ -60,6 +60,9 @@ final class ARSessionViewController: UIViewController {
     var onCameraPoseUpdated: ((CameraPoseSnapshot) -> Void)?
     var onCameraProjectionUpdated: ((CameraProjectionSnapshot) -> Void)?
     var onRouteArrowRenderStatusUpdated: ((String) -> Void)?
+    var onTrackingStateChanged: ((Bool, String) -> Void)?
+    private var lastTrackingLimited: Bool?
+    private var lastTrackingReason = ""
 
     init(geospatialSessionManager: GeospatialSessionManager) {
         self.geospatialSessionManager = geospatialSessionManager
@@ -729,6 +732,7 @@ private extension Float {
 extension ARSessionViewController: ARSessionDelegate {
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
         geospatialSessionManager.update(with: frame)
+        publishTrackingStateIfChanged(from: frame)
         updateGeospatialDebugVisualsForCamera()
         updateRouteArrowPlacement(from: frame)
         updateRibbonPlacement(from: frame)
@@ -789,6 +793,42 @@ extension ARSessionViewController: ARSessionDelegate {
 
         DispatchQueue.main.async { [weak self] in
             self?.onCameraProjectionUpdated?(snapshot)
+        }
+    }
+
+    private func publishTrackingStateIfChanged(from frame: ARFrame) {
+        let (limited, reason) = trackingStability(frame.camera.trackingState)
+        // 상태가 바뀔 때만 올린다(매 프레임 호출 방지).
+        guard limited != lastTrackingLimited || reason != lastTrackingReason else {
+            return
+        }
+        lastTrackingLimited = limited
+        lastTrackingReason = reason
+        DispatchQueue.main.async { [weak self] in
+            self?.onTrackingStateChanged?(limited, reason)
+        }
+    }
+
+    /// 트래킹 상태를 (3D 안내를 숨겨야 하는가, 사용자 안내 사유)로 변환한다.
+    private func trackingStability(_ trackingState: ARCamera.TrackingState) -> (limited: Bool, reason: String) {
+        switch trackingState {
+        case .normal:
+            return (false, "정상")
+        case .notAvailable:
+            return (true, "AR 추적을 사용할 수 없습니다")
+        case let .limited(reason):
+            switch reason {
+            case .initializing:
+                return (true, "AR 초기화 중입니다")
+            case .relocalizing:
+                return (true, "위치 재인식 중입니다")
+            case .excessiveMotion:
+                return (true, "기기를 천천히 움직여 주세요")
+            case .insufficientFeatures:
+                return (true, "주변을 천천히 비춰 주세요")
+            @unknown default:
+                return (true, "AR 추적이 불안정합니다")
+            }
         }
     }
 

@@ -227,6 +227,9 @@ final class AppState: ObservableObject {
     @Published var navigationGuidanceIsConservative = false
     /// 활성 회전 화살표가 있을 때의 카운트다운 안내("15m 후 우회전"). 없으면 nil.
     @Published var navigationTurnBanner: String?
+    /// ARKit 트래킹이 limited/notAvailable이면 true. 이때 3D 안내(리본/화살표/도착 핀)를 숨긴다.
+    @Published var arTrackingLimited = false
+    private var arTrackingReason = ""
     @Published var showsMatrixDebugMarker = FeatureFlags.enableLegacyMatrixDebugOverlay
     @Published var showsOnScreenCandidateDebugMarkers = FeatureFlags.enableLegacyOnScreenCandidateDebugMarkers
     @Published var shows3DGeospatialDebugMarker = FeatureFlags.enableLegacyGeospatial3DMarkers
@@ -1183,6 +1186,14 @@ final class AppState: ObservableObject {
         updateCameraHeading(pose.headingDegrees)
     }
 
+    func updateARTrackingState(limited: Bool, reason: String) {
+        arTrackingLimited = limited
+        arTrackingReason = reason
+        if isNavigationModeEnabled {
+            refreshRouteArrowPath()
+        }
+    }
+
     func updateCameraProjection(_ projection: CameraProjectionSnapshot) {
         cameraProjectionSnapshot = projection
         cameraProjectionDiagnostics = projection.diagnosticText
@@ -1844,6 +1855,24 @@ final class AppState: ObservableObject {
             routeArrowDiagnostics = "길찾기 모드 꺼짐 / 목적지를 선택하면 화살표를 표시합니다."
             routeArrowComputationDiagnostics = "길찾기 모드 꺼짐 / routeArrowPath nil"
             setNavigationGuidance(title: "길찾기 꺼짐", detail: "목적지를 선택하면 TMAP 경로 기준 방향 안내를 표시합니다.")
+            return
+        }
+
+        // AR 트래킹이 불안정하면 월드 앵커가 흔들리므로 3D 안내를 끄고 보수 텍스트로 강등(§4-B).
+        if arTrackingLimited {
+            routeArrowPath = nil
+            setNavigationGuidance(
+                NavigationGuidance(
+                    title: "AR 추적 불안정",
+                    detail: arTrackingReason.isEmpty ? "기기를 천천히 움직여 주변을 비춰 주세요." : arTrackingReason,
+                    systemImageName: "exclamationmark.triangle.fill",
+                    horizontalOffsetRatio: 0,
+                    isArrivalNearby: false,
+                    isConservative: true
+                )
+            )
+            routeArrowDiagnostics = "AR 추적 불안정 / 3D 안내 숨김"
+            routeArrowComputationDiagnostics = "AR trackingState limited(\(arTrackingReason)) / 리본·화살표·도착 핀 숨김"
             return
         }
 

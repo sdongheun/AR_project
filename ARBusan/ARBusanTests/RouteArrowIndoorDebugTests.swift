@@ -108,6 +108,19 @@ final class RouteArrowIndoorDebugTests: XCTestCase {
         XCTAssertNil(appState.routeRibbonPath)
     }
 
+    func testTrackingLimitedHidesArrowRibbonAndBanner() {
+        // AR 트래킹이 불안정하면 3D 안내를 모두 끄고 보수 텍스트로 강등한다(§4-B).
+        let fixture = makeRightTurnFixture(originNorthOffsetMeters: -5)
+        fixture.appState.arTrackingLimited = true
+
+        fixture.appState.updateCameraHeading(0)
+
+        XCTAssertNil(fixture.appState.routeArrowPath)
+        XCTAssertNil(fixture.appState.routeRibbonPath)
+        XCTAssertNil(fixture.appState.navigationTurnBanner)
+        XCTAssertTrue(fixture.appState.navigationGuidanceIsConservative)
+    }
+
     func testRouteRibbonAppearsWhileGuiding() {
         let fixture = makeRightTurnFixture(originNorthOffsetMeters: -5)
 

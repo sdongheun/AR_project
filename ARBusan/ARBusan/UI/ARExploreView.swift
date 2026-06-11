@@ -1669,6 +1669,9 @@ private struct ARViewContainer: UIViewControllerRepresentable {
                 appState.updateRouteArrowRenderDiagnostics(diagnostics)
             }
         }
+        viewController.onTrackingStateChanged = { limited, reason in
+            appState.updateARTrackingState(limited: limited, reason: reason)
+        }
         return viewController
     }
 
