@@ -188,12 +188,6 @@ struct MVPRecognitionControlView: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    DetailedLogText(title: "방향 후보", text: appState.cameraDirectionStatus)
-                    DetailedLogText(title: "heading", text: appState.cameraHeadingDiagnostics)
-                    DetailedLogText(title: "pose", text: appState.cameraPoseDiagnostics)
-                    DetailedLogText(title: "matrix", text: appState.cameraProjectionDiagnostics)
-                    DetailedLogText(title: "local ENU", text: appState.localCoordinateDiagnostics)
-
                     if let lastUpdatedAt = appState.cameraHeadingLastUpdatedAt {
                         Text("마지막 heading 갱신: \(lastUpdatedAt.formatted(date: .omitted, time: .standard))")
                             .font(.caption2)
@@ -255,13 +249,9 @@ struct MVPRecognitionControlView: View {
                 }
 
                 RecognitionSignalSection(
-                    title: "4. 화면 투영/2D 표시",
-                    caption: "화면 안/밖 여부, matrix 투영, edge marker 상태를 확인합니다."
+                    title: "3. 길찾기 화살표",
+                    caption: "길찾기 화살표 계산/렌더 로그를 확인합니다."
                 ) {
-                    DebugRowsBlock(rows: appState.displayDebugRows)
-                    DetailedLogText(title: "Polygon 화면 투영", text: appState.polygonProjectionDiagnostics)
-                    DetailedLogText(title: "Matrix 비교", text: appState.matrixProjectionComparisonDiagnostics)
-                    DetailedLogText(title: "2D 라벨", text: appState.arLabelOverlayDiagnostics)
                     DetailedLogText(title: "길찾기 화살표 계산", text: appState.routeArrowComputationDiagnostics)
                     DetailedLogText(title: "길찾기 화살표 렌더", text: appState.routeArrowRenderDiagnostics)
                 }

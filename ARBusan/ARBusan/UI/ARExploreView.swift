@@ -951,9 +951,7 @@ struct ARExploreView: View {
                                 DebugDashboardView(
                                     overviewRows: appState.debugOverviewRows,
                                     locationRows: appState.locationDebugRows,
-                                    dataRows: appState.dataDebugRows,
-                                    displayRows: appState.displayDebugRows,
-                                    anchorRows: appState.anchorDebugRows
+                                    navigationRows: appState.navigationDebugRows
                                 )
                             }
                             GeospatialStatusView(
@@ -1517,9 +1515,7 @@ private struct RadarMarkerDotView: View {
 private struct DebugDashboardView: View {
     let overviewRows: [DebugStatusRow]
     let locationRows: [DebugStatusRow]
-    let dataRows: [DebugStatusRow]
-    let displayRows: [DebugStatusRow]
-    let anchorRows: [DebugStatusRow]
+    let navigationRows: [DebugStatusRow]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -1528,11 +1524,10 @@ private struct DebugDashboardView: View {
 
             DebugStatusRowsView(rows: overviewRows)
 
+            // 내비게이션/VPS 실측에 필요한 그룹만 표시한다(인식기 잔재 데이터/표시/3D 그룹은 제외).
             VStack(alignment: .leading, spacing: 10) {
-                DebugStatusGroupView(title: "위치", rows: locationRows)
-                DebugStatusGroupView(title: "데이터", rows: dataRows)
-                DebugStatusGroupView(title: "표시", rows: displayRows)
-                DebugStatusGroupView(title: "3D", rows: anchorRows)
+                DebugStatusGroupView(title: "위치/VPS", rows: locationRows)
+                DebugStatusGroupView(title: "내비", rows: navigationRows)
             }
         }
         .padding(10)
