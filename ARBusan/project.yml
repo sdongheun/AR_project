@@ -42,6 +42,7 @@ targets:
         UIRequiredDeviceCapabilities:
           - arkit
         NSCameraUsageDescription: "건물 간판과 외관을 AR로 인식하기 위해 카메라 접근이 필요합니다."
+        NSPhotoLibraryAddUsageDescription: "도착 AR 포토존에서 촬영한 사진을 사진 앨범에 저장하기 위해 접근이 필요합니다."
         NSLocationWhenInUseUsageDescription: "현재 위치 주변의 건물 후보를 찾고 VPS 인식을 수행하기 위해 위치 접근이 필요합니다."
         NSLocationTemporaryUsageDescriptionDictionary:
           ARBusanPreciseLocation: "정확한 건물 후보 판정과 VPS 인식을 위해 정밀 위치가 필요합니다."

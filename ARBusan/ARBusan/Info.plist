@@ -4,10 +4,10 @@
 <dict>
 	<key>ARBUSAN_GOOGLE_ARCORE_API_KEY</key>
 	<string>$(GOOGLE_ARCORE_API_KEY)</string>
-	<key>ARBUSAN_TOUR_API_KEY</key>
-	<string>$(TOUR_API_KEY)</string>
 	<key>ARBUSAN_TMAP_API_KEY</key>
 	<string>$(TMAP_API_KEY)</string>
+	<key>ARBUSAN_TOUR_API_KEY</key>
+	<string>$(TOUR_API_KEY)</string>
 	<key>ARBUSAN_VWORLD_API_KEY</key>
 	<string>$(VWORLD_API_KEY)</string>
 	<key>CFBundleDevelopmentRegion</key>
@@ -37,6 +37,8 @@
 	</dict>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>현재 위치 주변의 건물 후보를 찾고 VPS 인식을 수행하기 위해 위치 접근이 필요합니다.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>도착 AR 포토존에서 촬영한 사진을 사진 앨범에 저장하기 위해 접근이 필요합니다.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

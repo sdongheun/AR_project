@@ -1,4 +1,5 @@
 import CoreLocation
+import SwiftData
 import SwiftUI
 import TMapSDK
 import UIKit
@@ -952,16 +953,17 @@ struct ARExploreView: View {
 
                         Spacer()
 
-                        Text("걸어서 각도를 잡고, 두 손가락으로 크기·회전을 조절하세요")
-                            .font(.caption2)
-                            .foregroundStyle(.white.opacity(0.92))
+                        Text(appState.photoCaptureNotice ?? "걸어서 각도를 잡고, 두 손가락으로 크기·회전을 조절하세요")
+                            .font(.caption2.weight(appState.photoCaptureNotice == nil ? .regular : .bold))
+                            .foregroundStyle(.white.opacity(0.95))
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
-                            .background(.black.opacity(0.4), in: Capsule())
+                            .background((appState.photoCaptureNotice == nil ? Color.black.opacity(0.4) : Color.green.opacity(0.85)), in: Capsule())
                             .padding(.bottom, 14)
+                            .animation(.easeOut(duration: 0.18), value: appState.photoCaptureNotice)
 
                         Button {
-                            // TODO(4단계): ARView 스냅샷 촬영 + 사진 저장 + 스탬프 획득
+                            appState.requestPhotoCapture()
                         } label: {
                             ZStack {
                                 Circle().stroke(.white, lineWidth: 4).frame(width: 74, height: 74)
@@ -1805,6 +1807,7 @@ private extension RecognitionConfidence {
 
 private struct ARViewContainer: UIViewControllerRepresentable {
     @EnvironmentObject private var appState: AppState
+    @Environment(\.modelContext) private var modelContext
 
     func makeUIViewController(context: Context) -> ARSessionViewController {
         let viewController = ARSessionViewController(
@@ -1826,6 +1829,26 @@ private struct ARViewContainer: UIViewControllerRepresentable {
             // 도착 3D 핀 탭 → 포토존 진입.
             appState.enterPhotoZone()
         }
+        viewController.onPhotoCaptured = { localIdentifier in
+            // 촬영 결과 → 스탬프 획득(중복 spotID 1회) + 알림.
+            guard let spotID = appState.photoZoneSpotID,
+                  let spotName = appState.photoZoneSpotName else {
+                appState.showPhotoCaptureNotice("사진 저장 실패")
+                return
+            }
+            let existing = (try? modelContext.fetch(FetchDescriptor<StampRecord>())) ?? []
+            let added = StampStore.addStampIfNeeded(
+                spotID: spotID,
+                spotName: spotName,
+                photoLocalIdentifier: localIdentifier,
+                existing: existing,
+                context: modelContext
+            )
+            try? modelContext.save()
+            appState.showPhotoCaptureNotice(
+                added ? "사진 저장 + \(spotName) 스탬프 획득!" : "사진 저장 완료 (스탬프 보유)"
+            )
+        }
         return viewController
     }
 
@@ -1835,6 +1858,8 @@ private struct ARViewContainer: UIViewControllerRepresentable {
         uiViewController.setArrivalPin(appState.arrivalPin)
         // 포토존: 활성 시 관광지 3D 타이포 배치, 아니면 제거(도착 핀 복귀).
         uiViewController.setPhotoZoneText(appState.isPhotoZoneActive ? appState.photoZoneSpotName : nil)
+        // 셔터: requestID가 바뀐 경우에만 스냅샷 촬영.
+        uiViewController.applyPhotoCaptureIfNeeded(requestID: appState.photoCaptureRequestID)
         // 북 재보정(§4-C): requestID가 바뀐 경우에만 세션을 리셋 재실행해 월드 북을 다시 고정한다.
         uiViewController.applyRecalibrationIfNeeded(requestID: appState.northRecalibrationRequestID)
     }

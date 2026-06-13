@@ -1,4 +1,5 @@
 import ARKit
+import Photos
 import RealityKit
 import UIKit
 
@@ -47,6 +48,9 @@ final class ARSessionViewController: UIViewController {
     var onTrackingStateChanged: ((Bool, String) -> Void)?
     /// 도착 3D 핀을 탭하면 호출(포토존 진입 트리거).
     var onArrivalPinTapped: (() -> Void)?
+    /// 촬영 완료 시 호출(사진 라이브러리 PHAsset localIdentifier, 실패 시 nil).
+    var onPhotoCaptured: ((String?) -> Void)?
+    private var lastAppliedCaptureID = 0
     private var photoZoneAnchor: AnchorEntity?
     private var currentPhotoZoneText: String?
     private var photoZoneGestures: [UIGestureRecognizer] = []
@@ -284,6 +288,55 @@ final class ARSessionViewController: UIViewController {
             self.photoZoneAnchor = nil
         }
         currentPhotoZoneText = nil
+    }
+
+    /// 셔터 요청(requestID 변경)일 때만 ARView 스냅샷을 촬영한다.
+    func applyPhotoCaptureIfNeeded(requestID: Int) {
+        guard requestID != lastAppliedCaptureID else {
+            return
+        }
+        lastAppliedCaptureID = requestID
+        guard requestID > 0 else {
+            return
+        }
+        capturePhoto()
+    }
+
+    // ARView 스냅샷(카메라 + 3D 타이포만, SwiftUI 오버레이 제외) → 사진 라이브러리에 저장.
+    private func capturePhoto() {
+        arView.snapshot(saveToHDR: false) { [weak self] image in
+            guard let self else {
+                return
+            }
+            guard let image else {
+                DispatchQueue.main.async { self.onPhotoCaptured?(nil) }
+                return
+            }
+            self.saveToPhotoLibrary(image)
+        }
+    }
+
+    private func saveToPhotoLibrary(_ image: UIImage) {
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { [weak self] status in
+            guard let self else {
+                return
+            }
+            guard status == .authorized || status == .limited else {
+                DispatchQueue.main.async { self.onPhotoCaptured?(nil) }
+                return
+            }
+            let data = image.jpegData(compressionQuality: 0.92)
+            var localIdentifier: String?
+            PHPhotoLibrary.shared().performChanges {
+                let request = PHAssetCreationRequest.forAsset()
+                if let data {
+                    request.addResource(with: .photo, data: data, options: nil)
+                }
+                localIdentifier = request.placeholderForCreatedAsset?.localIdentifier
+            } completionHandler: { success, _ in
+                DispatchQueue.main.async { self.onPhotoCaptured?(success ? localIdentifier : nil) }
+            }
+        }
     }
 
     private func photoZoneWorldPosition() -> SIMD3<Float> {

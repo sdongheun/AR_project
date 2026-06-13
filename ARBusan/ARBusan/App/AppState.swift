@@ -202,6 +202,12 @@ final class AppState: ObservableObject {
     @Published var isPhotoZoneActive = false
     /// 포토존에 띄울 관광지 이름(진입 시 도착 핀에서 확정).
     @Published var photoZoneSpotName: String?
+    /// 포토존 대상 관광지 ID(스탬프 획득에 사용).
+    @Published var photoZoneSpotID: TourismSpot.ID?
+    /// 증가할 때마다 ARViewContainer가 ARView 스냅샷 촬영을 수행한다.
+    @Published private(set) var photoCaptureRequestID = 0
+    /// 촬영/스탬프 결과 알림(예: "사진 저장 + 스탬프 획득"). 자동 해제.
+    @Published var photoCaptureNotice: String?
     @Published var navigationGuidanceIsConservative = false
     /// ARKit 트래킹이 limited/notAvailable이면 true. 이때 3D 안내(도착 핀)를 숨긴다.
     @Published var arTrackingLimited = false
@@ -735,6 +741,7 @@ final class AppState: ObservableObject {
             navigationDestinationOverlay = nil
             isPhotoZoneActive = false
             photoZoneSpotName = nil
+            photoZoneSpotID = nil
             offRouteSince = nil
             lastRerouteAt = nil
             isRerouting = false
@@ -2228,16 +2235,37 @@ final class AppState: ObservableObject {
 
     /// 근거리 도착 3D 핀 터치 시 진입. 도착 핀(근거리)이 있을 때만 — 관광지 이름으로 포토존 타이포를 띄운다.
     func enterPhotoZone() {
-        guard isNavigationModeEnabled, let name = arrivalPin?.spotName, !name.isEmpty else {
+        guard isNavigationModeEnabled, let pin = arrivalPin, !pin.spotName.isEmpty else {
             return
         }
-        photoZoneSpotName = name
+        photoZoneSpotName = pin.spotName
+        photoZoneSpotID = pin.spotID
         isPhotoZoneActive = true
     }
 
     func exitPhotoZone() {
         isPhotoZoneActive = false
         photoZoneSpotName = nil
+        photoZoneSpotID = nil
+    }
+
+    /// 셔터 → ARView 스냅샷 촬영 트리거(실제 촬영/저장은 ARViewContainer가 수행).
+    func requestPhotoCapture() {
+        guard isPhotoZoneActive else {
+            return
+        }
+        photoCaptureRequestID += 1
+    }
+
+    /// 촬영/스탬프 결과 알림을 잠깐 표시한다(2.5초 자동 해제).
+    func showPhotoCaptureNotice(_ text: String) {
+        photoCaptureNotice = text
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            if self?.photoCaptureNotice == text {
+                self?.photoCaptureNotice = nil
+            }
+        }
     }
 
     private func updateNavigationGuidance(
