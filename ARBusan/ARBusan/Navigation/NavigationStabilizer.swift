@@ -38,28 +38,6 @@ enum RouteGeometry {
         return best
     }
 
-    /// 기준 좌표가 경로 폴리라인의 몇 번째 세그먼트에 가장 가깝게 투영되는지(0-based 세그먼트 인덱스).
-    /// 좌표가 2개 미만이면 0. "최근접 정점"과 달리 진행도(예: 첫 회전 통과 여부) 비교에 안전하다
-    /// — 회전 직전이면 최근접 정점이 회전점이 돼 조기 종료되는 문제를 피한다.
-    static func nearestSegmentIndex(
-        from coordinate: CLLocationCoordinate2D,
-        routeCoordinates: [CLLocationCoordinate2D]
-    ) -> Int {
-        guard routeCoordinates.count >= 2 else {
-            return 0
-        }
-        let frame = PlanarFrame(reference: coordinate)
-        var bestIndex = 0
-        var bestDistance = Double.greatestFiniteMagnitude
-        for index in 0..<(routeCoordinates.count - 1) {
-            let projected = frame.projectOntoSegment(start: routeCoordinates[index], end: routeCoordinates[index + 1])
-            if projected.distanceMeters < bestDistance {
-                bestDistance = projected.distanceMeters
-                bestIndex = index
-            }
-        }
-        return bestIndex
-    }
 
     /// 회전 지점까지의 거리가 오차 원을 고려할 때 turn boundary 안에 들어오는지 판단한다.
     /// 위치를 점 하나가 아니라 `현재 위치 + horizontalAccuracy` 오차 원으로 보고,

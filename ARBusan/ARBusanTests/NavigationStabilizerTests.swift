@@ -37,15 +37,6 @@ final class NavigationStabilizerTests: XCTestCase {
         XCTAssertEqual(result.distanceMeters, 10, accuracy: 0.5)
     }
 
-    func testNearestSegmentIndexPicksSegmentNotNearestVertex() {
-        // ㄱ자 경로: 남→북(seg0), 북→동(seg1). 회전점(0,10) 5m 앞(0,5)에서는 seg0이 가장 가깝다
-        // (최근접 정점이라면 회전점 정점을 골라 조기 종료될 위치).
-        let route = [offset(east: 0, north: 0), offset(east: 0, north: 10), offset(east: 10, north: 10)]
-        XCTAssertEqual(RouteGeometry.nearestSegmentIndex(from: offset(east: 0, north: 5), routeCoordinates: route), 0)
-        // 회전 후 구간(5,10)에서는 seg1.
-        XCTAssertEqual(RouteGeometry.nearestSegmentIndex(from: offset(east: 5, north: 10), routeCoordinates: route), 1)
-    }
-
     func testShouldAutoRerouteOnlyWhenFarOffSustainedAndCoolerDown() {
         let start = Date(timeIntervalSince1970: 0)
         // 임계값(40m) 이하 → 안 함.

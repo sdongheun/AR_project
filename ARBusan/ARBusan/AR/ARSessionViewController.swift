@@ -10,17 +10,9 @@ final class ARSessionViewController: UIViewController {
         let labelEntity: Entity
     }
 
-    private struct RouteArrowRenderNode {
-        let anchorEntity: AnchorEntity
-        let arrowEntities: [Entity]
-        let turnDirections: [RouteTurnDirection]
-    }
-
     private var arView: ARView!
     private let geospatialSessionManager: GeospatialSessionManager
     private var geospatialDebugNodesByID: [UUID: GeospatialDebugRenderNode] = [:]
-    private var routeArrowNode: RouteArrowRenderNode?
-    private var latestRouteArrowPath: RouteArrowPathSnapshot?
     private var arrivalPinAnchor: AnchorEntity?
     private var latestArrivalPin: ArrivalPinSnapshot?
     private var arrivalPinNameLabel: Entity?
@@ -29,11 +21,6 @@ final class ARSessionViewController: UIViewController {
     private var pinWorldLocked = false
     private let arrivalPinHeightOffset: Float = -0.3
     private let pinWorldLockMaxRenderMeters: Float = 30  // 공간 고정 배치 거리 상한
-    // 회전 chevron: 주행 방향 앵커링(시선 비추종). 카메라 위치+높이 기준 전방에 배치.
-    // 거리감을 위해 실제 회전 거리에 비례해 배치하되, 너무 멀거나 가까우면 보기 나쁘므로 클램프.
-    private let routeArrowMinRenderDistanceMeters: Float = 2.5
-    private let routeArrowMaxRenderDistanceMeters: Float = 12
-    private let routeArrowHeightOffset: Float = -0.05
     // 카메라 영상 해상도 선호. 기본은 저해상도(발열 절감), 토글로 고해상도 전환 가능.
     private var prefersHighResolutionCamera = false
     private let markerScreenScalePerMeter: Float = 0.085
@@ -54,7 +41,6 @@ final class ARSessionViewController: UIViewController {
     var onCameraHeadingUpdated: ((Double) -> Void)?
     var onCameraPoseUpdated: ((CameraPoseSnapshot) -> Void)?
     var onCameraProjectionUpdated: ((CameraProjectionSnapshot) -> Void)?
-    var onRouteArrowRenderStatusUpdated: ((String) -> Void)?
     var onTrackingStateChanged: ((Bool, String) -> Void)?
     private var lastTrackingLimited: Bool?
     private var lastTrackingReason = ""
@@ -277,159 +263,6 @@ final class ARSessionViewController: UIViewController {
             arrivalPinNameLabel.look(at: cameraWorldPosition, from: labelWorld, relativeTo: nil)
             arrivalPinNameLabel.orientation *= simd_quatf(angle: .pi, axis: SIMD3<Float>(0, 1, 0))
         }
-    }
-
-    func setRouteArrowPath(_ path: RouteArrowPathSnapshot?) {
-        latestRouteArrowPath = path
-        applyRouteArrowPath(path)
-    }
-
-    private func applyRouteArrowPath(_ path: RouteArrowPathSnapshot?) {
-        guard let path, !path.arrows.isEmpty else {
-            if let routeArrowNode {
-                arView.scene.removeAnchor(routeArrowNode.anchorEntity)
-                self.routeArrowNode = nil
-                onRouteArrowRenderStatusUpdated?("RealityKit 화살표 제거 / routeArrowPath nil 또는 0개")
-            } else {
-                onRouteArrowRenderStatusUpdated?("RealityKit 화살표 없음 / routeArrowPath nil 또는 0개")
-            }
-            return
-        }
-
-        if let routeArrowNode,
-           routeArrowNode.arrowEntities.count == path.arrows.count,
-           routeArrowNode.turnDirections == path.arrows.map(\.turnDirection) {
-            onRouteArrowRenderStatusUpdated?("\(path.spotName) RealityKit 회전 화살표 유지 / \(path.arrows.count)개 / 주행 방향 앵커(기기 높이)")
-            return
-        }
-
-        if let routeArrowNode {
-            arView.scene.removeAnchor(routeArrowNode.anchorEntity)
-        }
-
-        // 월드 앵커. 위치/방향은 매 프레임 updateRouteArrowPlacement에서 카메라 위치 + 주행 방위로 갱신한다(시선 비추종).
-        let anchor = AnchorEntity(world: .zero)
-        let arrows = path.arrows.map { snapshot -> Entity in
-            let arrow = makeRouteArrowEntity(turnDirection: snapshot.turnDirection)
-            arrow.position = .zero
-            anchor.addChild(arrow)
-            return arrow
-        }
-        routeArrowNode = RouteArrowRenderNode(
-            anchorEntity: anchor,
-            arrowEntities: arrows,
-            turnDirections: path.arrows.map(\.turnDirection)
-        )
-        arView.scene.addAnchor(anchor)
-        onRouteArrowRenderStatusUpdated?("\(path.spotName) RealityKit 회전 화살표 생성 / \(arrows.count)개 / 주행 방향 앵커(기기 높이)")
-    }
-
-    private func updateRouteArrowPlacement(from frame: ARFrame) {
-        guard let routeArrowNode,
-              let arrow = latestRouteArrowPath?.arrows.first else {
-            return
-        }
-
-        let bearing = arrow.bearingDegrees
-        // 실제 회전 거리에 비례해 배치(가까워지면 화살표도 가까워짐). 보기 위해 2.5~12m로 클램프.
-        let renderDistance = min(
-            max(Float(arrow.distanceFromOriginMeters), routeArrowMinRenderDistanceMeters),
-            routeArrowMaxRenderDistanceMeters
-        )
-        let cameraColumn = frame.camera.transform.columns.3
-        let cameraWorldPosition = SIMD3<Float>(cameraColumn.x, cameraColumn.y, cameraColumn.z)
-        routeArrowNode.anchorEntity.transform.translation = TravelDirectionAnchor.worldPosition(
-            cameraWorldPosition: cameraWorldPosition,
-            bearingDegrees: bearing,
-            distanceMeters: renderDistance,
-            heightOffsetMeters: routeArrowHeightOffset
-        )
-        // 패널 콘텐츠면(+Z)이 사용자를 향하도록 회전. orientation(bearing)은 -Z를 주행 방위로,
-        // 즉 +Z(=chevron/텍스트 면)를 사용자 쪽으로 돌려 좌/우 chevron이 읽히게 한다.
-        routeArrowNode.anchorEntity.transform.rotation = TravelDirectionAnchor.orientation(bearingDegrees: bearing)
-    }
-
-    private func makeRouteArrowEntity(turnDirection: RouteTurnDirection) -> Entity {
-        let root = Entity()
-        let isRightTurn = turnDirection == .right
-        let material = SimpleMaterial(color: .systemBlue.withAlphaComponent(0.98), roughness: 0.12, isMetallic: false)
-        let glowMaterial = SimpleMaterial(color: .cyan.withAlphaComponent(0.28), roughness: 0.1, isMetallic: false)
-        let scale: Float = 1.85
-
-        let backing = ModelEntity(
-            mesh: .generateBox(size: SIMD3<Float>(2.9, 1.18, 0.045)),
-            materials: [glowMaterial]
-        )
-        backing.position = SIMD3<Float>(0, 0, -0.08)
-        root.addChild(backing)
-
-        let spacing: Float = 0.72
-        for index in 0..<3 {
-            let chevron = makeRouteChevronEntity(isRightTurn: isRightTurn, material: material)
-            chevron.position = SIMD3<Float>((Float(index) - 1) * spacing, 0, 0)
-            root.addChild(chevron)
-        }
-
-        let label = makeRouteArrowTextEntity(text: isRightTurn ? ">>>" : "<<<")
-        label.position = SIMD3<Float>(0, -0.62, 0.03)
-        root.addChild(label)
-        // 화면(카메라) 기준 보정 없음: 월드 앵커가 매 프레임 사용자를 향하도록 회전시킨다.
-        root.scale = SIMD3<Float>(repeating: scale)
-        return root
-    }
-
-    private func makeRouteChevronEntity(isRightTurn: Bool, material: SimpleMaterial) -> Entity {
-        ModelEntity(mesh: makeRouteChevronMesh(isRightTurn: isRightTurn), materials: [material])
-    }
-
-    private func makeRouteChevronMesh(isRightTurn: Bool) -> MeshResource {
-        var descriptor = MeshDescriptor()
-        let tipX: Float = isRightTurn ? 0.34 : -0.34
-        let tailX: Float = isRightTurn ? -0.34 : 0.34
-        let vertices: [SIMD3<Float>] = [
-            SIMD3<Float>(tipX, 0, 0.06),
-            SIMD3<Float>(tailX, 0.45, 0.06),
-            SIMD3<Float>(tailX, -0.45, 0.06),
-            SIMD3<Float>(tipX, 0, -0.06),
-            SIMD3<Float>(tailX, 0.45, -0.06),
-            SIMD3<Float>(tailX, -0.45, -0.06)
-        ]
-        descriptor.positions = MeshBuffers.Positions(vertices)
-        descriptor.primitives = .triangles([
-            0, 1, 2,
-            3, 5, 4,
-            0, 3, 4,
-            0, 4, 1,
-            1, 4, 5,
-            1, 5, 2,
-            2, 5, 3,
-            2, 3, 0
-        ])
-        return try! MeshResource.generate(from: [descriptor])
-    }
-
-    private func makeRouteArrowTextEntity(text: String) -> Entity {
-        let root = Entity()
-        let textMesh = MeshResource.generateText(
-            text,
-            extrusionDepth: 0.018,
-            font: .systemFont(ofSize: 0.3, weight: .black),
-            containerFrame: CGRect(x: -0.7, y: -0.16, width: 1.4, height: 0.32),
-            alignment: .center,
-            lineBreakMode: .byClipping
-        )
-        let shadow = ModelEntity(
-            mesh: textMesh,
-            materials: [SimpleMaterial(color: UIColor.black.withAlphaComponent(0.76), roughness: 0.18, isMetallic: false)]
-        )
-        shadow.position = SIMD3<Float>(0.018, -0.014, -0.018)
-        let label = ModelEntity(
-            mesh: textMesh,
-            materials: [SimpleMaterial(color: UIColor.white, roughness: 0.1, isMetallic: false)]
-        )
-        root.addChild(shadow)
-        root.addChild(label)
-        return root
     }
 
     private func updateGeospatialDebugAnchors(_ snapshots: [GeospatialDebugAnchorSnapshot]) {
@@ -681,7 +514,6 @@ extension ARSessionViewController: ARSessionDelegate {
         geospatialSessionManager.update(with: frame)
         publishTrackingStateIfChanged(from: frame)
         updateGeospatialDebugVisualsForCamera()
-        updateRouteArrowPlacement(from: frame)
         updateArrivalPinPlacement(from: frame)
         publishCameraHeadingIfNeeded(from: frame)
         publishCameraProjectionIfNeeded(from: frame)

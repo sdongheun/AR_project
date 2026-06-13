@@ -11,7 +11,6 @@ final class RouteArrowIndoorDebugTests: XCTestCase {
 
         XCTAssertNil(fixture.appState.arrivalPin)
         XCTAssertNotNil(fixture.appState.navigationDestinationOverlay)
-        XCTAssertNil(fixture.appState.routeArrowPath)
     }
 
     func testNearDestinationShows3DPinNotOverlay() throws {
@@ -75,20 +74,19 @@ final class RouteArrowIndoorDebugTests: XCTestCase {
         let pin = try XCTUnwrap(appState.arrivalPin)
         XCTAssertEqual(pin.spotID, spot.id)
         XCTAssertLessThanOrEqual(pin.distanceMeters, 10)
-        XCTAssertNil(appState.routeArrowPath)
         XCTAssertTrue(appState.edgeMarkerOverlays.isEmpty)
         XCTAssertTrue(appState.navigationGuidanceIsArrivalNearby)
     }
 
-    func testTrackingLimitedHidesArrowAndBanner() {
-        // AR 트래킹이 불안정하면 3D 안내를 모두 끄고 보수 텍스트로 강등한다(§4-B).
+    func testTrackingLimitedHidesDestinationGuidance() {
+        // AR 트래킹이 불안정하면 3D 핀/2D 목적지 표시를 모두 끄고 보수 텍스트로 강등한다(§4-B).
         let fixture = makeRightTurnFixture(originNorthOffsetMeters: -5)
         fixture.appState.arTrackingLimited = true
 
         fixture.appState.updateCameraHeading(0)
 
-        XCTAssertNil(fixture.appState.routeArrowPath)
-        XCTAssertNil(fixture.appState.navigationTurnBanner)
+        XCTAssertNil(fixture.appState.arrivalPin)
+        XCTAssertNil(fixture.appState.navigationDestinationOverlay)
         XCTAssertTrue(fixture.appState.navigationGuidanceIsConservative)
     }
 
@@ -191,78 +189,6 @@ final class RouteArrowIndoorDebugTests: XCTestCase {
         return (appState, spot)
     }
 
-    private func makeSmallAngleRightTurnFixture(
-        includeManeuver: Bool,
-        turnType: Int = 13
-    ) -> (appState: AppState, spot: TourismSpot) {
-        let turnCoordinate = CLLocationCoordinate2D(latitude: 35.245700, longitude: 128.904000)
-        let turnOrigin = LocationSnapshot(
-            latitude: turnCoordinate.latitude,
-            longitude: turnCoordinate.longitude,
-            altitude: nil,
-            horizontalAccuracy: 1,
-            verticalAccuracy: nil,
-            heading: nil,
-            headingAccuracy: nil,
-            source: .arCoreGeospatial,
-            capturedAt: Date()
-        )
-        // 진입: 남쪽에서 북쪽으로. 진출: 북에서 동쪽으로 30도만 꺾임(작은 각도).
-        let incoming = LocalENUProjector.coordinate(eastMeters: 0, northMeters: -10, from: turnOrigin)
-        let outgoing = LocalENUProjector.coordinate(eastMeters: 4, northMeters: 6.9, from: turnOrigin)
-        let originCoordinate = LocalENUProjector.coordinate(eastMeters: 0, northMeters: -5, from: turnOrigin)
-        let routeCoordinates = [incoming, turnCoordinate, outgoing]
-
-        let spot = TourismSpot(
-            id: "maneuver-small-angle-target",
-            name: "갈림길 테스트 목적지",
-            address: "실내 디버그",
-            districtName: "테스트",
-            category: "길찾기",
-            source: .mock,
-            geometryKind: .point,
-            center: outgoing,
-            recognitionHints: ["갈림길 테스트 목적지"],
-            notes: "작은 각도 + TMAP 안내점 회전 테스트"
-        )
-        let origin = LocationSnapshot(
-            latitude: originCoordinate.latitude,
-            longitude: originCoordinate.longitude,
-            altitude: nil,
-            horizontalAccuracy: 1,
-            verticalAccuracy: nil,
-            heading: nil,
-            headingAccuracy: nil,
-            source: .arCoreGeospatial,
-            capturedAt: Date()
-        )
-        let maneuvers: [TMAPRouteManeuver] = includeManeuver
-            ? [TMAPRouteManeuver(coordinate: turnCoordinate, turnType: turnType, kind: .from(turnType: turnType), description: "회전")]
-            : []
-        let route = TMAPPedestrianRoute(
-            destinationName: spot.name,
-            requestedStart: originCoordinate,
-            requestedDestination: spot.center,
-            arrivalCoordinate: outgoing,
-            routeCoordinates: routeCoordinates,
-            totalDistanceMeters: nil,
-            totalTimeSeconds: nil,
-            maneuvers: maneuvers
-        )
-        let appState = AppState(spots: [spot])
-        appState.spots = [spot]
-        appState.selectedSpot = spot
-        appState.navigationDestinationSpotID = spot.id
-        appState.isNavigationModeEnabled = true
-        appState.isIndoorDebugModeEnabled = true
-        appState.latestLocationSnapshot = origin
-        appState.latestGeospatialLocationSnapshot = origin
-        appState.locationConfidence = .high
-        appState.effectiveSpatialConfidence = .high
-        appState.tmapArrivalRoutesBySpotID[spot.id] = route
-        return (appState, spot)
-    }
-
     private func makeRightTurnFixture(
         originNorthOffsetMeters: Double
     ) -> (appState: AppState, spot: TourismSpot) {
@@ -322,82 +248,6 @@ final class RouteArrowIndoorDebugTests: XCTestCase {
             requestedDestination: spot.center,
             arrivalCoordinate: spot.center,
             routeCoordinates: [routeStart, turnCoordinate, routeEnd],
-            totalDistanceMeters: nil,
-            totalTimeSeconds: nil
-        )
-        let appState = AppState(spots: [spot])
-        appState.spots = [spot]
-        appState.selectedSpot = spot
-        appState.navigationDestinationSpotID = spot.id
-        appState.isNavigationModeEnabled = true
-        appState.isIndoorDebugModeEnabled = true
-        appState.latestLocationSnapshot = origin
-        appState.latestGeospatialLocationSnapshot = origin
-        appState.locationConfidence = .high
-        appState.effectiveSpatialConfidence = .high
-        appState.tmapArrivalRoutesBySpotID[spot.id] = route
-        return (appState, spot)
-    }
-
-    private func makeSegmentedLeftTurnFixture() -> (appState: AppState, spot: TourismSpot) {
-        let turnCoordinate = CLLocationCoordinate2D(latitude: 35.245700, longitude: 128.904000)
-        let turnOrigin = LocationSnapshot(
-            latitude: turnCoordinate.latitude,
-            longitude: turnCoordinate.longitude,
-            altitude: nil,
-            horizontalAccuracy: 1,
-            verticalAccuracy: nil,
-            heading: nil,
-            headingAccuracy: nil,
-            source: .arCoreGeospatial,
-            capturedAt: Date()
-        )
-
-        // 회전점 주변은 촘촘한 세그먼트로 두되, 도착점은 도착 반경(10m) 밖이 되도록 멀리 둔다.
-        let routeCoordinates = [
-            LocalENUProjector.coordinate(eastMeters: 0, northMeters: -8, from: turnOrigin),
-            LocalENUProjector.coordinate(eastMeters: 0, northMeters: -5, from: turnOrigin),
-            LocalENUProjector.coordinate(eastMeters: 0, northMeters: -2, from: turnOrigin),
-            turnCoordinate,
-            LocalENUProjector.coordinate(eastMeters: -2, northMeters: 0, from: turnOrigin),
-            LocalENUProjector.coordinate(eastMeters: -5, northMeters: 0, from: turnOrigin),
-            LocalENUProjector.coordinate(eastMeters: -8, northMeters: 0, from: turnOrigin),
-            LocalENUProjector.coordinate(eastMeters: -20, northMeters: 0, from: turnOrigin)
-        ]
-        let originCoordinate = LocalENUProjector.coordinate(
-            eastMeters: 0,
-            northMeters: -5,
-            from: turnOrigin
-        )
-        let spot = TourismSpot(
-            id: "segmented-left-turn-target",
-            name: "좌회전 테스트 목적지",
-            address: "실내 디버그",
-            districtName: "테스트",
-            category: "길찾기",
-            source: .mock,
-            geometryKind: .point,
-            center: routeCoordinates.last!,
-            recognitionHints: ["좌회전 테스트 목적지"],
-            notes: "짧은 세그먼트 좌회전 경로 테스트"
-        )
-        let origin = LocationSnapshot(
-            latitude: originCoordinate.latitude,
-            longitude: originCoordinate.longitude,
-            altitude: nil,
-            horizontalAccuracy: 1,
-            verticalAccuracy: nil,
-            heading: nil,
-            headingAccuracy: nil,
-            source: .arCoreGeospatial,
-            capturedAt: Date()
-        )
-        let route = TMAPPedestrianRoute(
-            destinationName: spot.name,
-            requestedStart: originCoordinate,
-            requestedDestination: spot.center,
-            arrivalCoordinate: spot.center,
-            routeCoordinates: routeCoordinates,
             totalDistanceMeters: nil,
             totalTimeSeconds: nil
         )

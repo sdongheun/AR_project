@@ -869,7 +869,7 @@ struct ARExploreView: View {
                     .disabled(appState.isRecalibratingNorth)
                     .position(
                         x: safeWidth / 2,
-                        y: max(geometry.safeAreaInsets.top, 44) + (appState.navigationTurnBanner == nil ? 28 : 76)
+                        y: max(geometry.safeAreaInsets.top, 44) + 28
                     )
                     .transition(.opacity)
                     .animation(.easeOut(duration: 0.18), value: appState.headingMiscalibrated)
@@ -1169,9 +1169,11 @@ private struct IndoorNavigationDebugPanel: View {
     private var compactArrowStatus: some View {
         HStack(spacing: 8) {
             Circle()
-                .fill(appState.routeArrowPath == nil ? Color.orange : Color.green)
+                .fill((appState.arrivalPin != nil || appState.navigationDestinationOverlay != nil) ? Color.green : Color.orange)
                 .frame(width: 8, height: 8)
-            Text(appState.routeArrowPath == nil ? "3D 화살표 숨김" : "3D 화살표 활성")
+            Text(appState.arrivalPin != nil
+                 ? "목적지 핀(근거리)"
+                 : (appState.navigationDestinationOverlay != nil ? "목적지 표시(원거리)" : "목적지 안내 없음"))
                 .font(.caption.weight(.bold))
             Spacer(minLength: 0)
             Text(appState.cameraHeadingDegrees.map { "heading \(Int($0))도" } ?? "heading 대기")
@@ -1273,16 +1275,13 @@ private struct IndoorNavigationDebugPanel: View {
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
                     Circle()
-                        .fill(appState.routeArrowPath == nil ? Color.orange : Color.green)
+                        .fill((appState.arrivalPin != nil || appState.navigationDestinationOverlay != nil) ? Color.green : Color.orange)
                         .frame(width: 8, height: 8)
-                    Text(appState.routeArrowPath == nil ? "3D 화살표 숨김" : "3D 화살표 활성")
+                    Text(appState.arrivalPin != nil
+                         ? "목적지 핀(근거리)"
+                         : (appState.navigationDestinationOverlay != nil ? "목적지 표시(원거리)" : "목적지 안내 없음"))
                         .font(.caption.weight(.bold))
                     Spacer(minLength: 0)
-                    if let path = appState.routeArrowPath {
-                        Text("\(path.arrows.count)개")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                    }
                 }
 
                 Text(appState.routeArrowDiagnostics)
@@ -1722,11 +1721,6 @@ private struct ARViewContainer: UIViewControllerRepresentable {
         viewController.onCameraProjectionUpdated = { projection in
             appState.updateCameraProjection(projection)
         }
-        viewController.onRouteArrowRenderStatusUpdated = { diagnostics in
-            DispatchQueue.main.async {
-                appState.updateRouteArrowRenderDiagnostics(diagnostics)
-            }
-        }
         viewController.onTrackingStateChanged = { limited, reason in
             appState.updateARTrackingState(limited: limited, reason: reason)
         }
@@ -1736,7 +1730,6 @@ private struct ARViewContainer: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: ARSessionViewController, context: Context) {
         uiViewController.setShows3DGeospatialDebugMarker(appState.shows3DGeospatialDebugMarker)
         uiViewController.setPrefersHighResolutionCamera(appState.prefersHighResolutionCamera)
-        uiViewController.setRouteArrowPath(appState.routeArrowPath)
         uiViewController.setArrivalPin(appState.arrivalPin)
         // 북 재보정(§4-C): requestID가 바뀐 경우에만 세션을 리셋 재실행해 월드 북을 다시 고정한다.
         uiViewController.applyRecalibrationIfNeeded(requestID: appState.northRecalibrationRequestID)
