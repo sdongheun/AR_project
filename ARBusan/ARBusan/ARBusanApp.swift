@@ -10,6 +10,6 @@ struct ARBusanApp: App {
             MainMapHomeView()
                 .environmentObject(appState)
         }
-        .modelContainer(for: TourismSpotEntity.self)
+        .modelContainer(for: [TourismSpotEntity.self, StampRecord.self])
     }
 }
