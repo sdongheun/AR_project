@@ -50,63 +50,6 @@ enum RouteGeometry {
         return (distanceToTurnMeters - radius) <= boundaryMeters
     }
 
-    /// 곡선 리본(§3.2): 현재 위치 최근접점부터 전방으로 경로 폴리라인을 `spacing` 간격(arc-length)으로
-    /// `maxLength`까지 재샘플한 좌표들. 도로의 휘는 정도가 이 점들에 그대로 담긴다.
-    static func forwardRibbonSamples(
-        from origin: CLLocationCoordinate2D,
-        routeCoordinates: [CLLocationCoordinate2D],
-        spacingMeters: CLLocationDistance,
-        maxLengthMeters: CLLocationDistance
-    ) -> [CLLocationCoordinate2D] {
-        guard routeCoordinates.count >= 2, spacingMeters > 0, maxLengthMeters > 0 else {
-            return []
-        }
-
-        // 1) 최근접 세그먼트와 그 위 투영점.
-        var nearestSegment = 0
-        var nearestPoint = routeCoordinates[0]
-        var nearestDistance = Double.greatestFiniteMagnitude
-        let frame = PlanarFrame(reference: origin)
-        for index in 0..<(routeCoordinates.count - 1) {
-            let projected = frame.projectOntoSegment(start: routeCoordinates[index], end: routeCoordinates[index + 1])
-            if projected.distanceMeters < nearestDistance {
-                nearestDistance = projected.distanceMeters
-                nearestSegment = index
-                nearestPoint = projected.coordinate
-            }
-        }
-
-        // 2) 투영점부터 폴리라인을 따라 일정 간격으로 전진하며 샘플.
-        var samples: [CLLocationCoordinate2D] = [nearestPoint]
-        var cursor = nearestPoint
-        var segmentIndex = nearestSegment
-        var distanceToNextSample = spacingMeters
-        var totalLength = 0.0
-
-        while segmentIndex < routeCoordinates.count - 1, totalLength < maxLengthMeters {
-            let segmentEnd = routeCoordinates[segmentIndex + 1]
-            let segmentRemaining = planarDistanceMeters(cursor, segmentEnd)
-            if segmentRemaining < 1e-6 {
-                segmentIndex += 1
-                cursor = segmentEnd
-                continue
-            }
-            if segmentRemaining >= distanceToNextSample {
-                let ratio = distanceToNextSample / segmentRemaining
-                let sample = interpolateCoordinate(from: cursor, to: segmentEnd, ratio: ratio)
-                samples.append(sample)
-                totalLength += distanceToNextSample
-                cursor = sample
-                distanceToNextSample = spacingMeters
-            } else {
-                distanceToNextSample -= segmentRemaining
-                totalLength += segmentRemaining
-                cursor = segmentEnd
-                segmentIndex += 1
-            }
-        }
-        return samples
-    }
 }
 
 // MARK: - 경로 이탈 자동 재탐색 (§4-A)
@@ -512,19 +455,6 @@ private func planarDistanceMeters(_ a: CLLocationCoordinate2D, _ b: CLLocationCo
     let frame = PlanarFrame(reference: a)
     let xy = frame.toXY(b)
     return hypot(xy.x, xy.y)
-}
-
-/// 두 좌표 사이를 비율(0~1)로 선형 보간. 도시 스케일에서 충분히 정확.
-private func interpolateCoordinate(
-    from start: CLLocationCoordinate2D,
-    to end: CLLocationCoordinate2D,
-    ratio: Double
-) -> CLLocationCoordinate2D {
-    let clamped = max(0, min(1, ratio))
-    return CLLocationCoordinate2D(
-        latitude: start.latitude + (end.latitude - start.latitude) * clamped,
-        longitude: start.longitude + (end.longitude - start.longitude) * clamped
-    )
 }
 
 /// 두 좌표 사이의 평면 근사 방위각(도, 북=0, 동=90).

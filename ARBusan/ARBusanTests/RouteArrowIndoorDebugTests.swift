@@ -104,11 +104,9 @@ final class RouteArrowIndoorDebugTests: XCTestCase {
         XCTAssertNil(appState.routeArrowPath)
         XCTAssertTrue(appState.edgeMarkerOverlays.isEmpty)
         XCTAssertTrue(appState.navigationGuidanceIsArrivalNearby)
-        // 도착 시에는 바닥 리본도 숨긴다.
-        XCTAssertNil(appState.routeRibbonPath)
     }
 
-    func testTrackingLimitedHidesArrowRibbonAndBanner() {
+    func testTrackingLimitedHidesArrowAndBanner() {
         // AR 트래킹이 불안정하면 3D 안내를 모두 끄고 보수 텍스트로 강등한다(§4-B).
         let fixture = makeRightTurnFixture(originNorthOffsetMeters: -5)
         fixture.appState.arTrackingLimited = true
@@ -116,7 +114,6 @@ final class RouteArrowIndoorDebugTests: XCTestCase {
         fixture.appState.updateCameraHeading(0)
 
         XCTAssertNil(fixture.appState.routeArrowPath)
-        XCTAssertNil(fixture.appState.routeRibbonPath)
         XCTAssertNil(fixture.appState.navigationTurnBanner)
         XCTAssertTrue(fixture.appState.navigationGuidanceIsConservative)
     }
@@ -153,18 +150,6 @@ final class RouteArrowIndoorDebugTests: XCTestCase {
         // 트래킹이 normal로 돌아오면 재보정 완료 처리.
         fixture.appState.updateARTrackingState(limited: false, reason: "정상")
         XCTAssertFalse(fixture.appState.isRecalibratingNorth)
-    }
-
-    func testRouteRibbonAppearsWhileGuiding() {
-        let fixture = makeRightTurnFixture(originNorthOffsetMeters: -5)
-
-        fixture.appState.updateCameraHeading(0)
-
-        // 안내 중(도착 전, 위치/heading 안정)에는 가는 방향 바닥 리본이 떠야 한다.
-        let ribbon = fixture.appState.routeRibbonPath
-        XCTAssertNotNil(ribbon)
-        // 길찾기 중에는 상단 2D 방향 라벨/edge marker를 숨긴다.
-        XCTAssertTrue(fixture.appState.edgeMarkerOverlays.isEmpty)
     }
 
     func testManeuverDrivesTurnArrowEvenForSmallAngle() throws {

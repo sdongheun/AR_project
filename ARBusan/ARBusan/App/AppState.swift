@@ -88,18 +88,6 @@ struct RouteArrowSnapshot: Identifiable, Equatable {
     let bearingDegrees: Double
 }
 
-/// 곡선 리본의 한 점. 현재 위치 기준 상대 방위/거리(§3.2).
-struct RouteRibbonPoint: Equatable {
-    let bearingDegrees: Double
-    let distanceMeters: Double
-}
-
-struct RouteRibbonSnapshot: Equatable {
-    let spotID: TourismSpot.ID
-    /// 전방 경로를 재샘플한 점들(현재 위치 기준 상대). 도로 곡률이 그대로 담긴다.
-    let points: [RouteRibbonPoint]
-}
-
 struct ArrivalPinSnapshot: Equatable {
     let spotID: TourismSpot.ID
     let spotName: String
@@ -223,7 +211,6 @@ final class AppState: ObservableObject {
     @Published var navigationGuidanceIsArrivalNearby = false
     @Published var navigationStabilityDiagnostics = "위치/방향 안정화를 아직 계산하지 않았습니다."
     @Published var arrivalPin: ArrivalPinSnapshot?
-    @Published var routeRibbonPath: RouteRibbonSnapshot?
     @Published var navigationGuidanceIsConservative = false
     /// 활성 회전 화살표가 있을 때의 카운트다운 안내("15m 후 우회전"). 없으면 nil.
     @Published var navigationTurnBanner: String?
@@ -315,8 +302,6 @@ final class AppState: ObservableObject {
     private let routeTurnAlignedThresholdDegrees: Double = 22
     private let routeArrowFacingToleranceDegrees: Double = 60
     private let routeTurnSampleDistanceMeters: CLLocationDistance = 6
-    private let ribbonSampleSpacingMeters: CLLocationDistance = 2
-    private let ribbonMaxLengthMeters: CLLocationDistance = 14
     // 경로 이탈 자동 재탐색(§4-A). 오탐을 피하려고 넉넉하게 잡는다.
     private let autoRerouteThresholdMeters: CLLocationDistance = 40
     private let autoRerouteSustainSeconds: TimeInterval = 8
@@ -766,7 +751,6 @@ final class AppState: ObservableObject {
             navigationRouteTaskSpotID = nil
             routeArrowPath = nil
             arrivalPin = nil
-            routeRibbonPath = nil
             navigationTurnBanner = nil
             offRouteSince = nil
             lastRerouteAt = nil
@@ -1952,9 +1936,8 @@ final class AppState: ObservableObject {
     }
 
     private func refreshRouteArrowPath() {
-        // 기본은 도착 핀/바닥 리본/회전 배너 없음. 아래 분기에서 안내 가능할 때만 다시 설정한다.
+        // 기본은 도착 핀/회전 배너 없음. 아래 분기에서 안내 가능할 때만 다시 설정한다.
         arrivalPin = nil
-        routeRibbonPath = nil
         navigationTurnBanner = nil
         guard isNavigationModeEnabled else {
             routeArrowPath = nil
@@ -2043,14 +2026,6 @@ final class AppState: ObservableObject {
             updateNavigationGuidance(for: route, targetSpot: targetSpot, origin: guidedOrigin, guidanceFix: guidanceFix)
             return
         }
-
-        // 안내 중(도착 전): 가는 방향으로 뻗는 바닥 리본을 계산한다. 위치/heading이 불안정하면 숨긴다.
-        routeRibbonPath = navigationRibbonSnapshot(
-            for: route,
-            targetSpot: targetSpot,
-            origin: guidedOrigin,
-            guidanceFix: guidanceFix
-        )
 
         let arrows = routeArrowSnapshots(
             for: route,
@@ -2316,48 +2291,6 @@ final class AppState: ObservableObject {
     ) {
         let guidance = navigationGuidance(for: route, targetSpot: targetSpot, origin: origin, guidanceFix: guidanceFix)
         setNavigationGuidance(guidance)
-    }
-
-    /// 가는 방향(다음 안내점 방위)으로 뻗는 바닥 리본. 위치 불안정 또는 heading 신뢰 불가 시 nil(숨김).
-    private func navigationRibbonSnapshot(
-        for route: TMAPPedestrianRoute,
-        targetSpot: TourismSpot,
-        origin: LocationSnapshot,
-        guidanceFix: GuidanceFix
-    ) -> RouteRibbonSnapshot? {
-        guard guidanceFix.allowsTurnCommitment else {
-            return nil
-        }
-
-        let facing = HeadingGuidance.facingEstimate(
-            compassHeadingDegrees: cameraHeadingDegrees,
-            compassDeltaDegrees: cameraHeadingDeltaDegrees,
-            movementBearingDegrees: movementTracker.movementBearingDegrees,
-            isWalking: movementTracker.isWalking(now: Date()),
-            instabilityThresholdDegrees: headingInstabilityThresholdDegrees
-        )
-        guard facing.isConfident else {
-            return nil
-        }
-
-        // 곡선 리본(§3.2): 전방 경로를 재샘플해 도로 곡률을 그대로 담는다.
-        let samples = RouteGeometry.forwardRibbonSamples(
-            from: origin.coordinate,
-            routeCoordinates: route.routeCoordinates,
-            spacingMeters: ribbonSampleSpacingMeters,
-            maxLengthMeters: ribbonMaxLengthMeters
-        )
-        guard samples.count >= 2 else {
-            return nil
-        }
-
-        let points = samples.map { sample in
-            RouteRibbonPoint(
-                bearingDegrees: origin.coordinate.bearing(to: sample),
-                distanceMeters: origin.coordinate.distance(to: sample)
-            )
-        }
-        return RouteRibbonSnapshot(spotID: targetSpot.id, points: points)
     }
 
     private func setNavigationGuidance(_ guidance: NavigationGuidance) {

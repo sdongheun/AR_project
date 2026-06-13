@@ -1742,7 +1742,6 @@ private struct ARViewContainer: UIViewControllerRepresentable {
         uiViewController.setShows3DGeospatialDebugMarker(appState.shows3DGeospatialDebugMarker)
         uiViewController.setPrefersHighResolutionCamera(appState.prefersHighResolutionCamera)
         uiViewController.setRouteArrowPath(appState.routeArrowPath)
-        uiViewController.setRouteRibbon(appState.routeRibbonPath)
         uiViewController.setArrivalPin(appState.arrivalPin)
         // 북 재보정(§4-C): requestID가 바뀐 경우에만 세션을 리셋 재실행해 월드 북을 다시 고정한다.
         uiViewController.applyRecalibrationIfNeeded(requestID: appState.northRecalibrationRequestID)
