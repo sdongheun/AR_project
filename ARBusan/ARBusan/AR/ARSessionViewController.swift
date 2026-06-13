@@ -25,9 +25,11 @@ final class ARSessionViewController: UIViewController {
     private var latestArrivalPin: ArrivalPinSnapshot?
     private var arrivalPinNameLabel: Entity?
     private var currentPinSpotName: String?
+    private var currentPinIsWorldLocked: Bool?
     // 공간 고정 상태: 한 번 실제 거리에 박으면 위치를 재계산하지 않고 VIO가 잡게 둔다.
     private var pinWorldLocked = false
     private let arrivalPinHeightOffset: Float = -0.3
+    private let beaconHeightOffset: Float = -1.0         // 방향 화살표 비콘: 바닥 느낌으로 약간 낮게
     private let pinBeaconDistanceMeters: Float = 10      // 비콘: 내 앞 고정 거리
     private let pinWorldLockMaxRenderMeters: Float = 30  // 공간 고정 배치 거리 상한
     // 회전 chevron: 주행 방향 앵커링(시선 비추종). 카메라 위치+높이 기준 전방에 배치.
@@ -166,23 +168,72 @@ final class ARSessionViewController: UIViewController {
             latestArrivalPin = nil
             arrivalPinNameLabel = nil
             currentPinSpotName = nil
+            currentPinIsWorldLocked = nil
             pinWorldLocked = false
             return
         }
 
-        // 앵커가 없거나 목적지가 바뀌면 핀(빨간 지도 핀 + 이름 라벨)을 새로 만든다.
-        if arrivalPinAnchor == nil || pin.spotName != currentPinSpotName {
+        // 앵커가 없거나 목적지/모드(비콘↔공간고정)가 바뀌면 새로 만든다.
+        // 비콘 = 방향 화살표(길안내 보조), 공간고정 = 빨간 도착 핀 + 이름.
+        if arrivalPinAnchor == nil
+            || pin.spotName != currentPinSpotName
+            || pin.isWorldLocked != currentPinIsWorldLocked {
             if let arrivalPinAnchor {
                 arView.scene.removeAnchor(arrivalPinAnchor)
             }
             let anchor = AnchorEntity(world: .zero)
-            anchor.addChild(makeArrivalPinEntity(name: pin.spotName))
+            if pin.isWorldLocked {
+                anchor.addChild(makeArrivalPinEntity(name: pin.spotName))
+            } else {
+                arrivalPinNameLabel = nil
+                anchor.addChild(makeDirectionBeaconEntity())
+            }
             arView.scene.addAnchor(anchor)
             arrivalPinAnchor = anchor
             currentPinSpotName = pin.spotName
+            currentPinIsWorldLocked = pin.isWorldLocked
             pinWorldLocked = false
         }
         latestArrivalPin = pin
+    }
+
+    // 방향 화살표 비콘: 가는 방위로 향하는 납작한 화살표(시안). 길안내 보조용.
+    // 앵커를 bearing으로 회전(-Z=주행 방위)시키므로 메시는 -Z를 향하게 만든다.
+    private func makeDirectionBeaconEntity() -> Entity {
+        let root = Entity()
+        let arrowMaterial = SimpleMaterial(color: .cyan.withAlphaComponent(0.95), roughness: 0.15, isMetallic: false)
+        let glowMaterial = SimpleMaterial(color: .systemBlue.withAlphaComponent(0.3), roughness: 0.1, isMetallic: false)
+        let arrow = ModelEntity(mesh: makeForwardArrowMesh(), materials: [arrowMaterial])
+        let glow = ModelEntity(mesh: makeForwardArrowMesh(), materials: [glowMaterial])
+        glow.scale = SIMD3<Float>(repeating: 1.25)
+        glow.position = SIMD3<Float>(0, -0.02, 0)
+        root.addChild(glow)
+        root.addChild(arrow)
+        root.scale = SIMD3<Float>(repeating: 2.0)
+        return root
+    }
+
+    // 수평면(XZ)에 누운 전방(-Z) 화살표. 양면 삼각형으로 컬링 무관 가시.
+    private func makeForwardArrowMesh() -> MeshResource {
+        let tip = SIMD3<Float>(0, 0, -0.9)
+        let headL = SIMD3<Float>(-0.5, 0, -0.2)
+        let headR = SIMD3<Float>(0.5, 0, -0.2)
+        let shaftBL = SIMD3<Float>(-0.18, 0, -0.2)
+        let shaftBR = SIMD3<Float>(0.18, 0, -0.2)
+        let shaftTL = SIMD3<Float>(-0.18, 0, 0.7)
+        let shaftTR = SIMD3<Float>(0.18, 0, 0.7)
+        let positions: [SIMD3<Float>] = [tip, headL, headR, shaftBL, shaftBR, shaftTL, shaftTR]
+        var descriptor = MeshDescriptor(name: "directionBeaconArrow")
+        descriptor.positions = MeshBuffers.Positions(positions)
+        descriptor.normals = MeshBuffers.Normals(Array(repeating: SIMD3<Float>(0, 1, 0), count: positions.count))
+        // 윗면 + 아랫면(역순) 양면.
+        descriptor.primitives = .triangles([
+            0, 2, 1,            // head (top)
+            3, 4, 6, 3, 6, 5,   // shaft (top)
+            0, 1, 2,            // head (bottom)
+            3, 6, 4, 3, 5, 6    // shaft (bottom)
+        ])
+        return (try? MeshResource.generate(from: [descriptor])) ?? .generateBox(size: 0.2)
     }
 
     // 빨간 지도 핀(둥근 머리 + 아래 막대) + 목적지 이름 큰 텍스트. 축대칭이라 yaw 불필요(중력 정렬).
@@ -271,15 +322,15 @@ final class ARSessionViewController: UIViewController {
                 pinWorldLocked = true
             }
         } else {
-            // 비콘: 매 프레임 목적지 방위로 내 앞 고정 거리에 둔다(위치 오차 영향 최소).
+            // 비콘(방향 화살표): 매 프레임 목적지 방위로 내 앞 고정 거리에 두고, 화살표가 그 방위를 향하게 회전.
             pinWorldLocked = false
             arrivalPinAnchor.transform.translation = TravelDirectionAnchor.worldPosition(
                 cameraWorldPosition: cameraWorldPosition,
                 bearingDegrees: latestArrivalPin.bearingDegrees,
                 distanceMeters: pinBeaconDistanceMeters,
-                heightOffsetMeters: arrivalPinHeightOffset
+                heightOffsetMeters: beaconHeightOffset
             )
-            arrivalPinAnchor.transform.rotation = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
+            arrivalPinAnchor.transform.rotation = TravelDirectionAnchor.orientation(bearingDegrees: latestArrivalPin.bearingDegrees)
         }
 
         // 이름 라벨은 항상 카메라를 바라보게(빌보드).
