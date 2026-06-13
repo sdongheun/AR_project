@@ -201,6 +201,7 @@ ARBusan/Config/Secrets.local.xcconfig
 - 견고성 §4-B(트래킹 상실 대응): ARKit `trackingState`가 limited/notAvailable이면 `AppState.arTrackingLimited`로 길찾기 3D 안내(리본/화살표/도착 핀/배너)를 숨기고 "AR 추적 불안정" 텍스트로 강등한다(`ARSessionViewController.onTrackingStateChanged` → `updateARTrackingState`).
 - 견고성 §4-C(북 재보정): **감지 자동 + 보정 수동**. 신뢰 가능한 나침반(`CLHeading.trueHeading`, 정확도 ≤ 20°)과 ARKit 월드 heading이 25° 넘게 6초 지속 발산하면(`NorthCalibration.shouldFlagMiscalibration`) `AppState.headingMiscalibrated`로 회전 배너 아래 **"방향 보정" 배지**를 띄운다. 탭 → `requestNorthRecalibration`이 `northRecalibrationRequestID`를 올리고 `ARViewContainer`가 세션을 `[.resetTracking, .removeExistingAnchors]`로 재실행해 현재 나침반 기준으로 월드 북을 재고정(직후 §4-B로 잠시 강등, normal 복귀 시 완료). 세션 리셋이라 자동 실행 않고 사용자 확인. 소프트 yaw-오프셋 연속 보정은 후속.
 - 곡선 리본 1차(TURN_UX_RULES_V2 §3.2): 전방 경로를 `RouteGeometry.forwardRibbonSamples`로 arc-length 재샘플(2m 간격, 최대 14m)해 `RouteRibbonSnapshot.points`로 만들고, 렌더러가 좌/우 가장자리를 잇는 **단일 연속 메시**로 **도로 곡률을 그대로 따라가는 곡선 리본**을 그린다(시선 비추종, ~10Hz 재생성, 겹침 없어 Z-파이팅 깜빡임 없음). 약한 굽이(slight maneuver)는 화살표에서 제외(`isHardTurn`)하고 리본이 담당. Catmull-Rom 평활화·가변 길이·방향 흐름 애니메이션은 후속.
+- **제품 방향 재정렬(2026-06-13)**: 연속 AR 턴바이턴(곡선 리본)은 부산 측위 한계로 ~100% 정확도가 불가→"고장"으로 보여 실용성에 불리. **메인을 "카메라 관광지 인식→정보/콘텐츠"로, 길안내는 2D(TMAP) 주력 + AR은 3-순간(출발 방향·회전·도착)만 보조**로 재정렬. 작업 순서: ①길안내 수정(연속 리본 제거)→②카메라 관광지 정보. 근거·로드맵은 `docs/navigation/RIBBON_ARROW_NATURALNESS_SCENARIOS.md` §0. (아래 "곡선 리본 1차"는 강등됨/제거 예정, 이력 보존)
 - VPS는 건물 후보로 쓰지 않고 위치 정확도 신호로만 쓴다.
 - Polygon 후보는 브이월드 조회 결과가 있으면 실제 외곽 좌표 기반으로 반영한다.
 - 브이월드 Polygon 선택은 POI 포함 여부까지 개선됐다.
