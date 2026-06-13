@@ -49,6 +49,7 @@ final class ARSessionViewController: UIViewController {
     var onArrivalPinTapped: (() -> Void)?
     private var photoZoneAnchor: AnchorEntity?
     private var currentPhotoZoneText: String?
+    private var photoZoneGestures: [UIGestureRecognizer] = []
     private var lastTrackingLimited: Bool?
     private var lastTrackingReason = ""
     // 북 재보정(§4-C): AppState의 requestID가 바뀔 때만 세션을 재실행해 월드 북을 다시 고정한다.
@@ -249,11 +250,7 @@ final class ARSessionViewController: UIViewController {
     /// 포토존 텍스트 배치/제거. name이 있으면 카메라 앞 근거리에 한 번 박고(걸어서 각도), 도착 핀은 숨긴다.
     func setPhotoZoneText(_ name: String?) {
         guard let name, !name.isEmpty else {
-            if let photoZoneAnchor {
-                arView.scene.removeAnchor(photoZoneAnchor)
-                self.photoZoneAnchor = nil
-            }
-            currentPhotoZoneText = nil
+            clearPhotoZone()
             arrivalPinAnchor?.isEnabled = true
             return
         }
@@ -262,9 +259,7 @@ final class ARSessionViewController: UIViewController {
         guard name != currentPhotoZoneText else {
             return
         }
-        if let photoZoneAnchor {
-            arView.scene.removeAnchor(photoZoneAnchor)
-        }
+        clearPhotoZone()
         let anchor = AnchorEntity(world: photoZoneWorldPosition())
         let text = makePhotoZoneTextEntity(name: name)
         anchor.addChild(text)
@@ -274,8 +269,21 @@ final class ARSessionViewController: UIViewController {
             text.look(at: cameraPos, from: text.position(relativeTo: nil), relativeTo: nil)
             text.orientation *= simd_quatf(angle: .pi, axis: SIMD3<Float>(0, 1, 0))
         }
+        // 핀치(크기)·회전 제스처 설치. 이동(.translation)은 평면 의존이라 제외 → 걸어서 각도.
+        photoZoneGestures = arView.installGestures([.scale, .rotation], for: text)
+            .compactMap { $0 as? UIGestureRecognizer }
         photoZoneAnchor = anchor
         currentPhotoZoneText = name
+    }
+
+    private func clearPhotoZone() {
+        photoZoneGestures.forEach { arView.removeGestureRecognizer($0) }
+        photoZoneGestures = []
+        if let photoZoneAnchor {
+            arView.scene.removeAnchor(photoZoneAnchor)
+            self.photoZoneAnchor = nil
+        }
+        currentPhotoZoneText = nil
     }
 
     private func photoZoneWorldPosition() -> SIMD3<Float> {
@@ -299,8 +307,9 @@ final class ARSessionViewController: UIViewController {
     }
 
     // 관광지 이름 3D 타이포(네온 본체 + 어두운 그림자). 중심 정렬해 배치점이 글자 중앙이 되게 한다.
-    private func makePhotoZoneTextEntity(name: String) -> Entity {
-        let root = Entity()
+    // 제스처(핀치/회전)를 위해 ModelEntity 컨테이너 + 충돌도형으로 만든다(루트를 변형하면 자식이 함께 움직임).
+    private func makePhotoZoneTextEntity(name: String) -> ModelEntity {
+        let root = ModelEntity()
         let mesh = MeshResource.generateText(
             name,
             extrusionDepth: 0.12,
@@ -319,6 +328,11 @@ final class ARSessionViewController: UIViewController {
         shadow.position = centerOffset + SIMD3<Float>(0.04, -0.04, -0.06)
         root.addChild(shadow)
         root.addChild(glow)
+        // 충돌 박스: 텍스트 크기를 대략 덮어 핀치/회전 제스처가 잡히게 한다.
+        let extents = mesh.bounds.extents
+        root.collision = CollisionComponent(shapes: [
+            .generateBox(size: SIMD3<Float>(max(extents.x, 0.3), max(extents.y, 0.3), max(extents.z, 0.2)))
+        ])
         return root
     }
 
