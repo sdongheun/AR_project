@@ -216,12 +216,15 @@ final class ARSessionViewController: UIViewController {
         root.addChild(stem)
 
         // 목적지 이름 큰 텍스트(빌보드). 매 프레임 카메라를 바라보게 한다.
+        // 핀을 크게 키우므로(아래 root.scale) 라벨은 머리 바로 위에 두고 상대 스케일을 줄여 과대해지지 않게 한다.
         let label = makePinNameLabel(text: name)
-        label.position = SIMD3<Float>(0, 1.25, 0)
+        label.position = SIMD3<Float>(0, 1.15, 0)
+        label.scale = SIMD3<Float>(repeating: 0.5)
         root.addChild(label)
         arrivalPinNameLabel = label
 
-        root.scale = SIMD3<Float>(repeating: 1.5)
+        // 크게: 10m 거리에서 카메라 화면 세로의 약 2/3를 차지하도록(핀 본체 ~1.3유닛 × 5 ≈ 6.6m).
+        root.scale = SIMD3<Float>(repeating: 5.0)
         return root
     }
 
