@@ -264,6 +264,8 @@ final class AppState: ObservableObject {
     @Published var buildingLabelHeightDiagnostics = "3D 라벨 높이 기준값을 아직 계산하지 않았습니다."
     @Published var geospatialWGS84CandidateDiagnostics = "WGS84 Anchor 후보를 아직 계산하지 않았습니다."
     @Published var geospatialAnchorStateDiagnostics = "WGS84 Anchor 생성 상태를 아직 받지 못했습니다."
+    /// VPS 품질 실측 요약(정확도·heading·트래킹율·가용성). 부산 실측 데이터 수집용(§A).
+    @Published var geospatialVPSTelemetryDiagnostics = "VPS 텔레메트리를 아직 받지 못했습니다."
     @Published var cameraDirectionSpotID: TourismSpot.ID?
     @Published var cameraDirectionStatus = "카메라 방향 후보를 아직 계산하지 않았습니다."
     @Published var polygonValidationStatus = "Polygon 자동 후보를 아직 계산하지 않았습니다."
@@ -331,6 +333,15 @@ final class AppState: ObservableObject {
     private var compassHeadingDegrees: Double?
     private var compassHeadingAccuracyDegrees: Double = -1
     private var headingDivergenceSince: Date?
+    // VPS 절대 heading(자기간섭 면역). 최근+정확하면 §4-C 북 기준으로 나침반보다 우선 사용한다.
+    private var vpsHeadingDegrees: Double?
+    private var vpsHeadingAccuracyDegrees: Double = -1
+    private var vpsHeadingUpdatedAt: Date?
+    private let vpsHeadingFreshnessSeconds: TimeInterval = 3
+    // VPS 품질 실측 누적(§A 정확도 조사).
+    private var vpsTelemetrySampleCount = 0
+    private var vpsTrackingHitCount = 0
+    private var vpsBestAccuracyMeters: Double?
     private let tmapRouteDebounceDistanceMeters: CLLocationDistance = 1
     private let tmapRouteDebounceInterval: TimeInterval = 1.5
     private let geospatial3DAnchorRefreshInterval: TimeInterval = 2.0
@@ -402,6 +413,11 @@ final class AppState: ObservableObject {
                 self?.updateCompassHeading(heading, accuracyDegrees: accuracy)
             }
         }
+        self.geospatialSessionManager.onGeospatialTelemetry = { [weak self] telemetry in
+            Task { @MainActor in
+                self?.updateGeospatialTelemetry(telemetry)
+            }
+        }
         self.geospatialSessionManager.onSnapshotUpdated = { [weak self] snapshot in
             Task { @MainActor in
                 guard self?.isIndoorDebugModeEnabled != true else {
@@ -413,6 +429,10 @@ final class AppState: ObservableObject {
                     self?.latestCoreLocationSnapshot = snapshot
                 case .arCoreGeospatial:
                     self?.latestGeospatialLocationSnapshot = snapshot
+                    // VPS 절대 heading을 §4-C 북 기준 후보로 저장(자기간섭 면역).
+                    if let vpsHeading = snapshot.heading {
+                        self?.updateVPSHeading(vpsHeading, accuracyDegrees: snapshot.headingAccuracy ?? -1)
+                    }
                 }
                 self?.locationConfidence = Self.locationConfidence(for: snapshot.horizontalAccuracy)
                 self?.movementTracker.update(coordinate: snapshot.coordinate, now: snapshot.capturedAt)
@@ -754,6 +774,8 @@ final class AppState: ObservableObject {
             navigationManualNotice = nil
             headingMiscalibrated = false
             headingDivergenceSince = nil
+            vpsHeadingDegrees = nil
+            vpsHeadingUpdatedAt = nil
             routeArrowDiagnostics = "길찾기 모드 꺼짐 / 목적지를 선택하면 화살표를 표시합니다."
             routeArrowComputationDiagnostics = "길찾기 모드 꺼짐 / 화살표 계산 안 함"
             setNavigationGuidance(title: "길찾기 꺼짐", detail: "목적지를 선택하면 TMAP 경로 기준 방향 안내를 표시합니다.")
@@ -1005,6 +1027,7 @@ final class AppState: ObservableObject {
         }
 
         rows.append(DebugStatusRow(title: "3D 기준", value: compactDiagnosticText(stableOriginDiagnostics)))
+        rows.append(DebugStatusRow(title: "VPS 품질", value: compactDiagnosticText(geospatialVPSTelemetryDiagnostics)))
         return rows
     }
 
@@ -1044,6 +1067,15 @@ final class AppState: ObservableObject {
             DebugStatusRow(title: "화살표 계산", value: compactDiagnosticText(routeArrowComputationDiagnostics)),
             DebugStatusRow(title: "화살표 렌더", value: compactDiagnosticText(routeArrowRenderDiagnostics)),
             DebugStatusRow(title: "matrix", value: matrixText)
+        ]
+    }
+
+    /// 내비게이션 디버그(길찾기 화살표/리본) 핵심만. 인식기 잔재(2D 라벨·edge·matrix)는 제외한다.
+    var navigationDebugRows: [DebugStatusRow] {
+        [
+            DebugStatusRow(title: "경로 화살표", value: compactDiagnosticText(routeArrowDiagnostics)),
+            DebugStatusRow(title: "화살표 계산", value: compactDiagnosticText(routeArrowComputationDiagnostics)),
+            DebugStatusRow(title: "화살표 렌더", value: compactDiagnosticText(routeArrowRenderDiagnostics))
         ]
     }
 
@@ -2164,22 +2196,31 @@ final class AppState: ObservableObject {
         evaluateNorthCalibration()
     }
 
-    /// 나침반(신뢰 가능할 때)과 ARKit 월드 heading이 임계값 넘게 지속 발산하면 `headingMiscalibrated`를 세운다(감지 전용).
+    /// VPS 절대 heading 업데이트. 자기간섭 면역이라 신뢰 가능할 때 §4-C 북 기준으로 나침반보다 우선한다.
+    func updateVPSHeading(_ degrees: Double, accuracyDegrees: Double) {
+        vpsHeadingDegrees = degrees
+        vpsHeadingAccuracyDegrees = accuracyDegrees
+        vpsHeadingUpdatedAt = Date()
+        evaluateNorthCalibration()
+    }
+
+    /// 절대 북 기준(reference)과 ARKit 월드 heading이 임계값 넘게 지속 발산하면 `headingMiscalibrated`를 세운다(감지 전용).
+    /// 기준 heading은 VPS(자기간섭 면역)가 최근+정확하면 우선, 아니면 나침반.
     private func evaluateNorthCalibration() {
         // 길찾기 중이 아니거나 재보정/추적 불안정(세션 초기화)이면 판단 보류.
         guard isNavigationModeEnabled, !isRecalibratingNorth, !arTrackingLimited,
               let arkitHeading = cameraHeadingDegrees,
-              let compass = compassHeadingDegrees else {
+              let reference = referenceAbsoluteHeading() else {
             headingDivergenceSince = nil
             return
         }
 
         let now = Date()
-        let divergence = arkitHeading.angularDifference(to: compass) // 0~180
-        let compassTrustworthy = compassHeadingAccuracyDegrees >= 0
-            && compassHeadingAccuracyDegrees <= headingDivergenceMaxCompassAccuracyDegrees
+        let divergence = arkitHeading.angularDifference(to: reference.degrees) // 0~180
+        let referenceTrustworthy = reference.accuracyDegrees >= 0
+            && reference.accuracyDegrees <= headingDivergenceMaxCompassAccuracyDegrees
 
-        if compassTrustworthy, divergence > headingDivergenceThresholdDegrees {
+        if referenceTrustworthy, divergence > headingDivergenceThresholdDegrees {
             if headingDivergenceSince == nil {
                 headingDivergenceSince = now
             }
@@ -2190,7 +2231,7 @@ final class AppState: ObservableObject {
         let miscalibrated = NorthCalibration.shouldFlagMiscalibration(
             divergenceDegrees: divergence,
             divergenceSince: headingDivergenceSince,
-            compassAccuracyDegrees: compassHeadingAccuracyDegrees,
+            compassAccuracyDegrees: reference.accuracyDegrees,
             now: now,
             thresholdDegrees: headingDivergenceThresholdDegrees,
             sustainSeconds: headingDivergenceSustainSeconds,
@@ -2199,6 +2240,49 @@ final class AppState: ObservableObject {
         if miscalibrated != headingMiscalibrated {
             headingMiscalibrated = miscalibrated
         }
+    }
+
+    /// §4-C 북 판정 기준이 될 절대 heading. VPS가 최근(freshness 이내)+정확하면 우선, 아니면 나침반.
+    private func referenceAbsoluteHeading() -> (degrees: Double, accuracyDegrees: Double)? {
+        if let vpsHeadingDegrees, let vpsHeadingUpdatedAt,
+           Date().timeIntervalSince(vpsHeadingUpdatedAt) <= vpsHeadingFreshnessSeconds,
+           vpsHeadingAccuracyDegrees >= 0 {
+            return (vpsHeadingDegrees, vpsHeadingAccuracyDegrees)
+        }
+        if let compassHeadingDegrees {
+            return (compassHeadingDegrees, compassHeadingAccuracyDegrees)
+        }
+        return nil
+    }
+
+    /// VPS 품질 실측 텔레메트리 수집(§A). 트래킹율·최고정확도·heading·가용성을 누적 요약한다.
+    func updateGeospatialTelemetry(_ telemetry: GeospatialTelemetry) {
+        vpsTelemetrySampleCount += 1
+        if telemetry.isTracking {
+            vpsTrackingHitCount += 1
+        }
+        if telemetry.isTracking, telemetry.horizontalAccuracyMeters >= 0 {
+            if let best = vpsBestAccuracyMeters {
+                vpsBestAccuracyMeters = min(best, telemetry.horizontalAccuracyMeters)
+            } else {
+                vpsBestAccuracyMeters = telemetry.horizontalAccuracyMeters
+            }
+        }
+
+        let hitRate = vpsTelemetrySampleCount > 0
+            ? Int(Double(vpsTrackingHitCount) / Double(vpsTelemetrySampleCount) * 100)
+            : 0
+        let bestText = vpsBestAccuracyMeters.map { "최고 \(Int($0))m" } ?? "최고 -"
+        let nowText: String
+        if telemetry.isTracking {
+            let camText = cameraHeadingDegrees.map { "AR \(Int($0))°" } ?? "AR -"
+            let compassText = compassHeadingDegrees.map { "나침반 \(Int($0))°" } ?? "나침반 -"
+            nowText = "ON \(Int(telemetry.horizontalAccuracyMeters))m / VPS \(Int(telemetry.headingDegrees))°±\(Int(telemetry.yawAccuracyDegrees))° / \(camText) / \(compassText)"
+        } else {
+            nowText = "OFF(트래킹 끊김)"
+        }
+        geospatialVPSTelemetryDiagnostics =
+            "\(nowText) / 트래킹율 \(hitRate)%(\(vpsTrackingHitCount)/\(vpsTelemetrySampleCount)) / \(bestText) / 가용성 \(telemetry.vpsAvailabilityText)"
     }
 
     /// 수동 북 재보정(§4-C): AR 세션을 리셋 재실행해 현재 나침반 기준으로 월드 북을 다시 고정한다.

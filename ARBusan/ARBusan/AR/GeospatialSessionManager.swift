@@ -36,6 +36,16 @@ struct GeospatialDebugAnchorSnapshot {
     let trackingState: String
 }
 
+/// VPS 품질 실측용 텔레메트리(§A 정확도 조사). ARCore 타입을 노출하지 않도록 값만 담는다.
+struct GeospatialTelemetry {
+    let isTracking: Bool
+    let horizontalAccuracyMeters: CLLocationAccuracy   // VPS localize 성공 여부의 핵심 신호. -1이면 없음.
+    let yawAccuracyDegrees: CLLocationDirectionAccuracy // -1이면 없음.
+    let headingDegrees: CLLocationDirection             // VPS 절대 heading(북0/동90). -1이면 없음.
+    let vpsAvailabilityText: String                     // checkVPSAvailability 결과.
+    let capturedAt: Date
+}
+
 final class GeospatialSessionManager: NSObject, CLLocationManagerDelegate {
     private struct WGS84DebugAnchorRecord {
         let spotID: TourismSpot.ID
@@ -71,6 +81,12 @@ final class GeospatialSessionManager: NSObject, CLLocationManagerDelegate {
     private let shouldEnableSceneSemantics = false
     private var lastSceneSemanticsTimestamp: TimeInterval = 0
     private let sceneSemanticsInterval: TimeInterval = 0.25
+    // VPS 품질 실측(§A). availability는 비싸므로 주기적으로만, 텔레메트리는 ~1Hz로 올린다.
+    private var lastTelemetryTimestamp: TimeInterval = 0
+    private let telemetryInterval: TimeInterval = 1.0
+    private var lastVPSAvailabilityCheckAt: Date?
+    private let vpsAvailabilityCheckInterval: TimeInterval = 15
+    private var latestVPSAvailabilityText = "미확인"
 
     private(set) var latestSnapshot: LocationSnapshot?
     private(set) var latestStatusMessage = "ARCore Geospatial 세션을 아직 시작하지 않았습니다."
@@ -78,6 +94,8 @@ final class GeospatialSessionManager: NSObject, CLLocationManagerDelegate {
     var onSnapshotUpdated: ((LocationSnapshot) -> Void)?
     /// 디바이스 나침반 절대 북(trueHeading, headingAccuracy도). ARKit 월드 북 발산 감지(§4-C)에 쓴다.
     var onCompassHeadingUpdated: ((Double, Double) -> Void)?
+    /// VPS 품질 실측 텔레메트리(정확도·yaw·tracking·availability). ~1Hz로 올린다.
+    var onGeospatialTelemetry: ((GeospatialTelemetry) -> Void)?
     var onStatusChanged: ((String) -> Void)?
     var onSceneSemanticsUpdated: ((SceneSemanticsSnapshot) -> Void)?
     var onSceneSemanticsStatusChanged: ((String) -> Void)?
@@ -175,22 +193,100 @@ final class GeospatialSessionManager: NSObject, CLLocationManagerDelegate {
         latestEarthIsTracking = earth.trackingState == GARTrackingState.tracking
         guard latestEarthIsTracking,
               let transform = earth.cameraGeospatialTransform else {
+            // 트래킹이 끊긴 구간도 측정에 중요(트래킹율 산출) → 텔레메트리는 올린다.
+            publishGeospatialTelemetryIfNeeded(
+                isTracking: false,
+                horizontalAccuracyMeters: -1,
+                yawAccuracyDegrees: -1,
+                headingDegrees: -1,
+                frameTimestamp: frame.timestamp
+            )
             return
         }
 
+        // VPS 절대 heading(자기간섭 면역). 기기를 세워 들었을 때 yaw와 동일.
+        let vpsHeading = GeospatialHeading.headingDegrees(eastUpSouthQTarget: transform.eastUpSouthQTarget)
         let snapshot = LocationSnapshot(
             latitude: transform.coordinate.latitude,
             longitude: transform.coordinate.longitude,
             altitude: transform.altitude,
             horizontalAccuracy: transform.horizontalAccuracy,
             verticalAccuracy: transform.verticalAccuracy,
-            heading: nil,
+            heading: vpsHeading,
             headingAccuracy: transform.orientationYawAccuracy,
             source: .arCoreGeospatial,
             capturedAt: Date()
         )
         publish(snapshot)
-        updateStatus("VPS 위치 추정 중: 정확도 약 \(Int(transform.horizontalAccuracy))m")
+        checkVPSAvailabilityIfNeeded(at: transform.coordinate)
+        publishGeospatialTelemetryIfNeeded(
+            isTracking: true,
+            horizontalAccuracyMeters: transform.horizontalAccuracy,
+            yawAccuracyDegrees: transform.orientationYawAccuracy,
+            headingDegrees: vpsHeading,
+            frameTimestamp: frame.timestamp
+        )
+        updateStatus("VPS 추정 중: 정확도 ~\(Int(transform.horizontalAccuracy))m / heading \(Int(vpsHeading))°±\(Int(transform.orientationYawAccuracy))° / 가용성 \(latestVPSAvailabilityText)")
+    }
+
+    /// VPS 커버리지 유무를 주기적으로 조회한다("커버리지 있음" ≠ "지금 localize 됨"을 분리하기 위함).
+    private func checkVPSAvailabilityIfNeeded(at coordinate: CLLocationCoordinate2D) {
+        let now = Date()
+        if let lastVPSAvailabilityCheckAt, now.timeIntervalSince(lastVPSAvailabilityCheckAt) < vpsAvailabilityCheckInterval {
+            return
+        }
+        lastVPSAvailabilityCheckAt = now
+        guard let garSession else {
+            return
+        }
+        garSession.checkVPSAvailability(coordinate: coordinate) { [weak self] availability in
+            self?.latestVPSAvailabilityText = Self.describeVPSAvailability(availability)
+        }
+    }
+
+    private static func describeVPSAvailability(_ availability: GARVPSAvailability) -> String {
+        switch availability {
+        case .available:
+            return "가능"
+        case .unavailable:
+            return "불가"
+        case .unknown:
+            return "알수없음"
+        case .errorInternal:
+            return "오류(내부)"
+        case .errorNetworkConnection:
+            return "오류(네트워크)"
+        case .errorNotAuthorized:
+            return "오류(인증)"
+        case .errorResourceExhausted:
+            return "오류(자원초과)"
+        @unknown default:
+            return "기타"
+        }
+    }
+
+    private func publishGeospatialTelemetryIfNeeded(
+        isTracking: Bool,
+        horizontalAccuracyMeters: CLLocationAccuracy,
+        yawAccuracyDegrees: CLLocationDirectionAccuracy,
+        headingDegrees: CLLocationDirection,
+        frameTimestamp: TimeInterval
+    ) {
+        guard frameTimestamp - lastTelemetryTimestamp >= telemetryInterval else {
+            return
+        }
+        lastTelemetryTimestamp = frameTimestamp
+        let telemetry = GeospatialTelemetry(
+            isTracking: isTracking,
+            horizontalAccuracyMeters: horizontalAccuracyMeters,
+            yawAccuracyDegrees: yawAccuracyDegrees,
+            headingDegrees: headingDegrees,
+            vpsAvailabilityText: latestVPSAvailabilityText,
+            capturedAt: Date()
+        )
+        DispatchQueue.main.async { [onGeospatialTelemetry] in
+            onGeospatialTelemetry?(telemetry)
+        }
     }
 
     func createTerrainAnchorIfPossible(for request: GeospatialTerrainAnchorRequest) {

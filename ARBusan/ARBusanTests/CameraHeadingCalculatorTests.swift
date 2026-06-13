@@ -61,3 +61,27 @@ final class CameraHeadingCalculatorTests: XCTestCase {
         return transform
     }
 }
+
+final class GeospatialHeadingTests: XCTestCase {
+    // eastUpSouthQTarget: target(카메라) 프레임 → East-Up-South 프레임 회전. 카메라 전방은 -Z.
+    // 항등 회전이면 전방(-Z)이 EUS의 -South=North를 향함 → heading 0(북).
+    func testHeadingIsNorthForIdentity() {
+        let heading = GeospatialHeading.headingDegrees(eastUpSouthQTarget: simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0)))
+        XCTAssertEqual(heading, 0, accuracy: 0.001)
+    }
+
+    func testHeadingIsEastWhenForwardMapsToEast() {
+        let q = simd_quatf(from: SIMD3<Float>(0, 0, -1), to: SIMD3<Float>(1, 0, 0)) // 전방 → East
+        XCTAssertEqual(GeospatialHeading.headingDegrees(eastUpSouthQTarget: q), 90, accuracy: 0.001)
+    }
+
+    func testHeadingIsSouthWhenForwardMapsToSouth() {
+        let q = simd_quatf(from: SIMD3<Float>(0, 0, -1), to: SIMD3<Float>(0, 0, 1)) // 전방 → South
+        XCTAssertEqual(GeospatialHeading.headingDegrees(eastUpSouthQTarget: q), 180, accuracy: 0.001)
+    }
+
+    func testHeadingIsWestWhenForwardMapsToWest() {
+        let q = simd_quatf(from: SIMD3<Float>(0, 0, -1), to: SIMD3<Float>(-1, 0, 0)) // 전방 → West
+        XCTAssertEqual(GeospatialHeading.headingDegrees(eastUpSouthQTarget: q), 270, accuracy: 0.001)
+    }
+}
