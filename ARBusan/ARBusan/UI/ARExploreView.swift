@@ -987,7 +987,7 @@ struct ARExploreView: View {
                     .transition(.opacity)
                 }
 
-                if appState.isNavigationModeEnabled, !isLogPanelVisible {
+                if appState.isNavigationModeEnabled, !isLogPanelVisible, !appState.isPhotoZoneActive {
                     NavigationRouteMiniMapView(
                         height: navigationMapHeight,
                         allowsIndoorMapTap: showsIndoorNavigationDebug || appState.isIndoorDebugModeEnabled
