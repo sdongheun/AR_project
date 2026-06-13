@@ -320,9 +320,12 @@ final class AppState: ObservableObject {
     // 출발 방향 라벨(2단계): 출발 방위를 잴 때 현재 위치에서 최소 이만큼 앞의 경로 정점을 겨눈다(방위 떨림 방지).
     private let startDirectionAimMinMeters: CLLocationDistance = 8
     // 목적지 표시: 이 거리 이내면 3D 공간 고정 핀, 밖이면 2D 라벨/가장자리 지시.
-    private let pinWorldLockMeters: CLLocationDistance = 30
+    private let pinWorldLockMeters: CLLocationDistance = 20
     // 먼 거리 목적지가 화면 안일 때의 2D 라벨 아이콘(가장자리 지시는 chevron). 화면 안/밖 판단에도 쓴다.
     private let destinationOnScreenImageName = "mappin.circle.fill"
+    // 길찾기 목적지 폴리곤: 목적지당 1회만 브이월드에서 가져온다(시도한 spot은 기록해 재요청 방지 → 발열/네트워크 안전).
+    private var navigationPolygonRequestedSpotIDs: Set<TourismSpot.ID> = []
+    private var navigationPolygonTask: Task<Void, Never>?
     // 경로 이탈 자동 재탐색(§4-A). 오탐을 피하려고 넉넉하게 잡는다.
     private let autoRerouteThresholdMeters: CLLocationDistance = 40
     private let autoRerouteSustainSeconds: TimeInterval = 8
@@ -2053,16 +2056,17 @@ final class AppState: ObservableObject {
             navigationDestinationOverlay = nil
             routeArrowDiagnostics = "\(targetSpot.name) 목적지 3D 핀(공간 고정) / 거리 \(Int(arrivalDistance))m / \(guidanceFix.quality.displayName)"
         } else {
-            // 먼 거리: 2D 목적지 라벨/가장자리 지시.
+            // 먼 거리: 2D 목적지 라벨/가장자리 지시. 큰 건물이면 폴리곤 외곽 기준(목적지 1개만 1회 fetch).
             arrivalPin = nil
+            fetchNavigationDestinationPolygonIfNeeded(for: targetSpot)
             navigationDestinationOverlay = navigationDestinationOverlay(
                 spot: targetSpot,
-                destination: route.arrivalCoordinate,
                 origin: guidedOrigin,
                 distanceMeters: arrivalDistance
             )
             let onScreen = navigationDestinationOverlay?.systemImageName == destinationOnScreenImageName
-            routeArrowDiagnostics = "\(targetSpot.name) 목적지 2D \(onScreen ? "라벨(화면 안)" : "가장자리 지시") / 거리 \(Int(arrivalDistance))m / \(guidanceFix.quality.displayName)"
+            let hasPolygon = buildingPolygonsBySpotID[targetSpot.id] != nil
+            routeArrowDiagnostics = "\(targetSpot.name) 목적지 2D \(onScreen ? "라벨(화면 안)" : "가장자리 지시") / \(hasPolygon ? "폴리곤" : "POI점") / 거리 \(Int(arrivalDistance))m / \(guidanceFix.quality.displayName)"
         }
         if arrivalDistance <= routeArrivalCompletionMeters {
             // 도착 임박: POI 2D 라벨/edge marker는 숨긴다(목적지 표시만).
@@ -5072,10 +5076,36 @@ final class AppState: ObservableObject {
         )
     }
 
-    /// 먼 거리 목적지의 2D 표시(기존 화면 투영·가장자리 클램프 재사용). 화면 안이면 라벨, 밖이면 가장자리 방향 화살표.
+    /// 길찾기 목적지 폴리곤을 목적지당 1회만 브이월드에서 가져온다(인식 모드 prefetch와 무관, 독립).
+    /// 폴리곤이 없으면(미발견) 점 fallback이 동작하므로 안전. 같은 spot은 재요청하지 않는다.
+    private func fetchNavigationDestinationPolygonIfNeeded(for spot: TourismSpot) {
+        guard buildingPolygonsBySpotID[spot.id] == nil,
+              !navigationPolygonRequestedSpotIDs.contains(spot.id) else {
+            return
+        }
+        navigationPolygonRequestedSpotIDs.insert(spot.id)
+        navigationPolygonTask?.cancel()
+        navigationPolygonTask = Task { [weak self] in
+            guard let self else {
+                return
+            }
+            let polygon = try? await self.vworldClient.fetchBuildingPolygon(for: spot)
+            await MainActor.run {
+                guard let polygon else {
+                    return
+                }
+                self.buildingPolygonsBySpotID[spot.id] = polygon
+                self.resolvedBuildingHeightsBySpotID[spot.id] = self.buildingHeightResolver.resolve(polygon: polygon)
+                // 다음 refresh에서 폴리곤 외곽 기준으로 오버레이가 갱신된다.
+                self.refreshRouteArrowPath()
+            }
+        }
+    }
+
+    /// 먼 거리 목적지의 2D 표시(기존 폴리곤 투영·가장자리 클램프 재사용).
+    /// 폴리곤 있으면 외곽 ring 기준(화면 안/밖 판정·중심 배치), 없으면 POI 중심점. 화면 안이면 라벨, 밖이면 가장자리 화살표.
     private func navigationDestinationOverlay(
         spot: TourismSpot,
-        destination: CLLocationCoordinate2D,
         origin: LocationSnapshot,
         distanceMeters: CLLocationDistance
     ) -> EdgeMarkerOverlay? {
@@ -5083,9 +5113,21 @@ final class AppState: ObservableObject {
             return nil
         }
         let pitch = cameraPoseSnapshot?.pitchDegrees ?? 0
-        let projected = projectCoordinate(destination, from: origin.coordinate, headingDegrees: heading, pitchDegrees: pitch)
+        let polygon = buildingPolygonsBySpotID[spot.id]
+        let targetCoordinate = polygon?.centroid ?? spot.center
+        let fovProjected = projectedPoints(for: spot, polygon: polygon, from: origin, heading: heading, pitch: pitch)
+        let matrixProjected = matrixProjectedPoints(for: spot, polygon: polygon, from: origin)
+        let isOnScreen = edgeMarkerScreenVisibility(
+            for: spot,
+            polygon: polygon,
+            fovProjectedPoints: fovProjected,
+            matrixProjectedPoints: matrixProjected,
+            from: origin,
+            headingDegrees: heading
+        )
+        let projected = projectCoordinate(targetCoordinate, from: origin.coordinate, headingDegrees: heading, pitchDegrees: pitch)
         let distanceText = "\(Int(distanceMeters))m"
-        if projected.isInsideView {
+        if isOnScreen {
             return EdgeMarkerOverlay(
                 id: spot.id,
                 shortTitle: spot.name,
