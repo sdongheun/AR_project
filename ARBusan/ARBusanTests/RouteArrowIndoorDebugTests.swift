@@ -15,8 +15,8 @@ final class RouteArrowIndoorDebugTests: XCTestCase {
     }
 
     func testNearDestinationShows3DPinNotOverlay() throws {
-        // 가까우면(≤20m, 도착 반경 밖) 3D 공간 고정 핀을 띄우고 2D 오버레이는 끈다.
-        let fixture = makeStraightNorthRouteFixture(originDistanceMeters: 15)
+        // 가까우면(≤30m, 도착 반경 밖) 3D 공간 고정 핀을 띄우고 2D 오버레이는 끈다.
+        let fixture = makeStraightNorthRouteFixture(originDistanceMeters: 25)
         fixture.appState.updateCameraHeading(0)
 
         XCTAssertNotNil(fixture.appState.arrivalPin)

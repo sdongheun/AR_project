@@ -320,7 +320,7 @@ final class AppState: ObservableObject {
     // 출발 방향 라벨(2단계): 출발 방위를 잴 때 현재 위치에서 최소 이만큼 앞의 경로 정점을 겨눈다(방위 떨림 방지).
     private let startDirectionAimMinMeters: CLLocationDistance = 8
     // 목적지 표시: 이 거리 이내면 3D 공간 고정 핀, 밖이면 2D 라벨/가장자리 지시.
-    private let pinWorldLockMeters: CLLocationDistance = 20
+    private let pinWorldLockMeters: CLLocationDistance = 30
     // 먼 거리 목적지가 화면 안일 때의 2D 라벨 아이콘(가장자리 지시는 chevron). 화면 안/밖 판단에도 쓴다.
     private let destinationOnScreenImageName = "mappin.circle.fill"
     // 길찾기 목적지 폴리곤: 목적지당 1회만 브이월드에서 가져온다(시도한 spot은 기록해 재요청 방지 → 발열/네트워크 안전).
