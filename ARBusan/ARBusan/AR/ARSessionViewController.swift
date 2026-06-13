@@ -21,6 +21,9 @@ final class ARSessionViewController: UIViewController {
     private var pinWorldLocked = false
     private let arrivalPinHeightOffset: Float = -0.3
     private let pinWorldLockMaxRenderMeters: Float = 30  // 공간 고정 배치 거리 상한
+    // 도착 포토존 3D 타이포: 카메라 앞 고정 거리/높이에 한 번 배치(이후 걸어서 각도).
+    private let photoZoneDistanceMeters: Float = 2.5
+    private let photoZoneHeightOffset: Float = -0.2
     // 카메라 영상 해상도 선호. 기본은 저해상도(발열 절감), 토글로 고해상도 전환 가능.
     private var prefersHighResolutionCamera = false
     private let markerScreenScalePerMeter: Float = 0.085
@@ -42,6 +45,10 @@ final class ARSessionViewController: UIViewController {
     var onCameraPoseUpdated: ((CameraPoseSnapshot) -> Void)?
     var onCameraProjectionUpdated: ((CameraProjectionSnapshot) -> Void)?
     var onTrackingStateChanged: ((Bool, String) -> Void)?
+    /// 도착 3D 핀을 탭하면 호출(포토존 진입 트리거).
+    var onArrivalPinTapped: (() -> Void)?
+    private var photoZoneAnchor: AnchorEntity?
+    private var currentPhotoZoneText: String?
     private var lastTrackingLimited: Bool?
     private var lastTrackingReason = ""
     // 북 재보정(§4-C): AppState의 requestID가 바뀔 때만 세션을 재실행해 월드 북을 다시 고정한다.
@@ -184,6 +191,7 @@ final class ARSessionViewController: UIViewController {
 
         let head = ModelEntity(mesh: .generateSphere(radius: 0.36), materials: [solid])
         head.position = SIMD3<Float>(0, 0.5, 0)
+        head.generateCollisionShapes(recursive: false) // 탭(포토존 진입) 히트용
         root.addChild(head)
 
         let dot = ModelEntity(
@@ -199,6 +207,7 @@ final class ARSessionViewController: UIViewController {
             materials: [solid]
         )
         stem.position = SIMD3<Float>(0, 0.02, 0)
+        stem.generateCollisionShapes(recursive: false) // 탭(포토존 진입) 히트용
         root.addChild(stem)
 
         // 목적지 이름 큰 텍스트(빌보드). 매 프레임 카메라를 바라보게 한다.
@@ -232,6 +241,84 @@ final class ARSessionViewController: UIViewController {
         let label = ModelEntity(mesh: textMesh, materials: [SimpleMaterial(color: .white, roughness: 0.1, isMetallic: false)])
         root.addChild(shadow)
         root.addChild(label)
+        return root
+    }
+
+    // MARK: - 도착 AR 포토존 (관광지 3D 타이포)
+
+    /// 포토존 텍스트 배치/제거. name이 있으면 카메라 앞 근거리에 한 번 박고(걸어서 각도), 도착 핀은 숨긴다.
+    func setPhotoZoneText(_ name: String?) {
+        guard let name, !name.isEmpty else {
+            if let photoZoneAnchor {
+                arView.scene.removeAnchor(photoZoneAnchor)
+                self.photoZoneAnchor = nil
+            }
+            currentPhotoZoneText = nil
+            arrivalPinAnchor?.isEnabled = true
+            return
+        }
+        // 포토존 중에는 도착 핀을 숨겨 화면을 깔끔히.
+        arrivalPinAnchor?.isEnabled = false
+        guard name != currentPhotoZoneText else {
+            return
+        }
+        if let photoZoneAnchor {
+            arView.scene.removeAnchor(photoZoneAnchor)
+        }
+        let anchor = AnchorEntity(world: photoZoneWorldPosition())
+        let text = makePhotoZoneTextEntity(name: name)
+        anchor.addChild(text)
+        arView.scene.addAnchor(anchor)
+        // 배치 순간 카메라를 향하도록 1회 정렬(이후 고정 → 걸어서 각도).
+        if let cameraPos = currentCameraWorldPosition() {
+            text.look(at: cameraPos, from: text.position(relativeTo: nil), relativeTo: nil)
+            text.orientation *= simd_quatf(angle: .pi, axis: SIMD3<Float>(0, 1, 0))
+        }
+        photoZoneAnchor = anchor
+        currentPhotoZoneText = name
+    }
+
+    private func photoZoneWorldPosition() -> SIMD3<Float> {
+        guard let cam = arView.session.currentFrame?.camera.transform else {
+            return SIMD3<Float>(0, photoZoneHeightOffset, -photoZoneDistanceMeters)
+        }
+        let camPos = SIMD3<Float>(cam.columns.3.x, cam.columns.3.y, cam.columns.3.z)
+        var forward = SIMD3<Float>(-cam.columns.2.x, 0, -cam.columns.2.z) // 수평 전방
+        if simd_length(forward) < 1e-4 {
+            forward = SIMD3<Float>(0, 0, -1)
+        }
+        forward = simd_normalize(forward)
+        return camPos + forward * photoZoneDistanceMeters + SIMD3<Float>(0, photoZoneHeightOffset, 0)
+    }
+
+    private func currentCameraWorldPosition() -> SIMD3<Float>? {
+        guard let cam = arView.session.currentFrame?.camera.transform else {
+            return nil
+        }
+        return SIMD3<Float>(cam.columns.3.x, cam.columns.3.y, cam.columns.3.z)
+    }
+
+    // 관광지 이름 3D 타이포(네온 본체 + 어두운 그림자). 중심 정렬해 배치점이 글자 중앙이 되게 한다.
+    private func makePhotoZoneTextEntity(name: String) -> Entity {
+        let root = Entity()
+        let mesh = MeshResource.generateText(
+            name,
+            extrusionDepth: 0.12,
+            font: .boldSystemFont(ofSize: 0.6),
+            containerFrame: .zero,
+            alignment: .center,
+            lineBreakMode: .byTruncatingTail
+        )
+        let centerOffset = SIMD3<Float>(-mesh.bounds.center.x, -mesh.bounds.center.y, 0)
+        let glow = ModelEntity(mesh: mesh, materials: [UnlitMaterial(color: .cyan)])
+        glow.position = centerOffset
+        let shadow = ModelEntity(
+            mesh: mesh,
+            materials: [SimpleMaterial(color: UIColor.black.withAlphaComponent(0.85), roughness: 0.3, isMetallic: false)]
+        )
+        shadow.position = centerOffset + SIMD3<Float>(0.04, -0.04, -0.06)
+        root.addChild(shadow)
+        root.addChild(glow)
         return root
     }
 
@@ -368,6 +455,11 @@ final class ARSessionViewController: UIViewController {
 
     @objc private func handleARViewTap(_ gesture: UITapGestureRecognizer) {
         let location = gesture.location(in: arView)
+        // 도착 3D 핀 탭 → 포토존 진입.
+        if let tappedEntity = arView.entity(at: location), isUnderArrivalPin(tappedEntity) {
+            onArrivalPinTapped?()
+            return
+        }
         guard let tappedEntity = arView.entity(at: location),
               let anchorID = geospatialDebugAnchorID(containing: tappedEntity) else {
             selectedGeospatialDebugAnchorID = nil
@@ -377,6 +469,20 @@ final class ARSessionViewController: UIViewController {
 
         selectedGeospatialDebugAnchorID = selectedGeospatialDebugAnchorID == anchorID ? nil : anchorID
         updateGeospatialDebugVisualsForCamera()
+    }
+
+    private func isUnderArrivalPin(_ entity: Entity) -> Bool {
+        guard let arrivalPinAnchor else {
+            return false
+        }
+        var current: Entity? = entity
+        while let node = current {
+            if node === arrivalPinAnchor {
+                return true
+            }
+            current = node.parent
+        }
+        return false
     }
 
     private func geospatialDebugAnchorID(containing entity: Entity) -> UUID? {

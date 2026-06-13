@@ -198,6 +198,10 @@ final class AppState: ObservableObject {
     @Published var arrivalPin: ArrivalPinSnapshot?
     /// 먼 거리(>30m) 목적지 방향 2D 라벨/가장자리 지시. 화면 안이면 라벨, 밖이면 가장자리 화살표. 근거리엔 nil(3D 핀이 담당).
     @Published var navigationDestinationOverlay: EdgeMarkerOverlay?
+    /// 도착 AR 포토존 활성 여부(근거리 도착 핀 터치로 진입). true면 관광지 3D 타이포 + 촬영 UI 표시.
+    @Published var isPhotoZoneActive = false
+    /// 포토존에 띄울 관광지 이름(진입 시 도착 핀에서 확정).
+    @Published var photoZoneSpotName: String?
     @Published var navigationGuidanceIsConservative = false
     /// ARKit 트래킹이 limited/notAvailable이면 true. 이때 3D 안내(도착 핀)를 숨긴다.
     @Published var arTrackingLimited = false
@@ -729,6 +733,8 @@ final class AppState: ObservableObject {
             navigationRouteTaskSpotID = nil
             arrivalPin = nil
             navigationDestinationOverlay = nil
+            isPhotoZoneActive = false
+            photoZoneSpotName = nil
             offRouteSince = nil
             lastRerouteAt = nil
             isRerouting = false
@@ -2216,6 +2222,22 @@ final class AppState: ObservableObject {
             }
             self.isRecalibratingNorth = false
         }
+    }
+
+    // MARK: - 도착 AR 포토존
+
+    /// 근거리 도착 3D 핀 터치 시 진입. 도착 핀(근거리)이 있을 때만 — 관광지 이름으로 포토존 타이포를 띄운다.
+    func enterPhotoZone() {
+        guard isNavigationModeEnabled, let name = arrivalPin?.spotName, !name.isEmpty else {
+            return
+        }
+        photoZoneSpotName = name
+        isPhotoZoneActive = true
+    }
+
+    func exitPhotoZone() {
+        isPhotoZoneActive = false
+        photoZoneSpotName = nil
     }
 
     private func updateNavigationGuidance(

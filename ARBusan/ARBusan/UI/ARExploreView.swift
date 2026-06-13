@@ -924,6 +924,56 @@ struct ARExploreView: View {
                     .animation(.easeOut(duration: 0.18), value: appState.isRecalibratingNorth)
                 }
 
+                // 도착 AR 포토존: 관광지 3D 타이포(렌더러) + 촬영/닫기 UI. (촬영 연결은 4단계)
+                if appState.isPhotoZoneActive {
+                    VStack(spacing: 0) {
+                        HStack {
+                            Button {
+                                appState.exitPhotoZone()
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.headline.weight(.bold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 40, height: 40)
+                                    .background(.black.opacity(0.5), in: Circle())
+                            }
+                            Spacer()
+                            Text(appState.photoZoneSpotName ?? "")
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(.black.opacity(0.5), in: Capsule())
+                            Spacer()
+                            Color.clear.frame(width: 40, height: 40)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, max(geometry.safeAreaInsets.top, 44))
+
+                        Spacer()
+
+                        Text("걸어서 각도를 잡고, 두 손가락으로 크기·회전을 조절하세요")
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.92))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(.black.opacity(0.4), in: Capsule())
+                            .padding(.bottom, 14)
+
+                        Button {
+                            // TODO(4단계): ARView 스냅샷 촬영 + 사진 저장 + 스탬프 획득
+                        } label: {
+                            ZStack {
+                                Circle().stroke(.white, lineWidth: 4).frame(width: 74, height: 74)
+                                Circle().fill(.white).frame(width: 60, height: 60)
+                            }
+                        }
+                        .padding(.bottom, max(geometry.safeAreaInsets.bottom, 24) + 10)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .transition(.opacity)
+                }
+
                 if isLogPanelVisible, !appState.radarMarkerOverlays.isEmpty {
                     RadarOverlayView(markers: appState.radarMarkerOverlays) { markerID in
                         if let spot = appState.spots.first(where: { $0.id == markerID }) {
@@ -1772,6 +1822,10 @@ private struct ARViewContainer: UIViewControllerRepresentable {
         viewController.onTrackingStateChanged = { limited, reason in
             appState.updateARTrackingState(limited: limited, reason: reason)
         }
+        viewController.onArrivalPinTapped = {
+            // 도착 3D 핀 탭 → 포토존 진입.
+            appState.enterPhotoZone()
+        }
         return viewController
     }
 
@@ -1779,6 +1833,8 @@ private struct ARViewContainer: UIViewControllerRepresentable {
         uiViewController.setShows3DGeospatialDebugMarker(appState.shows3DGeospatialDebugMarker)
         uiViewController.setPrefersHighResolutionCamera(appState.prefersHighResolutionCamera)
         uiViewController.setArrivalPin(appState.arrivalPin)
+        // 포토존: 활성 시 관광지 3D 타이포 배치, 아니면 제거(도착 핀 복귀).
+        uiViewController.setPhotoZoneText(appState.isPhotoZoneActive ? appState.photoZoneSpotName : nil)
         // 북 재보정(§4-C): requestID가 바뀐 경우에만 세션을 리셋 재실행해 월드 북을 다시 고정한다.
         uiViewController.applyRecalibrationIfNeeded(requestID: appState.northRecalibrationRequestID)
     }
