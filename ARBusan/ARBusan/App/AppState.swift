@@ -88,16 +88,15 @@ struct RouteArrowSnapshot: Identifiable, Equatable {
     let bearingDegrees: Double
 }
 
-/// 적응형 목적지 핀. 멀면 비콘(내 앞 고정 거리 방향), 가까우면 공간 고정(실제 위치에 박힘).
+/// 근거리(≤30m) 목적지 핀. 공간 고정(실제 거리에 한 번 박아 VIO가 잡음 → 다가가서 도달).
+/// 먼 거리는 핀 대신 2D 라벨/가장자리 지시(navigationDestinationOverlay)를 쓴다.
 struct ArrivalPinSnapshot: Equatable {
     let spotID: TourismSpot.ID
     let spotName: String
     /// 현재 위치에서 목적지(도착 좌표)로의 방위(도).
     let bearingDegrees: Double
-    /// 현재 위치와 도착 좌표 사이 거리(m). 비콘일 때 거리 텍스트로, 공간 고정일 때 배치 거리로 쓴다.
+    /// 현재 위치와 도착 좌표 사이 거리(m). 공간 고정 배치 거리로 쓴다.
     let distanceMeters: Double
-    /// true면 공간 고정(실제 거리에 한 번 박아 VIO가 잡음), false면 비콘(매 프레임 내 앞 고정 거리).
-    let isWorldLocked: Bool
 }
 
 /// 출발 직후(첫 회전 전) "어느 쪽으로 걸어가야 하나"를 알려주는 2D 라벨 데이터.
@@ -223,6 +222,8 @@ final class AppState: ObservableObject {
     @Published var navigationGuidanceIsArrivalNearby = false
     @Published var navigationStabilityDiagnostics = "위치/방향 안정화를 아직 계산하지 않았습니다."
     @Published var arrivalPin: ArrivalPinSnapshot?
+    /// 먼 거리(>30m) 목적지 방향 2D 라벨/가장자리 지시. 화면 안이면 라벨, 밖이면 가장자리 화살표. 근거리엔 nil(3D 핀이 담당).
+    @Published var navigationDestinationOverlay: EdgeMarkerOverlay?
     /// 출발 직후 첫 회전 전까지 표시하는 2D 출발 방향 라벨. 그 외엔 nil.
     @Published var navigationStartDirection: NavigationStartDirection?
     @Published var navigationGuidanceIsConservative = false
@@ -318,8 +319,10 @@ final class AppState: ObservableObject {
     private let routeTurnSampleDistanceMeters: CLLocationDistance = 6
     // 출발 방향 라벨(2단계): 출발 방위를 잴 때 현재 위치에서 최소 이만큼 앞의 경로 정점을 겨눈다(방위 떨림 방지).
     private let startDirectionAimMinMeters: CLLocationDistance = 8
-    // 적응형 목적지 핀: 이 거리 이내면 공간 고정(실제 위치에 박음), 밖이면 비콘(방향만).
+    // 목적지 표시: 이 거리 이내면 3D 공간 고정 핀, 밖이면 2D 라벨/가장자리 지시.
     private let pinWorldLockMeters: CLLocationDistance = 30
+    // 먼 거리 목적지가 화면 안일 때의 2D 라벨 아이콘(가장자리 지시는 chevron). 화면 안/밖 판단에도 쓴다.
+    private let destinationOnScreenImageName = "mappin.circle.fill"
     // 경로 이탈 자동 재탐색(§4-A). 오탐을 피하려고 넉넉하게 잡는다.
     private let autoRerouteThresholdMeters: CLLocationDistance = 40
     private let autoRerouteSustainSeconds: TimeInterval = 8
@@ -769,6 +772,7 @@ final class AppState: ObservableObject {
             navigationRouteTaskSpotID = nil
             routeArrowPath = nil
             arrivalPin = nil
+            navigationDestinationOverlay = nil
             navigationTurnBanner = nil
             navigationStartDirection = nil
             offRouteSince = nil
@@ -1955,8 +1959,9 @@ final class AppState: ObservableObject {
     }
 
     private func refreshRouteArrowPath() {
-        // 기본은 도착 핀/회전 배너/출발 방향 없음. 아래 분기에서 안내 가능할 때만 다시 설정한다.
+        // 기본은 도착 핀/회전 배너/출발 방향/목적지 오버레이 없음. 아래 분기에서 안내 가능할 때만 다시 설정한다.
         arrivalPin = nil
+        navigationDestinationOverlay = nil
         navigationTurnBanner = nil
         navigationStartDirection = nil
         guard isNavigationModeEnabled else {
@@ -2031,27 +2036,40 @@ final class AppState: ObservableObject {
 
         let arrivalDistance = guidedOrigin.coordinate.distance(to: route.arrivalCoordinate)
 
-        // AR 길안내는 "적응형 목적지 핀" 하나로 통일한다(회전 화살표·출발 라벨 폐기).
-        // 멀면 비콘(내 앞 방향), 가까우면(≤ pinWorldLockMeters) 공간 고정. 상세 경로는 2D 지도가 담당.
+        // AR 길안내는 목적지 표시 하나로 통일한다(회전 화살표·출발 라벨 폐기).
+        // 멀면(>30m) 2D 라벨/가장자리 지시(위치·heading 오차에 강함), 가까우면(≤30m) 3D 공간 고정 핀.
         let bearingToDestination = guidedOrigin.coordinate.bearing(to: route.arrivalCoordinate)
-        let isWorldLocked = arrivalDistance <= pinWorldLockMeters
         routeArrowPath = nil
         navigationTurnBanner = nil
         navigationStartDirection = nil
-        arrivalPin = ArrivalPinSnapshot(
-            spotID: targetSpot.id,
-            spotName: targetSpot.name,
-            bearingDegrees: bearingToDestination,
-            distanceMeters: arrivalDistance,
-            isWorldLocked: isWorldLocked
-        )
+        if arrivalDistance <= pinWorldLockMeters {
+            // 근거리: 3D 공간 고정 빨간 핀.
+            arrivalPin = ArrivalPinSnapshot(
+                spotID: targetSpot.id,
+                spotName: targetSpot.name,
+                bearingDegrees: bearingToDestination,
+                distanceMeters: arrivalDistance
+            )
+            navigationDestinationOverlay = nil
+            routeArrowDiagnostics = "\(targetSpot.name) 목적지 3D 핀(공간 고정) / 거리 \(Int(arrivalDistance))m / \(guidanceFix.quality.displayName)"
+        } else {
+            // 먼 거리: 2D 목적지 라벨/가장자리 지시.
+            arrivalPin = nil
+            navigationDestinationOverlay = navigationDestinationOverlay(
+                spot: targetSpot,
+                destination: route.arrivalCoordinate,
+                origin: guidedOrigin,
+                distanceMeters: arrivalDistance
+            )
+            let onScreen = navigationDestinationOverlay?.systemImageName == destinationOnScreenImageName
+            routeArrowDiagnostics = "\(targetSpot.name) 목적지 2D \(onScreen ? "라벨(화면 안)" : "가장자리 지시") / 거리 \(Int(arrivalDistance))m / \(guidanceFix.quality.displayName)"
+        }
         if arrivalDistance <= routeArrivalCompletionMeters {
-            // 도착 임박: 목적지 2D 라벨/edge marker는 숨긴다(핀만).
+            // 도착 임박: POI 2D 라벨/edge marker는 숨긴다(목적지 표시만).
             edgeMarkerOverlays = []
             arLabelOverlay = nil
         }
-        routeArrowDiagnostics = "\(targetSpot.name) 목적지 핀 / 거리 \(Int(arrivalDistance))m / \(isWorldLocked ? "공간 고정" : "비콘") / \(guidanceFix.quality.displayName)"
-        routeArrowComputationDiagnostics = "\(targetSpot.name) 목적지 방향 핀 / bearing \(Int(bearingToDestination))° / origin \(guidedOrigin.source.rawValue) \(guidedOrigin.coordinate.shortText)"
+        routeArrowComputationDiagnostics = "\(targetSpot.name) 목적지 표시 / bearing \(Int(bearingToDestination))° / origin \(guidedOrigin.source.rawValue) \(guidedOrigin.coordinate.shortText)"
         updateNavigationGuidance(for: route, targetSpot: targetSpot, origin: guidedOrigin, guidanceFix: guidanceFix)
     }
 
@@ -5051,6 +5069,42 @@ final class AppState: ObservableObject {
         return CGPoint(
             x: current.normalizedX * previousWeight + Double(next.x) * nextWeight,
             y: current.normalizedY * previousWeight + Double(next.y) * nextWeight
+        )
+    }
+
+    /// 먼 거리 목적지의 2D 표시(기존 화면 투영·가장자리 클램프 재사용). 화면 안이면 라벨, 밖이면 가장자리 방향 화살표.
+    private func navigationDestinationOverlay(
+        spot: TourismSpot,
+        destination: CLLocationCoordinate2D,
+        origin: LocationSnapshot,
+        distanceMeters: CLLocationDistance
+    ) -> EdgeMarkerOverlay? {
+        guard let heading = cameraHeadingDegrees else {
+            return nil
+        }
+        let pitch = cameraPoseSnapshot?.pitchDegrees ?? 0
+        let projected = projectCoordinate(destination, from: origin.coordinate, headingDegrees: heading, pitchDegrees: pitch)
+        let distanceText = "\(Int(distanceMeters))m"
+        if projected.isInsideView {
+            return EdgeMarkerOverlay(
+                id: spot.id,
+                shortTitle: spot.name,
+                distanceText: distanceText,
+                normalizedX: min(max(projected.screenX, 0.07), 0.93),
+                normalizedY: min(max(projected.screenY, 0.12), 0.82),
+                scale: 1.0,
+                systemImageName: destinationOnScreenImageName
+            )
+        }
+        let edge = edgeMarkerPosition(forScreenX: projected.screenX, screenY: projected.screenY)
+        return EdgeMarkerOverlay(
+            id: spot.id,
+            shortTitle: spot.name,
+            distanceText: distanceText,
+            normalizedX: edge.x,
+            normalizedY: edge.y,
+            scale: 1.0,
+            systemImageName: edge.systemImageName
         )
     }
 

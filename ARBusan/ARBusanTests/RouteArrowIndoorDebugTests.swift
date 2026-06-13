@@ -4,24 +4,23 @@ import XCTest
 
 @MainActor
 final class RouteArrowIndoorDebugTests: XCTestCase {
-    func testDestinationPinIsBeaconWhenFar() throws {
-        // 목적지가 멀면(>30m) 핀은 비콘(방향만). 회전 화살표·배너는 폐기되어 항상 nil.
+    func testFarDestinationShows2DOverlayNotPin() throws {
+        // 멀면(>30m) 3D 핀 대신 2D 목적지 표시(라벨/가장자리 지시). 회전 화살표는 폐기되어 항상 nil.
         let fixture = makeStraightNorthRouteFixture(originDistanceMeters: 45)
         fixture.appState.updateCameraHeading(0)
 
-        let pin = try XCTUnwrap(fixture.appState.arrivalPin)
-        XCTAssertFalse(pin.isWorldLocked)
+        XCTAssertNil(fixture.appState.arrivalPin)
+        XCTAssertNotNil(fixture.appState.navigationDestinationOverlay)
         XCTAssertNil(fixture.appState.routeArrowPath)
-        XCTAssertNil(fixture.appState.navigationTurnBanner)
     }
 
-    func testDestinationPinIsWorldLockedWhenNear() throws {
-        // 목적지가 가까우면(≤30m, 도착 반경 밖)엔 핀이 공간 고정으로 전환된다.
+    func testNearDestinationShows3DPinNotOverlay() throws {
+        // 가까우면(≤30m, 도착 반경 밖) 3D 공간 고정 핀을 띄우고 2D 오버레이는 끈다.
         let fixture = makeStraightNorthRouteFixture(originDistanceMeters: 25)
         fixture.appState.updateCameraHeading(0)
 
-        let pin = try XCTUnwrap(fixture.appState.arrivalPin)
-        XCTAssertTrue(pin.isWorldLocked)
+        XCTAssertNotNil(fixture.appState.arrivalPin)
+        XCTAssertNil(fixture.appState.navigationDestinationOverlay)
     }
 
     func testArrivalPinAppearsWithinCompletionRadiusAndHidesEdgeMarkers() throws {

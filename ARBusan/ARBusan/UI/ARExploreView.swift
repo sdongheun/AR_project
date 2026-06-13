@@ -801,6 +801,17 @@ struct ARExploreView: View {
                         .animation(.easeOut(duration: 0.16), value: marker)
                 }
 
+                // 먼 거리(>30m) 목적지 2D 표시: 화면 안이면 라벨, 밖이면 가장자리 방향 지시(기존 EdgeMarkerView 재사용).
+                if appState.isNavigationModeEnabled, let destination = appState.navigationDestinationOverlay {
+                    EdgeMarkerView(marker: destination)
+                        .position(
+                            x: destination.normalizedX.screenCoordinate(in: safeWidth),
+                            y: destination.normalizedY.screenCoordinate(in: safeHeight)
+                        )
+                        .allowsHitTesting(false)
+                        .animation(.easeOut(duration: 0.16), value: destination)
+                }
+
 	                // 길찾기 중 방향은 바닥 리본/회전 chevron이 담당하므로 상단 2D 방향 라벨은 평소 숨긴다.
 	                // 도착 또는 위치/heading 불안정(좌우 확정 불가)일 때만 텍스트 배너로 표시한다.
 	                if appState.isNavigationModeEnabled,
