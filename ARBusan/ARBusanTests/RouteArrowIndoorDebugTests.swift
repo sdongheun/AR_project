@@ -4,49 +4,24 @@ import XCTest
 
 @MainActor
 final class RouteArrowIndoorDebugTests: XCTestCase {
-    func testRightTurnArrowAppearsInsideTurnBoundaryWhenHeadingIsNotAligned() throws {
-        let fixture = makeRightTurnFixture(originNorthOffsetMeters: -5)
-
+    func testDestinationPinIsBeaconWhenFar() throws {
+        // 목적지가 멀면(>30m) 핀은 비콘(방향만). 회전 화살표·배너는 폐기되어 항상 nil.
+        let fixture = makeStraightNorthRouteFixture(originDistanceMeters: 45)
         fixture.appState.updateCameraHeading(0)
 
-        let path = try XCTUnwrap(fixture.appState.routeArrowPath)
-        XCTAssertEqual(path.arrows.count, 1)
-        XCTAssertEqual(path.arrows[0].turnDirection, .right)
-        XCTAssertEqual(path.arrows[0].distanceFromOriginMeters, 5, accuracy: 0.8)
-        XCTAssertTrue(fixture.appState.routeArrowDiagnostics.contains("전방 3D 대형 화살표"))
-        // 거리 카운트다운 배너("Nm 후 우회전")가 채워져야 한다.
-        let banner = try XCTUnwrap(fixture.appState.navigationTurnBanner)
-        XCTAssertTrue(banner.hasSuffix("후 우회전"), "예상과 다른 배너: \(banner)")
-    }
-
-    func testTurnArrowIsHiddenWhenHeadingAlreadyMatchesOutgoingRoute() {
-        // 회전점 바로 앞(2m)에서 진행 방향(동쪽 90도)을 이미 향하고 있으면 화살표를 숨긴다.
-        let fixture = makeRightTurnFixture(originNorthOffsetMeters: -2)
-
-        fixture.appState.updateCameraHeading(90)
-
+        let pin = try XCTUnwrap(fixture.appState.arrivalPin)
+        XCTAssertFalse(pin.isWorldLocked)
         XCTAssertNil(fixture.appState.routeArrowPath)
-        XCTAssertTrue(fixture.appState.routeArrowComputationDiagnostics.contains("이미 방향 정렬"))
+        XCTAssertNil(fixture.appState.navigationTurnBanner)
     }
 
-    func testTurnArrowIsHiddenOutsideTurnBoundary() {
-        let fixture = makeRightTurnFixture(originNorthOffsetMeters: -25)
-
+    func testDestinationPinIsWorldLockedWhenNear() throws {
+        // 목적지가 가까우면(≤30m, 도착 반경 밖)엔 핀이 공간 고정으로 전환된다.
+        let fixture = makeStraightNorthRouteFixture(originDistanceMeters: 25)
         fixture.appState.updateCameraHeading(0)
 
-        XCTAssertNil(fixture.appState.routeArrowPath)
-        XCTAssertTrue(fixture.appState.routeArrowComputationDiagnostics.contains("boundary"))
-    }
-
-    func testTurnArrowAppearsForDenselySegmentedTurnRoute() throws {
-        let fixture = makeSegmentedLeftTurnFixture()
-
-        fixture.appState.updateCameraHeading(0)
-
-        let path = try XCTUnwrap(fixture.appState.routeArrowPath)
-        XCTAssertEqual(path.arrows.count, 1)
-        XCTAssertEqual(path.arrows[0].turnDirection, .left)
-        XCTAssertTrue(fixture.appState.routeArrowComputationDiagnostics.contains("전방 AR 화살표"))
+        let pin = try XCTUnwrap(fixture.appState.arrivalPin)
+        XCTAssertTrue(pin.isWorldLocked)
     }
 
     func testArrivalPinAppearsWithinCompletionRadiusAndHidesEdgeMarkers() throws {
@@ -118,29 +93,6 @@ final class RouteArrowIndoorDebugTests: XCTestCase {
         XCTAssertTrue(fixture.appState.navigationGuidanceIsConservative)
     }
 
-    func testStartDirectionLabelShownBeforeFirstTurnFacingAhead() {
-        // 출발 직후(회전 boundary 밖)엔 회전 화살표 없이 2D 출발 방향 라벨이 뜬다. 경로 초반은 북향.
-        let fixture = makeRightTurnFixture(originNorthOffsetMeters: -20)
-        fixture.appState.updateCameraHeading(0) // 북쪽을 향함 → 직진
-
-        XCTAssertNil(fixture.appState.routeArrowPath)
-        let start = fixture.appState.navigationStartDirection
-        XCTAssertNotNil(start)
-        XCTAssertEqual(start?.relativeAngleDegrees ?? 999, 0, accuracy: 1)
-        XCTAssertEqual(start?.text, "앞으로 직진")
-    }
-
-    func testStartDirectionLabelTellsRightWhenFacingWest() {
-        // 서쪽(270)을 향하면 출발 방향(북)은 오른쪽이다.
-        let fixture = makeRightTurnFixture(originNorthOffsetMeters: -20)
-        fixture.appState.updateCameraHeading(270)
-
-        let start = fixture.appState.navigationStartDirection
-        XCTAssertNotNil(start)
-        XCTAssertEqual(start?.relativeAngleDegrees ?? 0, 90, accuracy: 1)
-        XCTAssertEqual(start?.text, "오른쪽으로 출발")
-    }
-
     func testManualRefreshOnRouteDoesNotReroute() {
         // 온-루트인데 수동 버튼을 누르면 위치/heading 보정만 하고 경로 재탐색(API)은 하지 않는다(§4-A 스마트).
         let fixture = makeRightTurnFixture(originNorthOffsetMeters: -5)
@@ -175,30 +127,69 @@ final class RouteArrowIndoorDebugTests: XCTestCase {
         XCTAssertFalse(fixture.appState.isRecalibratingNorth)
     }
 
-    func testManeuverDrivesTurnArrowEvenForSmallAngle() throws {
-        // 30도(45도 미만) 꺾임 + TMAP 우회전 안내점 → 화살표가 떠야 한다(maneuver 우선).
-        let fixture = makeSmallAngleRightTurnFixture(includeManeuver: true)
-        fixture.appState.updateCameraHeading(0)
-
-        let path = try XCTUnwrap(fixture.appState.routeArrowPath)
-        XCTAssertEqual(path.arrows.count, 1)
-        XCTAssertEqual(path.arrows[0].turnDirection, .right)
-    }
-
-    func testGeometricFallbackIgnoresSmallAngleWithoutManeuver() {
-        // 같은 30도 꺾임이지만 안내점이 없으면 기하 45° 기준 미달 → 화살표 없음(fallback).
-        let fixture = makeSmallAngleRightTurnFixture(includeManeuver: false)
-        fixture.appState.updateCameraHeading(0)
-
-        XCTAssertNil(fixture.appState.routeArrowPath)
-    }
-
-    func testSlightManeuverDoesNotShowArrow() {
-        // 약한 굽이(turnType 18, slightRight)는 화살표가 아니라 곡선 리본이 담당 → 화살표 없음.
-        let fixture = makeSmallAngleRightTurnFixture(includeManeuver: true, turnType: 18)
-        fixture.appState.updateCameraHeading(0)
-
-        XCTAssertNil(fixture.appState.routeArrowPath)
+    /// 북쪽으로 곧게 뻗는 경로(목적지=기준점)에서 origin을 지정 거리만큼 남쪽 on-route에 둔다.
+    /// 적응형 핀의 비콘↔공간 고정 전환을 거리로 검증하기 위함.
+    private func makeStraightNorthRouteFixture(
+        originDistanceMeters: Double
+    ) -> (appState: AppState, spot: TourismSpot) {
+        let destination = CLLocationCoordinate2D(latitude: 35.245700, longitude: 128.904000)
+        let destOrigin = LocationSnapshot(
+            latitude: destination.latitude,
+            longitude: destination.longitude,
+            altitude: nil,
+            horizontalAccuracy: 1,
+            verticalAccuracy: nil,
+            heading: nil,
+            headingAccuracy: nil,
+            source: .arCoreGeospatial,
+            capturedAt: Date()
+        )
+        let routeStart = LocalENUProjector.coordinate(eastMeters: 0, northMeters: -60, from: destOrigin)
+        let originCoordinate = LocalENUProjector.coordinate(eastMeters: 0, northMeters: -originDistanceMeters, from: destOrigin)
+        let spot = TourismSpot(
+            id: "straight-route-target",
+            name: "직진 경로 목적지",
+            address: "실내 디버그",
+            districtName: "테스트",
+            category: "길찾기",
+            source: .mock,
+            geometryKind: .point,
+            center: destination,
+            recognitionHints: ["직진 경로 목적지"],
+            notes: "적응형 목적지 핀 테스트"
+        )
+        let origin = LocationSnapshot(
+            latitude: originCoordinate.latitude,
+            longitude: originCoordinate.longitude,
+            altitude: nil,
+            horizontalAccuracy: 1,
+            verticalAccuracy: nil,
+            heading: nil,
+            headingAccuracy: nil,
+            source: .arCoreGeospatial,
+            capturedAt: Date()
+        )
+        let route = TMAPPedestrianRoute(
+            destinationName: spot.name,
+            requestedStart: originCoordinate,
+            requestedDestination: destination,
+            arrivalCoordinate: destination,
+            routeCoordinates: [routeStart, destination],
+            totalDistanceMeters: nil,
+            totalTimeSeconds: nil
+        )
+        let appState = AppState(spots: [spot])
+        appState.spots = [spot]
+        appState.selectedSpot = spot
+        appState.navigationDestinationSpotID = spot.id
+        appState.isNavigationModeEnabled = true
+        appState.isIndoorDebugModeEnabled = true
+        appState.latestLocationSnapshot = origin
+        appState.latestGeospatialLocationSnapshot = origin
+        appState.locationConfidence = .high
+        appState.effectiveSpatialConfidence = .high
+        appState.tmapArrivalRoutesBySpotID[spot.id] = route
+        return (appState, spot)
     }
 
     private func makeSmallAngleRightTurnFixture(

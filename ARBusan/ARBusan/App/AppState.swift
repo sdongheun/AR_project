@@ -88,13 +88,16 @@ struct RouteArrowSnapshot: Identifiable, Equatable {
     let bearingDegrees: Double
 }
 
+/// 적응형 목적지 핀. 멀면 비콘(내 앞 고정 거리 방향), 가까우면 공간 고정(실제 위치에 박힘).
 struct ArrivalPinSnapshot: Equatable {
     let spotID: TourismSpot.ID
     let spotName: String
-    /// 현재 위치에서 목적지(도착 좌표)로의 방위(도). 핀을 "가는 방향"에 배치할 때 쓴다.
+    /// 현재 위치에서 목적지(도착 좌표)로의 방위(도).
     let bearingDegrees: Double
-    /// 현재 위치와 도착 좌표 사이 거리(m).
+    /// 현재 위치와 도착 좌표 사이 거리(m). 비콘일 때 거리 텍스트로, 공간 고정일 때 배치 거리로 쓴다.
     let distanceMeters: Double
+    /// true면 공간 고정(실제 거리에 한 번 박아 VIO가 잡음), false면 비콘(매 프레임 내 앞 고정 거리).
+    let isWorldLocked: Bool
 }
 
 /// 출발 직후(첫 회전 전) "어느 쪽으로 걸어가야 하나"를 알려주는 2D 라벨 데이터.
@@ -315,6 +318,8 @@ final class AppState: ObservableObject {
     private let routeTurnSampleDistanceMeters: CLLocationDistance = 6
     // 출발 방향 라벨(2단계): 출발 방위를 잴 때 현재 위치에서 최소 이만큼 앞의 경로 정점을 겨눈다(방위 떨림 방지).
     private let startDirectionAimMinMeters: CLLocationDistance = 8
+    // 적응형 목적지 핀: 이 거리 이내면 공간 고정(실제 위치에 박음), 밖이면 비콘(방향만).
+    private let pinWorldLockMeters: CLLocationDistance = 30
     // 경로 이탈 자동 재탐색(§4-A). 오탐을 피하려고 넉넉하게 잡는다.
     private let autoRerouteThresholdMeters: CLLocationDistance = 40
     private let autoRerouteSustainSeconds: TimeInterval = 8
@@ -2025,57 +2030,28 @@ final class AppState: ObservableObject {
         evaluateAutoReroute(offRouteMeters: guidanceFix.offRouteDistanceMeters)
 
         let arrivalDistance = guidedOrigin.coordinate.distance(to: route.arrivalCoordinate)
-        if arrivalDistance <= routeArrivalCompletionMeters {
-            routeArrowPath = nil
-            // 도착: 길안내 종료 + 목적지 방향 3D 대형 핀 표시 + 목적지 2D 라벨/edge marker 숨김.
-            arrivalPin = ArrivalPinSnapshot(
-                spotID: targetSpot.id,
-                spotName: targetSpot.name,
-                bearingDegrees: guidedOrigin.coordinate.bearing(to: route.arrivalCoordinate),
-                distanceMeters: arrivalDistance
-            )
-            edgeMarkerOverlays = []
-            arLabelOverlay = nil
-            routeArrowDiagnostics = "\(targetSpot.name) 도착 완료 / TMAP 도착 좌표 \(Int(arrivalDistance))m 이내 / 길안내 종료"
-            routeArrowComputationDiagnostics = "\(targetSpot.name) 도착 완료 / AR 화살표 제거 / 목적지 방향 3D 도착 핀 표시"
-            updateNavigationGuidance(for: route, targetSpot: targetSpot, origin: guidedOrigin, guidanceFix: guidanceFix)
-            return
-        }
 
-        let arrows = routeArrowSnapshots(
-            for: route,
-            from: guidedOrigin,
-            accuracyRadiusMeters: guidanceFix.accuracyRadiusMeters,
-            allowsTurnCommitment: guidanceFix.allowsTurnCommitment
-        )
-        guard !arrows.isEmpty else {
-            routeArrowPath = nil
-            // 활성 회전이 없는 구간: 첫 회전 전이면 2D 출발 방향 라벨을 띄운다(그 외엔 nil 유지).
-            navigationStartDirection = navigationStartDirectionLabel(for: route, origin: guidedOrigin)
-            routeArrowDiagnostics = "\(targetSpot.name) 전방 3D 화살표 숨김 / \(Int(routeTurnBoundaryMeters))m turn boundary 안 활성 회전 없음 / \(guidanceFix.quality.displayName)"
-            routeArrowComputationDiagnostics = routeArrowRejectionDiagnostics(
-                route: route,
-                origin: guidedOrigin,
-                targetSpot: targetSpot
-            )
-            updateNavigationGuidance(for: route, targetSpot: targetSpot, origin: guidedOrigin, guidanceFix: guidanceFix)
-            return
-        }
-
-        routeArrowPath = RouteArrowPathSnapshot(
+        // AR 길안내는 "적응형 목적지 핀" 하나로 통일한다(회전 화살표·출발 라벨 폐기).
+        // 멀면 비콘(내 앞 방향), 가까우면(≤ pinWorldLockMeters) 공간 고정. 상세 경로는 2D 지도가 담당.
+        let bearingToDestination = guidedOrigin.coordinate.bearing(to: route.arrivalCoordinate)
+        let isWorldLocked = arrivalDistance <= pinWorldLockMeters
+        routeArrowPath = nil
+        navigationTurnBanner = nil
+        navigationStartDirection = nil
+        arrivalPin = ArrivalPinSnapshot(
             spotID: targetSpot.id,
             spotName: targetSpot.name,
-            arrows: arrows
+            bearingDegrees: bearingToDestination,
+            distanceMeters: arrivalDistance,
+            isWorldLocked: isWorldLocked
         )
-        if let firstArrow = arrows.first {
-            // 거리 카운트다운: "Nm 후 좌/우회전". 거리는 현재 위치→회전 지점 직선 거리.
-            navigationTurnBanner = "\(Int(firstArrow.distanceFromOriginMeters.rounded()))m 후 \(firstArrow.turnDirection.displayName)"
+        if arrivalDistance <= routeArrivalCompletionMeters {
+            // 도착 임박: 목적지 2D 라벨/edge marker는 숨긴다(핀만).
+            edgeMarkerOverlays = []
+            arLabelOverlay = nil
         }
-        routeArrowDiagnostics = "\(targetSpot.name) 전방 3D 대형 화살표 \(arrows.count)개 / turn boundary \(Int(routeTurnBoundaryMeters))m / \(Int(routeTurnMinimumAngleDegrees))도 이상 꺾임 / \(guidanceFix.quality.displayName)"
-        let first = arrows.first
-        let firstText = first.map { "활성 회전 \(String(format: "%.0f", $0.distanceFromOriginMeters))m / \($0.turnDirection.displayName) / 카메라 전방 \(String(format: "%.1f", abs($0.position.z)))m / 높이 offset \(String(format: "%.2f", $0.position.y))m" } ?? "활성 회전 화살표 없음"
-        let routeLength = routePolylineLengthMeters(route.routeCoordinates)
-        routeArrowComputationDiagnostics = "\(targetSpot.name) route 좌표 \(route.routeCoordinates.count)개 / 경로 길이 \(Int(routeLength))m -> turn boundary 안 전방 AR 화살표 \(arrows.count)개 생성 / guidedOrigin \(guidedOrigin.source.rawValue) \(guidedOrigin.coordinate.shortText) / \(guidanceFix.quality.displayName) / \(firstText)"
+        routeArrowDiagnostics = "\(targetSpot.name) 목적지 핀 / 거리 \(Int(arrivalDistance))m / \(isWorldLocked ? "공간 고정" : "비콘") / \(guidanceFix.quality.displayName)"
+        routeArrowComputationDiagnostics = "\(targetSpot.name) 목적지 방향 핀 / bearing \(Int(bearingToDestination))° / origin \(guidedOrigin.source.rawValue) \(guidedOrigin.coordinate.shortText)"
         updateNavigationGuidance(for: route, targetSpot: targetSpot, origin: guidedOrigin, guidanceFix: guidanceFix)
     }
 

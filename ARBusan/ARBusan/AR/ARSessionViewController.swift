@@ -23,9 +23,13 @@ final class ARSessionViewController: UIViewController {
     private var latestRouteArrowPath: RouteArrowPathSnapshot?
     private var arrivalPinAnchor: AnchorEntity?
     private var latestArrivalPin: ArrivalPinSnapshot?
+    private var arrivalPinNameLabel: Entity?
+    private var currentPinSpotName: String?
+    // 공간 고정 상태: 한 번 실제 거리에 박으면 위치를 재계산하지 않고 VIO가 잡게 둔다.
+    private var pinWorldLocked = false
     private let arrivalPinHeightOffset: Float = -0.3
-    private let arrivalPinMinDistanceMeters: Float = 2
-    private let arrivalPinMaxDistanceMeters: Float = 8
+    private let pinBeaconDistanceMeters: Float = 10      // 비콘: 내 앞 고정 거리
+    private let pinWorldLockMaxRenderMeters: Float = 30  // 공간 고정 배치 거리 상한
     // 회전 chevron: 주행 방향 앵커링(시선 비추종). 카메라 위치+높이 기준 전방에 배치.
     // 거리감을 위해 실제 회전 거리에 비례해 배치하되, 너무 멀거나 가까우면 보기 나쁘므로 클램프.
     private let routeArrowMinRenderDistanceMeters: Float = 2.5
@@ -160,73 +164,130 @@ final class ARSessionViewController: UIViewController {
                 self.arrivalPinAnchor = nil
             }
             latestArrivalPin = nil
+            arrivalPinNameLabel = nil
+            currentPinSpotName = nil
+            pinWorldLocked = false
             return
         }
 
-        if arrivalPinAnchor == nil {
-            // 월드 앵커. 위치/방향은 매 프레임 updateArrivalPinPlacement에서 카메라 월드 위치 + 목적지 방위로 갱신한다.
+        // 앵커가 없거나 목적지가 바뀌면 핀(빨간 지도 핀 + 이름 라벨)을 새로 만든다.
+        if arrivalPinAnchor == nil || pin.spotName != currentPinSpotName {
+            if let arrivalPinAnchor {
+                arView.scene.removeAnchor(arrivalPinAnchor)
+            }
             let anchor = AnchorEntity(world: .zero)
-            anchor.addChild(makeArrivalPinEntity())
+            anchor.addChild(makeArrivalPinEntity(name: pin.spotName))
             arView.scene.addAnchor(anchor)
             arrivalPinAnchor = anchor
+            currentPinSpotName = pin.spotName
+            pinWorldLocked = false
         }
         latestArrivalPin = pin
     }
 
-    // 도착 핀은 축대칭 마커라 yaw가 필요 없다. 중력 정렬(upright)로 두고 위치만 가는 방향으로 갱신한다.
-    // iOS 17 호환을 위해 generateSphere/generateBox만 사용한다.
-    private func makeArrivalPinEntity() -> Entity {
+    // 빨간 지도 핀(둥근 머리 + 아래 막대) + 목적지 이름 큰 텍스트. 축대칭이라 yaw 불필요(중력 정렬).
+    // iOS 17 호환을 위해 generateSphere/generateBox/generateText만 사용한다.
+    private func makeArrivalPinEntity(name: String) -> Entity {
         let root = Entity()
-        let pinColor = UIColor.systemGreen
+        let pinColor = UIColor.systemRed
         let solid = SimpleMaterial(color: pinColor.withAlphaComponent(0.98), roughness: 0.15, isMetallic: false)
         let glow = SimpleMaterial(color: pinColor.withAlphaComponent(0.28), roughness: 0.1, isMetallic: false)
 
-        let halo = ModelEntity(mesh: .generateSphere(radius: 0.52), materials: [glow])
-        halo.position = SIMD3<Float>(0, 0.42, 0)
+        let halo = ModelEntity(mesh: .generateSphere(radius: 0.55), materials: [glow])
+        halo.position = SIMD3<Float>(0, 0.5, 0)
         root.addChild(halo)
 
-        let head = ModelEntity(mesh: .generateSphere(radius: 0.34), materials: [solid])
-        head.position = SIMD3<Float>(0, 0.42, 0)
+        let head = ModelEntity(mesh: .generateSphere(radius: 0.36), materials: [solid])
+        head.position = SIMD3<Float>(0, 0.5, 0)
         root.addChild(head)
 
         let dot = ModelEntity(
-            mesh: .generateSphere(radius: 0.13),
+            mesh: .generateSphere(radius: 0.14),
             materials: [SimpleMaterial(color: .white, roughness: 0.2, isMetallic: false)]
         )
-        dot.position = SIMD3<Float>(0, 0.42, 0.27)
+        dot.position = SIMD3<Float>(0, 0.5, 0.28)
         root.addChild(dot)
 
+        // 꼬리: 머리 아래로 내려가는 막대(핀 끝).
         let stem = ModelEntity(
-            mesh: .generateBox(size: SIMD3<Float>(0.09, 0.52, 0.09)),
+            mesh: .generateBox(size: SIMD3<Float>(0.10, 0.6, 0.10)),
             materials: [solid]
         )
-        stem.position = SIMD3<Float>(0, -0.02, 0)
+        stem.position = SIMD3<Float>(0, 0.02, 0)
         root.addChild(stem)
 
-        root.scale = SIMD3<Float>(repeating: 1.4)
+        // 목적지 이름 큰 텍스트(빌보드). 매 프레임 카메라를 바라보게 한다.
+        let label = makePinNameLabel(text: name)
+        label.position = SIMD3<Float>(0, 1.25, 0)
+        root.addChild(label)
+        arrivalPinNameLabel = label
+
+        root.scale = SIMD3<Float>(repeating: 1.5)
         return root
     }
 
+    private func makePinNameLabel(text: String) -> Entity {
+        let root = Entity()
+        let textMesh = MeshResource.generateText(
+            text,
+            extrusionDepth: 0.02,
+            font: .boldSystemFont(ofSize: 0.5),
+            containerFrame: CGRect(x: -2, y: -0.4, width: 4, height: 0.8),
+            alignment: .center,
+            lineBreakMode: .byTruncatingTail
+        )
+        let shadow = ModelEntity(
+            mesh: textMesh,
+            materials: [SimpleMaterial(color: UIColor.black.withAlphaComponent(0.8), roughness: 0.2, isMetallic: false)]
+        )
+        shadow.position = SIMD3<Float>(0.03, -0.03, -0.02)
+        let label = ModelEntity(mesh: textMesh, materials: [SimpleMaterial(color: .white, roughness: 0.1, isMetallic: false)])
+        root.addChild(shadow)
+        root.addChild(label)
+        return root
+    }
+
+    // 적응형 배치: 비콘(매 프레임 내 앞 고정 거리) ↔ 공간 고정(가까우면 실제 거리에 한 번 박고 VIO가 잡음).
     private func updateArrivalPinPlacement(from frame: ARFrame) {
         guard let latestArrivalPin, let arrivalPinAnchor else {
             return
         }
 
-        // 카메라 transform에서 위치(높이 포함)만 사용하고 회전은 사용하지 않는다(시선 비추종).
+        // 카메라 transform에서 위치(높이 포함)만 사용한다(시선 비추종).
         let cameraColumn = frame.camera.transform.columns.3
         let cameraWorldPosition = SIMD3<Float>(cameraColumn.x, cameraColumn.y, cameraColumn.z)
-        let distance = min(
-            max(Float(latestArrivalPin.distanceMeters), arrivalPinMinDistanceMeters),
-            arrivalPinMaxDistanceMeters
-        )
-        let worldPosition = TravelDirectionAnchor.worldPosition(
-            cameraWorldPosition: cameraWorldPosition,
-            bearingDegrees: latestArrivalPin.bearingDegrees,
-            distanceMeters: distance,
-            heightOffsetMeters: arrivalPinHeightOffset
-        )
-        arrivalPinAnchor.transform.translation = worldPosition
-        arrivalPinAnchor.transform.rotation = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
+
+        if latestArrivalPin.isWorldLocked {
+            // 공간 고정: 처음 진입 시 실제 거리에 한 번 박고 이후엔 건드리지 않는다(VIO가 공간에 잡음).
+            if !pinWorldLocked {
+                let distance = max(min(Float(latestArrivalPin.distanceMeters), pinWorldLockMaxRenderMeters), 1)
+                arrivalPinAnchor.transform.translation = TravelDirectionAnchor.worldPosition(
+                    cameraWorldPosition: cameraWorldPosition,
+                    bearingDegrees: latestArrivalPin.bearingDegrees,
+                    distanceMeters: distance,
+                    heightOffsetMeters: arrivalPinHeightOffset
+                )
+                arrivalPinAnchor.transform.rotation = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
+                pinWorldLocked = true
+            }
+        } else {
+            // 비콘: 매 프레임 목적지 방위로 내 앞 고정 거리에 둔다(위치 오차 영향 최소).
+            pinWorldLocked = false
+            arrivalPinAnchor.transform.translation = TravelDirectionAnchor.worldPosition(
+                cameraWorldPosition: cameraWorldPosition,
+                bearingDegrees: latestArrivalPin.bearingDegrees,
+                distanceMeters: pinBeaconDistanceMeters,
+                heightOffsetMeters: arrivalPinHeightOffset
+            )
+            arrivalPinAnchor.transform.rotation = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
+        }
+
+        // 이름 라벨은 항상 카메라를 바라보게(빌보드).
+        if let arrivalPinNameLabel {
+            let labelWorld = arrivalPinNameLabel.position(relativeTo: nil)
+            arrivalPinNameLabel.look(at: cameraWorldPosition, from: labelWorld, relativeTo: nil)
+            arrivalPinNameLabel.orientation *= simd_quatf(angle: .pi, axis: SIMD3<Float>(0, 1, 0))
+        }
     }
 
     func setRouteArrowPath(_ path: RouteArrowPathSnapshot?) {
