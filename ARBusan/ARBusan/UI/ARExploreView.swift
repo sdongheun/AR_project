@@ -854,6 +854,29 @@ struct ARExploreView: View {
                         .animation(.easeOut(duration: 0.18), value: turnBanner)
                 }
 
+                // 출발 방향(2D): 출발 직후 첫 회전 전까지, 현재 향한 방향 대비 어느 쪽으로 출발할지 화살표+텍스트로.
+                // 회전 배너와 시점이 겹치지 않으므로 같은 상단 위치에 둔다.
+                if appState.isNavigationModeEnabled,
+                   appState.navigationTurnBanner == nil,
+                   let startDirection = appState.navigationStartDirection {
+                    HStack(spacing: 8) {
+                        Image(systemName: "location.north.fill")
+                            .font(.headline.weight(.bold))
+                            .rotationEffect(.degrees(startDirection.relativeAngleDegrees))
+                        Text(startDirection.text)
+                            .font(.title3.weight(.bold))
+                    }
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 10)
+                        .background(.green.opacity(0.9), in: Capsule())
+                        .shadow(color: .black.opacity(0.3), radius: 8, y: 3)
+                        .position(x: safeWidth / 2, y: max(geometry.safeAreaInsets.top, 44) + 28)
+                        .allowsHitTesting(false)
+                        .transition(.opacity)
+                        .animation(.easeOut(duration: 0.18), value: startDirection)
+                }
+
                 // 북 재보정 경고(§4-C): 나침반과 ARKit 월드 북이 지속 발산할 때 탭 → 세션 재고정. 회전 배너 아래.
                 if appState.isNavigationModeEnabled,
                    appState.headingMiscalibrated || appState.isRecalibratingNorth {

@@ -118,6 +118,29 @@ final class RouteArrowIndoorDebugTests: XCTestCase {
         XCTAssertTrue(fixture.appState.navigationGuidanceIsConservative)
     }
 
+    func testStartDirectionLabelShownBeforeFirstTurnFacingAhead() {
+        // 출발 직후(회전 boundary 밖)엔 회전 화살표 없이 2D 출발 방향 라벨이 뜬다. 경로 초반은 북향.
+        let fixture = makeRightTurnFixture(originNorthOffsetMeters: -20)
+        fixture.appState.updateCameraHeading(0) // 북쪽을 향함 → 직진
+
+        XCTAssertNil(fixture.appState.routeArrowPath)
+        let start = fixture.appState.navigationStartDirection
+        XCTAssertNotNil(start)
+        XCTAssertEqual(start?.relativeAngleDegrees ?? 999, 0, accuracy: 1)
+        XCTAssertEqual(start?.text, "앞으로 직진")
+    }
+
+    func testStartDirectionLabelTellsRightWhenFacingWest() {
+        // 서쪽(270)을 향하면 출발 방향(북)은 오른쪽이다.
+        let fixture = makeRightTurnFixture(originNorthOffsetMeters: -20)
+        fixture.appState.updateCameraHeading(270)
+
+        let start = fixture.appState.navigationStartDirection
+        XCTAssertNotNil(start)
+        XCTAssertEqual(start?.relativeAngleDegrees ?? 0, 90, accuracy: 1)
+        XCTAssertEqual(start?.text, "오른쪽으로 출발")
+    }
+
     func testManualRefreshOnRouteDoesNotReroute() {
         // 온-루트인데 수동 버튼을 누르면 위치/heading 보정만 하고 경로 재탐색(API)은 하지 않는다(§4-A 스마트).
         let fixture = makeRightTurnFixture(originNorthOffsetMeters: -5)

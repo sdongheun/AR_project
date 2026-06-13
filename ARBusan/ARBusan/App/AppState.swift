@@ -97,6 +97,15 @@ struct ArrivalPinSnapshot: Equatable {
     let distanceMeters: Double
 }
 
+/// 출발 직후(첫 회전 전) "어느 쪽으로 걸어가야 하나"를 알려주는 2D 라벨 데이터.
+/// 3D로 바닥에 못박지 않고 화면 2D로 방향만 알려준다(UX·정확도 안전).
+struct NavigationStartDirection: Equatable {
+    /// 현재 향한 방향 대비 출발 방위의 상대각(도, +오른쪽/−왼쪽, −180~180). 화살표 회전에 쓴다.
+    let relativeAngleDegrees: Double
+    /// "앞으로 직진" / "오른쪽으로 출발" 등 안내 텍스트.
+    let text: String
+}
+
 private struct NavigationGuidance {
     let title: String
     let detail: String
@@ -211,6 +220,8 @@ final class AppState: ObservableObject {
     @Published var navigationGuidanceIsArrivalNearby = false
     @Published var navigationStabilityDiagnostics = "위치/방향 안정화를 아직 계산하지 않았습니다."
     @Published var arrivalPin: ArrivalPinSnapshot?
+    /// 출발 직후 첫 회전 전까지 표시하는 2D 출발 방향 라벨. 그 외엔 nil.
+    @Published var navigationStartDirection: NavigationStartDirection?
     @Published var navigationGuidanceIsConservative = false
     /// 활성 회전 화살표가 있을 때의 카운트다운 안내("15m 후 우회전"). 없으면 nil.
     @Published var navigationTurnBanner: String?
@@ -302,6 +313,8 @@ final class AppState: ObservableObject {
     private let routeTurnAlignedThresholdDegrees: Double = 22
     private let routeArrowFacingToleranceDegrees: Double = 60
     private let routeTurnSampleDistanceMeters: CLLocationDistance = 6
+    // 출발 방향 라벨(2단계): 출발 방위를 잴 때 현재 위치에서 최소 이만큼 앞의 경로 정점을 겨눈다(방위 떨림 방지).
+    private let startDirectionAimMinMeters: CLLocationDistance = 8
     // 경로 이탈 자동 재탐색(§4-A). 오탐을 피하려고 넉넉하게 잡는다.
     private let autoRerouteThresholdMeters: CLLocationDistance = 40
     private let autoRerouteSustainSeconds: TimeInterval = 8
@@ -752,6 +765,7 @@ final class AppState: ObservableObject {
             routeArrowPath = nil
             arrivalPin = nil
             navigationTurnBanner = nil
+            navigationStartDirection = nil
             offRouteSince = nil
             lastRerouteAt = nil
             isRerouting = false
@@ -1936,9 +1950,10 @@ final class AppState: ObservableObject {
     }
 
     private func refreshRouteArrowPath() {
-        // 기본은 도착 핀/회전 배너 없음. 아래 분기에서 안내 가능할 때만 다시 설정한다.
+        // 기본은 도착 핀/회전 배너/출발 방향 없음. 아래 분기에서 안내 가능할 때만 다시 설정한다.
         arrivalPin = nil
         navigationTurnBanner = nil
+        navigationStartDirection = nil
         guard isNavigationModeEnabled else {
             routeArrowPath = nil
             routeArrowDiagnostics = "길찾기 모드 꺼짐 / 목적지를 선택하면 화살표를 표시합니다."
@@ -2035,6 +2050,8 @@ final class AppState: ObservableObject {
         )
         guard !arrows.isEmpty else {
             routeArrowPath = nil
+            // 활성 회전이 없는 구간: 첫 회전 전이면 2D 출발 방향 라벨을 띄운다(그 외엔 nil 유지).
+            navigationStartDirection = navigationStartDirectionLabel(for: route, origin: guidedOrigin)
             routeArrowDiagnostics = "\(targetSpot.name) 전방 3D 화살표 숨김 / \(Int(routeTurnBoundaryMeters))m turn boundary 안 활성 회전 없음 / \(guidanceFix.quality.displayName)"
             routeArrowComputationDiagnostics = routeArrowRejectionDiagnostics(
                 route: route,
@@ -2455,6 +2472,67 @@ final class AppState: ObservableObject {
         }
 
         return spots.first(where: { $0.id == navigationDestinationSpotID })
+    }
+
+    /// 출발 직후 2D 출발 방향 라벨. 경로 순서상 첫 강한 회전 정점 이전 구간에서만 반환(그 외 nil).
+    /// 출발 방위(다음 경로 정점 방위)와 현재 향한 방향의 상대각을 담는다.
+    private func navigationStartDirectionLabel(
+        for route: TMAPPedestrianRoute,
+        origin: LocationSnapshot
+    ) -> NavigationStartDirection? {
+        let coordinates = route.routeCoordinates
+        guard coordinates.count >= 2 else {
+            return nil
+        }
+
+        // 현재 위치가 투영되는 경로 세그먼트(진행도). 최근접 "정점"이 아니라 "세그먼트"라야
+        // 회전 직전에 originIndex가 회전점이 돼 조기 종료되는 문제를 피한다.
+        let originSegment = RouteGeometry.nearestSegmentIndex(from: origin.coordinate, routeCoordinates: coordinates)
+
+        // 경로 순서상 첫 강한 회전 정점 인덱스. 회전이 없으면 도착(마지막 정점) 전까지 표시.
+        let firstHardTurn = route.maneuvers.first { $0.kind.isHardTurn }
+        let limitIndex: Int
+        if let firstHardTurn {
+            limitIndex = coordinates.indices.min {
+                firstHardTurn.coordinate.distance(to: coordinates[$0]) < firstHardTurn.coordinate.distance(to: coordinates[$1])
+            } ?? (coordinates.count - 1)
+        } else {
+            limitIndex = coordinates.count - 1
+        }
+
+        // 첫 회전 정점이 속한 세그먼트보다 더 진행했으면 출발 방향은 더 보여주지 않는다(회전 화살표가 인계).
+        guard originSegment < limitIndex else {
+            return nil
+        }
+
+        // 출발 방위: 현재 세그먼트 다음 정점부터 최소 거리(떨림 방지) 이상 앞의 정점을 겨눈다.
+        // limitIndex를 넘지 않게 막아 첫 회전을 가로지르는 방위를 잡지 않는다.
+        var aimIndex = min(originSegment + 1, coordinates.count - 1)
+        while aimIndex < limitIndex, origin.coordinate.distance(to: coordinates[aimIndex]) < startDirectionAimMinMeters {
+            aimIndex += 1
+        }
+        let startBearing = origin.coordinate.bearing(to: coordinates[aimIndex])
+
+        // 현재 향한 방향(카메라 heading 우선, 없으면 나침반) 대비 상대각.
+        guard let facing = cameraHeadingDegrees ?? compassHeadingDegrees else {
+            return nil
+        }
+        let relativeAngle = facing.signedAngularDifference(to: startBearing)
+        return NavigationStartDirection(
+            relativeAngleDegrees: relativeAngle,
+            text: startDirectionText(relativeAngleDegrees: relativeAngle)
+        )
+    }
+
+    private func startDirectionText(relativeAngleDegrees: Double) -> String {
+        let magnitude = abs(relativeAngleDegrees)
+        if magnitude <= 20 {
+            return "앞으로 직진"
+        }
+        if magnitude > 135 {
+            return "뒤로 돌아 출발"
+        }
+        return relativeAngleDegrees > 0 ? "오른쪽으로 출발" : "왼쪽으로 출발"
     }
 
     private func routeArrowSnapshots(
