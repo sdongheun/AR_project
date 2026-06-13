@@ -8,6 +8,7 @@ struct MainMapHomeView: View {
     @State private var selectedSpot: TourismSpot?
     @State private var showsARNavigation = false
     @State private var showsInfoSheet = false
+    @State private var showsCollection = false
 
     private var mapCenter: CLLocationCoordinate2D {
         if let coordinate = appState.latestLocationSnapshot?.coordinate {
@@ -37,6 +38,10 @@ struct MainMapHomeView: View {
 
                     selectedSpot = spot
                     appState.selectCandidate(spot)
+                },
+                onTapMap: { _ in
+                    // 빈 지도 탭 → 선택 해제(길찾기 박스 닫히고 플로팅 메뉴바 복귀).
+                    selectedSpot = nil
                 }
             )
             .ignoresSafeArea()
@@ -50,6 +55,7 @@ struct MainMapHomeView: View {
                 Spacer()
 
                 if let selectedSpot {
+                    // 핀 선택: 플로팅 메뉴바는 내려가고 길찾기 박스가 올라온다.
                     TourismSpotMapCard(
                         spot: selectedSpot,
                         onShowInfo: {
@@ -64,15 +70,23 @@ struct MainMapHomeView: View {
                     .padding(.bottom, 18)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 } else {
-                    MainMapEmptySelectionHint()
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 18)
+                    // 기본: 하단 타원 플로팅 메뉴바.
+                    BottomFloatingMenuBar(
+                        onMap: { selectedSpot = nil },
+                        onExplore: { showsARNavigation = true },
+                        onRecord: { showsCollection = true }
+                    )
+                    .padding(.bottom, 24)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
         }
-        .animation(.easeOut(duration: 0.18), value: selectedSpot?.id)
+        .animation(.easeOut(duration: 0.22), value: selectedSpot?.id)
         .sheet(isPresented: $showsInfoSheet) {
             TourismSpotInfoPlaceholderView(spot: selectedSpot)
+        }
+        .sheet(isPresented: $showsCollection) {
+            CollectionBookView(spots: appState.spots, selectedSpot: selectedSpot)
         }
         .fullScreenCover(isPresented: $showsARNavigation) {
             ARExploreView {
@@ -123,6 +137,40 @@ private struct MainMapHeaderView: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 12)
+    }
+}
+
+/// 메인 지도 하단의 타원(캡슐) 플로팅 메뉴바. 기본 상태에서 표시되고, 핀 선택 시 아래로 슬라이드된다.
+private struct BottomFloatingMenuBar: View {
+    let onMap: () -> Void
+    let onExplore: () -> Void
+    let onRecord: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            item(title: "지도", systemImage: "map.fill", isCurrent: true, action: onMap)
+            item(title: "탐색", systemImage: "camera.viewfinder", isCurrent: false, action: onExplore)
+            item(title: "기록", systemImage: "star.circle.fill", isCurrent: false, action: onRecord)
+        }
+        .padding(6)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().stroke(.white.opacity(0.15), lineWidth: 1))
+        .shadow(color: .black.opacity(0.25), radius: 12, y: 5)
+    }
+
+    private func item(title: String, systemImage: String, isCurrent: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 3) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 18, weight: .semibold))
+                Text(title)
+                    .font(.caption2.weight(.semibold))
+            }
+            .foregroundStyle(isCurrent ? Color.white : Color.primary.opacity(0.65))
+            .frame(width: 66, height: 50)
+            .background(isCurrent ? Color.blue.opacity(0.92) : Color.clear, in: Capsule())
+        }
+        .buttonStyle(.plain)
     }
 }
 
