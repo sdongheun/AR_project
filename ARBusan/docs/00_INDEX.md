@@ -7,14 +7,15 @@
 | 순서 | 문서 | 역할 |
 | --- | --- | --- |
 | 1 | [`../ARBusan_PROJECT_STATUS.md`](../ARBusan_PROJECT_STATUS.md) | 현재 프로젝트 상태와 다음 작업 요약 |
-| 2 | [`planning/AR_MVP_DIRECTION.md`](planning/AR_MVP_DIRECTION.md) | 현재 공모전 MVP 방향: 지도/레이더 + 카메라 AR 방향 안내 |
-| 3 | [`planning/AR_TECH_ROADMAP.md`](planning/AR_TECH_ROADMAP.md) | 이전 AR 인식/라벨 기술 실험과 보류 판단 |
+| 2 | [`planning/AR_MVP_DIRECTION.md`](planning/AR_MVP_DIRECTION.md) | **현재 MVP 방향: AR 관광 체험(카메라 인식 + 도착 AR 포토존/스탬프), 길찾기는 보조** |
+| 3 | [`experience/PHOTO_ZONE_STAMP_MVP.md`](experience/PHOTO_ZONE_STAMP_MVP.md) | AR 정체성 핵심: 도착 AR 포토존 + 스탬프 MVP |
 
-## 2. Planning
+## 2. Planning / Experience
 
 | 문서 | 역할 | 상태 |
 | --- | --- | --- |
-| [`planning/AR_MVP_DIRECTION.md`](planning/AR_MVP_DIRECTION.md) | 공모전 MVP 기준과 새 구현 순서 | 활성 |
+| [`planning/AR_MVP_DIRECTION.md`](planning/AR_MVP_DIRECTION.md) | 현재 MVP 방향(AR 관광 체험 중심)과 구현 순서 | **활성(최신)** |
+| [`experience/PHOTO_ZONE_STAMP_MVP.md`](experience/PHOTO_ZONE_STAMP_MVP.md) | 도착 AR 포토존 + 스탬프 MVP(흐름·인터랙션·범위) | **활성(최신)** |
 | [`planning/AR_TECH_ROADMAP.md`](planning/AR_TECH_ROADMAP.md) | AR 기술 판단, 처리 흐름, 작업 순서 | 참고/보류 판단 |
 | [`planning/NATIVE_TRANSITION.md`](planning/NATIVE_TRANSITION.md) | React Native에서 Swift 네이티브로 전환한 배경과 초기 세팅 기록 | 보관/참고 |
 
@@ -26,12 +27,16 @@
 
 ## 4. Navigation
 
+> ⚠️ 길찾기는 **보조**로 재정렬됨. **회전 화살표·곡선 리본·출발 방향·턴바이턴은 제거**되었고, 현재 길찾기 AR은
+> "목적지 표시(원거리 2D 라벨/가장자리, 근거리 3D 핀)"만 남았다. 아래 문서들의 회전/리본 관련 상세는 **구식(이력)** 이다.
+
 | 문서 | 역할 | 상태 |
 | --- | --- | --- |
-| [`navigation/AR_NAVIGATION_LOGIC_PLAN.md`](navigation/AR_NAVIGATION_LOGIC_PLAN.md) | AR 길찾기 로직: TMAP 경로, 2D 방향 안내, turn boundary 3D 화살표, 도착 핀 체크리스트 | 활성 |
-| [`navigation/TURN_UX_RULES_V2.md`](navigation/TURN_UX_RULES_V2.md) | 회전 판정/거리감/리본/실내·연속회전 정교화 설계 제안(TMAP turnType 도입 등) | 제안/미구현 |
-| [`navigation/turn-arrow-logic.html`](navigation/turn-arrow-logic.html) | 회전 지점 3D 화살표 표시 로직 시각화(판단 흐름·다이어그램·상수) | 보조/시각화 |
-| [`navigation/turn-trigger-and-placement.html`](navigation/turn-trigger-and-placement.html) | 회전 바운더리·오차 원·회전각·전방 배치 거리 쉬운 정리 | 보조/시각화 |
+| [`navigation/RIBBON_ARROW_NATURALNESS_SCENARIOS.md`](navigation/RIBBON_ARROW_NATURALNESS_SCENARIOS.md) | §0에 제품 방향 재정렬 결정 + 시나리오(대부분 OUT) | 활성(§0) / 이력 |
+| [`navigation/AR_NAVIGATION_LOGIC_PLAN.md`](navigation/AR_NAVIGATION_LOGIC_PLAN.md) | 옛 AR 길찾기 로직(회전 3D 화살표·리본 등) | **구식/이력**(archive 이동 후보) |
+| [`navigation/TURN_UX_RULES_V2.md`](navigation/TURN_UX_RULES_V2.md) | 옛 회전 판정/거리감/리본 설계 | **구식/이력**(archive 이동 후보) |
+| [`navigation/turn-arrow-logic.html`](navigation/turn-arrow-logic.html) | 옛 회전 3D 화살표 로직 시각화 | **구식/이력**(archive 후보) |
+| [`navigation/turn-trigger-and-placement.html`](navigation/turn-trigger-and-placement.html) | 옛 회전 바운더리·배치 거리 정리 | **구식/이력**(archive 후보) |
 
 ## 5. AR Label
 
